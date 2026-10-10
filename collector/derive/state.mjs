@@ -43,8 +43,19 @@ export function deriveState({ model, registry, cpuHistory = [], now, cfg, mode }
   return { state: 'idle', reason: 'no activity yet' };
 }
 
-export function deriveCodexState(cpuHistory, now) {
-  const recent = cpuHistory.filter(s => now - s.at <= 15_000);
-  const avg = recent.length ? recent.reduce((t, s) => t + s.cpu, 0) / recent.length : 0;
-  return avg > 5 ? { state: 'working', reason: 'busy (CPU)' } : { state: 'idle', reason: 'idle' };
+const CODEX_TURN_QUIET_MS = 30 * 60_000;
+const CODEX_QUIET_MS = 120_000;
+
+/**
+ * A Codex thread, from its rollout: a turn that started and has not ended is working. After a
+ * restart the start may lie before the part that was read, so recent writes count as working too.
+ * Codex writes to a thread when it loads it again, so stale goes by when its last turn ended.
+ */
+export function deriveCodexState(thread, now, cfg) {
+  if (!thread) return { state: 'idle', reason: 'no rollout' };
+  const quiet = now - thread.lastActivityAt;
+  if (thread.turnOpen ? quiet < CODEX_TURN_QUIET_MS : thread.turnOpen === undefined && quiet < CODEX_QUIET_MS) return { state: 'working', reason: 'busy' };
+  const since = thread.lastTurnEndAt || thread.lastActivityAt;
+  if (now - since >= cfg.staleAfterHours * 3_600_000) return { state: 'stale', reason: `no activity for ${cfg.staleAfterHours}h+`, since };
+  return { state: 'yourTurn', reason: 'turn finished', since };
 }

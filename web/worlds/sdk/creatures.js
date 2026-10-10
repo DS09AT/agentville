@@ -70,12 +70,12 @@
       if (look !== 'hen') p(1, -5, 1, 1, '#ffffff');
       p(1, -7, 2, 3, head); p(3, -6, 2, 1, '#f0b429'); p(2, -6, 1, 1, INK);
     } },
-    cat: { w: 11, h: 9, speed: 12, night: 'awake', draw(p, pose, T) {
-      const G = '#9aa4ad', D = '#5f6b7a';
-      if (pose === 'sleep') { p(-3, -3, 6, 3, G); p(2, -4, 2, 2, G); p(-4, -2, 1, 2, D); return; }
+    cat: { w: 11, h: 9, speed: 12, night: 'awake', draw(p, pose, T, look = 'grey') { // looks: grey, black (its eyes shine, so it shows at night)
+      const [G, D, eye] = look === 'black' ? ['#2a2a31', '#17171c', '#ffd43b'] : ['#9aa4ad', '#5f6b7a', INK];
+      if (pose === 'sleep') { p(-3, -3, 6, 3, G); p(2, -4, 2, 2, G); p(-4, -2, 1, 2, D); if (look === 'black') p(-2, -3, 4, 1, '#3d3d47'); return; } // a sheen on its back, so it isn't a hole in the grass
       const s = legStep(pose, T);
       p(-3, -2, 1, 2 - s, D); p(2, -2, 1, 1 + s, D); p(-3, -5, 6, 3, G); p(-5, -7, 1, 3, D);
-      p(2, -7, 3, 3, G); p(2, -8, 1, 1, G); p(4, -8, 1, 1, G); p(4, -6, 1, 1, INK);
+      p(2, -7, 3, 3, G); p(2, -8, 1, 1, G); p(4, -8, 1, 1, G); p(4, -6, 1, 1, eye);
     } },
     dog: { w: 11, h: 8, speed: 16, night: 'sleep', draw(p, pose, T) {
       const B = '#a8703c', D = '#6b4320';
@@ -97,11 +97,30 @@
       const O = '#f08a24';
       p(-2, -3, 4, 2, O); p(-3, -4, 1, 1, O); p(-3, -2, 1, 1, O); p(1, -3, 1, 1, INK);
     } },
+    // White, with a golden horn and a rainbow mane and tail; a gleam runs along its back and sparks twinkle round it.
+    unicorn: { w: 15, h: 13, speed: 22, night: 'awake', draw(p, pose, T) {
+      const W = '#fbfbff', S = '#d9dcec', GOLD = '#ffd43b', RAINBOW = ['#ff7eb6', '#ffd43b', '#6cc04a', '#5ab4ff', '#b388ff'];
+      const spark = () => { const k = Math.floor(T * 5) % 4; for (const [i, [x, y]] of [[-7, -11], [1, -13], [7, -5], [-4, -1]].entries()) if (i === k || i === (k + 2) % 4) p(x, y, 1, 1, i === k ? '#ffffff' : '#fff3a6'); };
+      if (pose === 'sleep') {
+        p(-6, -4, 11, 4, W); p(-6, -1, 11, 1, S); p(4, -7, 3, 4, W); p(6, -5, 2, 2, W); p(6, -9, 1, 2, GOLD); p(5, -6, 1, 1, INK);
+        RAINBOW.slice(0, 3).forEach((c, i) => p(3, -7 + i, 1, 1, c)); RAINBOW.slice(0, 3).forEach((c, i) => p(-7, -4 + i, 1, 1, c));
+        spark(); return;
+      }
+      const s = legStep(pose, T), down = pose === 'eat' ? 2 : 0;
+      p(-5, -3, 1, 3 - s, S); p(-3, -3, 1, 2 + s, S); p(2, -3, 1, 3 - s, S); p(4, -3, 1, 2 + s, S);
+      for (const x of [-5, -3, 2, 4]) p(x, -1, 1, 1, GOLD); // golden hooves
+      p(-6, -8, 11, 5, W); p(-6, -4, 11, 1, S); p(-5 + (Math.floor(T * 7) % 9), -8, 2, 1, '#ffffff');
+      RAINBOW.forEach((c, i) => p(-7, -8 + i, 1, 1, c)); // its tail
+      p(3, -11 + down, 3, 4, W); p(5, -11 + down, 3, 3, W); p(6, -10 + down, 1, 1, INK); p(7, -9 + down, 1, 1, '#f4b6c2');
+      p(6, -12 + down, 1, 1, GOLD); p(6, -13 + down, 1, 1, '#fff3a6'); // its horn, the tip alight
+      RAINBOW.slice(0, 4).forEach((c, i) => p(i < 2 ? 3 : 2, -12 + down + i, 1, 1, c)); // its mane
+      spark();
+    } },
   };
 
   // The poses every creature knows beyond its own: a yawn and a start stand (a start one pixel up), a
   // stretch and a roll lie down; the duck slides on ice as it stands. Then each creature's touches for
-  // them, and what it wears (a scarf, a hat in its mouth, a bucket).
+  // them, and what it wears (a scarf, a hat in its mouth, a bucket; a cat's bucket lies beside it, pushed over).
   const POSE_AS = { yawn: 'stand', startled: 'stand', stretch: 'sleep', roll: 'sleep', slide: 'stand' };
   const LEGS = { cow: INK, goat: '#8c7b62', sheepdog: '#8a93a0', lion: '#8a5a2b', tiger: '#e8792b', cat: '#5f6b7a', dog: '#6b4320' };
   const belly = (colour, legs) => p => { p(-4, -4, 8, 2, colour); for (const x of [-4, -2, 1, 3]) p(x, -6, 1, 2, legs); }; // on its back, legs in the air
@@ -123,6 +142,7 @@
       if (kind === 'goat' && wear.scarf) { p(2, -7, 3, 1, '#e04a3a'); p(1, -6, 1, 2, '#e04a3a'); }
       if (kind === 'goat' && wear.hat) p(5, -9, 2, 2, wear.hat);
       if (kind === 'ostrich' && wear.bucket) { p(4, -13, 2, 3, '#8a93a0'); p(4, -13, 2, 1, '#c3cbd2'); }
+      if (kind === 'cat' && wear.bucket) { p(3, -2, 3, 2, '#8a93a0'); p(5, -2, 1, 2, '#c3cbd2'); p(6, -1, 1, 1, '#5ab4ff'); } // the bucket it pushed over, on its side, a drop spilt
     };
   }
 

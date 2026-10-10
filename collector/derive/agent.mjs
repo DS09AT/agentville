@@ -157,12 +157,12 @@ function mcpUsed(model, childModels, now) {
   return last.size ? [...last].map(([server, at]) => ({ server, at })).sort((x, y) => y.at - x.at).slice(0, 8) : undefined;
 }
 
-export function buildAgent({ base, model, registry, proc, command, cpuHistory = [], childModels = new Map(), offer, beacon, repoOf, now, cfg, home, asides, setting, shells, notes, naming }) {
+export function buildAgent({ base, model, codex, registry, proc, command, cpuHistory = [], childModels = new Map(), offer, beacon, repoOf, now, cfg, home, asides, setting, shells, notes, naming }) {
   const mode = modeOf(model, command, registry?.startedAt);
   // An older mod offers every call Claude Code's check hands on, even where the mode decides it without you.
   const ask = offer?.kind === 'permission' && DECIDES_ALONE.has(mode) ? undefined : askOf(offer, model, now);
   const derived = base.kind === 'codex'
-    ? deriveCodexState(cpuHistory, now)
+    ? deriveCodexState(codex, now, cfg)
     : ask?.kind === 'permission' || ask?.kind === 'always'
       ? { state: 'waiting', reason: `permission needed: ${ask.tool}`, since: offer.createdAt }
       : ask?.kind === 'question' ? { state: 'waiting', reason: 'question pending', since: offer.createdAt }
@@ -205,10 +205,10 @@ export function buildAgent({ base, model, registry, proc, command, cpuHistory = 
     notes, // your notes on it: how many, how many unused, and a rev that moves with each change (never their text)
     naming, // the helper's name for it: an offer, asking, or why there is none
     usage: beacon?.usage ? { costUsd: beacon.usage.costUsd, contextPercent: beacon.usage.contextPercent } : undefined, // the plan's windows go in snapshot.plan
-    lastActivityAt: model?.lastActivityAt || undefined,
+    lastActivityAt: model?.lastActivityAt || codex?.lastActivityAt || undefined,
     now: nowOf(model),
     lastPrompt: model?.lastPrompt ?? undefined,
-    lastReply: model?.lastReply ?? undefined,
+    lastReply: model?.lastReply ?? codex?.lastReply ?? undefined,
     question: derived.state === 'yourTurn' ? trailingQuestion(model?.finalReply) ?? undefined : undefined,
     feed: model ? model.recent(20, 10).map(previewOf) : [], // the latest steps, and the latest messages however busy it was
     children: model ? childrenOf(model, childModels, now) : [],

@@ -121,9 +121,11 @@ It listens on `127.0.0.1` only and reads what Claude Code already writes to disk
   fills, weather shows the last deploy, a cart runs to town for each web call, each MCP server's
   cart drives to the farmer calling it, and you click
   the barn to start a session.
-- Animals on the farm, just for fun: cows, goats, a sheepdog, an ostrich, a lion, a tiger and a duck
-  family on the pond. Click one to pet or feed it, and a farmer walks over to do it. Now and then they
-  get up to something (a goat steals a hat), react to deploys and merges, and huddle in winter.
+- Animals on the farm, just for fun: cows, goats, a sheepdog, an ostrich, a lion, a tiger, two cats,
+  two mice and a duck family on the pond. Click one to pet or feed it, and a farmer walks over to do
+  it. Now and then they get up to something (a goat steals a hat, a cat hunts a mouse), react to
+  deploys and merges, and huddle in winter. The cats nap in their basket, sometimes curled up together.
+  Now and then a shy unicorn is there for a moment.
 - The farm is a world: it runs in a sandboxed frame of its own, with no access to the token, and
   asks the page for the little it needs ([docs/worlds.md](docs/worlds.md)). A world from your own
   folder sees no words or paths until you tick **Can see what agents say** for it.
@@ -602,16 +604,18 @@ instead and its line slants across to the name. Bubbles stay inside the farm, an
 keep clear of the panel and the buttons too.
 
 **Animals.** Two cows, two goats, a sheepdog (with a red bandana, so it is never taken for the
-Explore dog), an ostrich, a lion, a tiger and a duck family (a mallard pair and three ducklings) live
-on the farm just for fun. They never stand for anything.
-- They wander the yard, graze and nap. They keep off the lane by the porch (where farmers waiting
-  on you stand), out of the fields, the hay, crates and mailbox, the hammocks, and the henhouse and its run
+Explore dog), an ostrich, a lion, a tiger, two cats (a grey one and a black one, whose eyes shine), two
+mice and a duck family (a mallard pair and three ducklings) live on the farm just for fun. They never
+stand for anything.
+- They wander the yard, graze and nap, and walk round the pond and the hammocks by the yard's path:
+  none is ever moved from one place to another. They keep off the lane by the porch (where farmers
+  waiting on you stand), out of the fields, the hay, crates and mailbox, the hammocks, and the henhouse and its run
   (its hens are subagents). The ducks keep to the pond.
-- At night most sleep; the lion wanders. With **Motion** off they doze where they are.
+- At night most sleep; the lion, the cats and the mice wander. With **Motion** off they doze where they are.
 - Now and then one says something in a small cream bubble with a dotted edge. It never covers a
   farmer's bubble or name: it moves aside or waits.
 - Click one (or the pond, for the ducks) for its menu: Pet, Feed, Ride, Throw a stick, Give a fish,
-  Feed bread… The menu says who will go: the nearest farmer that isn't waiting on you (a farmer whose
+  Feed bread, Laser pointer, Give cheese… The menu says who will go: the nearest farmer that isn't waiting on you (a farmer whose
   turn has ended stays on your porch too); click a colour dot to send another. That farmer walks over,
   does it, and walks back. One at work goes only if it can be there and back in a few seconds, and one
   that starts waiting on you drops it at once. With no one free, or Motion off, you do it yourself, at
@@ -619,20 +623,33 @@ on the farm just for fun. They never stand for anything.
 - Feeding the ducks brings the whole family paddling over, and the littlest duckling gets there first.
 - Each has its habits: the goats climb the woodpile and the rock, the ostrich runs in circles and
   hides its head, the lion yawns and stretches, the tiger chases its tail and pounces, the sheepdog
-  fetches, rolls over and runs laps. A trough with a bucket, a woodpile and a rock appear in the yard
-  with them.
+  fetches, rolls over and runs laps, the cats yawn, stretch and pounce. A trough with a bucket, a
+  woodpile, a rock and the cats' basket appear in the yard with them.
+- The cats stroll the yard and, every few minutes, sleep for a minute or two: in their basket in the
+  meadow, or on the bed of moss at the feet of the two trees where the wood reaches into the yard, on
+  its left side below the pond. Now and then the other cat comes too and they sleep curled up together, with a heart.
+  Nothing else walks through the basket or under those trees. A cat you click in its sleep does what you asked, then walks
+  back out the way it came.
 - Now and then (every minute or two) they get up to something. A goat steals an idle farmer's hat and
   is chased for it; one nibbles the hat of a farmer working in the meadow, who keeps working. The ostrich
   runs off wearing the trough's bucket. The lion is startled by a chicken, a cow naps in the empty
-  hammock (and gets out when a farmer needs it), and the tiger plays tag with the sheepdog. Only idle
+  hammock (and gets out when a farmer needs it), and the tiger plays tag with the sheepdog. A cat hunts
+  a mouse, which is faster; sometimes the mouse turns round and chases the cat. The sheepdog tries to
+  herd the cats and gives up, a cat pushes the trough's bucket over, a mouse startles the lion, the
+  lion squeezes into the cats' basket while they are out, the tiger says boo and a goat faints, and
+  the cows gossip about your branches. On a Friday the black cat has a word about deploying. Only idle
   farmers are ever borrowed, never one waiting on you or napping in a hammock; one that starts waiting,
   or gets work, drops it at once and gets its hat back, and one you send to an animal yourself leaves
   the gag for you.
+- A unicorn, white with a golden horn and a rainbow mane, comes every three to eight minutes and
+  stays twenty to forty seconds, anywhere the animals may walk and nowhere else. It twinkles, has no
+  menu and says nothing. It is shy: put the pointer on it, or click it, and it bolts a few steps and
+  is gone in a shower of sparks. It isn't there when the page opens, and **Motion** off keeps it away.
 - They react: a failed deploy (rain on a field) scatters them and the ostrich hides, a good one (a
   rainbow) makes them hop, a harvest draws a few over, and the sheepdog runs to the stall when a pull
   request is merged and to meet a new farmer.
 - A farmer idle for three minutes or more sometimes plays with one: throws the sheepdog a stick, pets a
-  goat, naps by the lion. Two at most.
+  goat, naps by the lion, has a cat chase a laser pointer. Two at most.
 - In winter they huddle together, the goats wear scarves and the ducks slide on the frozen pond.
 - The **Animals** switch hides them all (and brings back the pond's white duck); it is remembered.
   With it off, or **Motion** off, whatever they were up to stops where it is.
@@ -763,6 +780,11 @@ The **collector** (`collector/`) is a Node program run by launchd. Every few sec
   into a worktree, Claude Code moves its transcript to the worktree's folder, and the collector
   follows it there;
 - `ps`: processes, CPU and memory, and each session's start flags;
+- Codex's rollouts under `~/.codex/sessions/` (only the new bytes of each) and the thread names in
+  `~/.codex/session_index.jsonl`, while a Codex process runs. Codex runs its threads in one shared
+  process, so a Codex agent is a thread written to in the last `staleAfterHours`, not a process.
+  Its folder is the thread's, its state follows the turn (started: working; completed or
+  interrupted: your turn; a day after that: stale), and its bubble is the turn's last message;
 - `git` in each repo, with `GIT_OPTIONAL_LOCKS=0`, so it never takes `index.lock` from an agent
   that is committing (it never fetches);
 - `gh`, for deploys and pull requests.
@@ -792,6 +814,16 @@ and can do is in [docs/worlds.md](docs/worlds.md).
 
 - Everything stays on your Mac. The collector listens on `127.0.0.1` only and sends nothing
   anywhere. The exception is `gh`, which asks GitHub about your own repos.
+- Started with `TRACKER_LAN=1` in its environment, the collector listens on every interface and
+  also answers to this Mac's host name and addresses (`http://<its address>:7777`). There is no
+  sign-in, so a visitor from the network is a guest. A guest sees the farm and the list: each
+  agent's name, folder, state, model, current tool and step, numbers, and your repos with their
+  branches and pull requests. A guest gets nothing that was said (no prompts, replies, questions,
+  steps' text, task or subagent text, documents), no token, and so no conversation, transcript,
+  files or past sessions, and can't answer, message, start or stop anything: the collector refuses
+  each of those to any address but this Mac's own. Names stay, and a session's name can be its
+  conversation's title. The dashboard opened on this Mac itself (`localhost`, or through an SSH
+  tunnel) is unchanged.
 - The dashboard's own page and its API tell the browser never to show them inside a frame
   (`frame-ancestors 'none'`), so no other page, and no world, can load the dashboard with its token
   inside itself.
@@ -937,7 +969,11 @@ and can do is in [docs/worlds.md](docs/worlds.md).
 - claude.ai cloud sessions and Remote Control sessions on other machines aren't visible locally.
 - **⑂ Fork** puts your message in the new prompt box with Claude Code's `--prefill` option, which its
   help doesn't list. If a Claude Code update drops it, the fork still opens, with an empty box.
-- Codex sessions can't be forked or restored from the dashboard.
+- Codex sessions are read-only: they can't be answered, messaged, stopped, forked or restored from
+  the dashboard, and show no steps, tools, cost, CPU or memory. A Codex thread's subagents aren't
+  shown, and a prompt waiting in Codex shows as working. A thread nothing wrote to for
+  `staleAfterHours` leaves the dashboard, open or not. For up to two minutes after the collector
+  starts, a thread written to just before counts as working, until its next turn event is read.
 - **↺ Restore** uses Claude Code's `--rewind-files` and `--prefill` options, which its help doesn't
   list, and writes the line `/rewind` writes (as of Claude Code 2.1.295). A Claude Code update could
   change them.

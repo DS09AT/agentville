@@ -92,8 +92,16 @@ test('a session that has never had a prompt is idle', () => {
   assert.equal(deriveState({ model: modelOf(title('x')), now: at(0), cfg }).state, 'idle');
 });
 
-test('codex is working only when its average CPU over 15 s is above 5 %', () => {
-  assert.equal(deriveCodexState([{ at: at(0), cpu: 20 }, { at: at(3), cpu: 20 }], at(5)).state, 'working');
-  assert.equal(deriveCodexState([{ at: at(0), cpu: 1 }], at(5)).state, 'idle');
-  assert.equal(deriveCodexState([], at(5)).state, 'idle');
+test('a codex thread works while its turn is open, is your turn once it ended, and stale a day after that', () => {
+  assert.equal(deriveCodexState({ turnOpen: true, lastActivityAt: at(0) }, at(600), cfg).state, 'working');
+  assert.equal(deriveCodexState({ turnOpen: true, lastActivityAt: at(0) }, at(31 * 60), cfg).state, 'yourTurn', 'an open turn with nothing written for half an hour');
+  assert.deepEqual(deriveCodexState({ turnOpen: false, lastActivityAt: at(9), lastTurnEndAt: at(8) }, at(10), cfg), { state: 'yourTurn', reason: 'turn finished', since: at(8) });
+  const day = cfg.staleAfterHours * 3600;
+  assert.deepEqual(deriveCodexState({ turnOpen: false, lastActivityAt: at(day), lastTurnEndAt: at(8) }, at(day + 8), cfg), { state: 'stale', reason: `no activity for ${cfg.staleAfterHours}h+`, since: at(8) }, 'loaded again since, but its last turn ended a day ago');
+  assert.equal(deriveCodexState(undefined, at(5), cfg).state, 'idle');
+});
+
+test('a codex thread whose turn was not read counts as working only while it is written to', () => {
+  assert.equal(deriveCodexState({ turnOpen: undefined, lastActivityAt: at(0) }, at(60), cfg).state, 'working');
+  assert.deepEqual(deriveCodexState({ turnOpen: undefined, lastActivityAt: at(0), lastTurnEndAt: 0 }, at(121), cfg), { state: 'yourTurn', reason: 'turn finished', since: at(0) });
 });

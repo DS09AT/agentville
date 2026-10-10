@@ -1,10 +1,34 @@
 import { createServer } from 'node:http';
 import { createReadStream, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { hostname, networkInterfaces } from 'node:os';
 import { FRAME_CSP } from './worlds.mjs';
 
 const BODY_LIMIT = 64 * 1024;
 const MESSAGE_LIMIT = 90 * 1024 * 1024; // up to six 10 MB attached files, base64-encoded
+
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const GUEST_PATH = /^\/($|[a-z]+\.(js|css)$|world\/|api\/(state|events)$)/;
+const GUEST_AGENT = ['id', 'kind', 'cliId', 'name', 'startedAt', 'cwd', 'model', 'modelLabel', 'fast', 'contextTokens', 'compactions', 'lastCompactAt', 'wakeAt', 'state', 'stateReason', 'stateSince', 'mode', 'effort', 'turn', 'usage', 'lastActivityAt', 'mcp', 'touching', 'proc', 'activity', 'timeline'];
+const stepOnly = now => (now ? { tool: now.tool, step: now.step, startedAt: now.startedAt } : undefined);
+
+/**
+ * The snapshot for a visitor from the network: who works where, in what state and with what tool,
+ * but nothing an agent or you said. Only the listed fields go out, so a new one stays in by default.
+ */
+export function guestSnapshot(snapshot) {
+  return {
+    ...snapshot,
+    agents: snapshot.agents.map(a => ({
+      ...Object.fromEntries(GUEST_AGENT.filter(k => a[k] !== undefined).map(k => [k, a[k]])),
+      now: stepOnly(a.now),
+      tasks: a.tasks ? { done: a.tasks.done, total: a.tasks.total, items: [] } : undefined,
+      feed: [],
+      children: (a.children ?? []).map(c => ({ id: c.id, kind: c.kind, agentType: c.agentType, label: '', state: c.state, startedAt: c.startedAt, now: stepOnly(c.now), steps: c.steps, lastAt: c.lastAt, endedAt: c.endedAt })),
+      docs: [],
+    })),
+  };
+}
 
 function send(res, status, type, body) {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
@@ -60,17 +84,31 @@ function clampInt(value, min, max, fallback) {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 }
 
-export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed, getConversation, getPrompts, getNotes, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, listDirs, shellOutput, namedFiles, getTranscriptHtml, getDoc, listFiles, readFile, repoTouched, actions, pastSessions, worlds, log = () => {} }) {
+export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed, getConversation, getPrompts, getNotes, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, listDirs, shellOutput, namedFiles, getTranscriptHtml, getDoc, listFiles, readFile, repoTouched, actions, pastSessions, worlds, log = () => {}, lan = process.env.TRACKER_LAN === '1' }) {
   const clients = new Set();
   let server;
   const actualPort = () => server.address()?.port ?? port;
 
-  const isAllowedHost = host => host === `localhost:${actualPort()}` || host === `127.0.0.1:${actualPort()}`;
-  const isAllowedOrigin = origin => origin === `http://localhost:${actualPort()}` || origin === `http://127.0.0.1:${actualPort()}`;
+  // TRACKER_LAN=1 opens the dashboard to the local network: it binds every interface and also
+  // answers to this Mac's own names and addresses. Any other Host is still refused (DNS rebinding).
+  // A visitor from the network is a guest: it gets the page without the token, a snapshot without
+  // what was said, and nothing else. Only this Mac itself reads conversations and files, or acts.
+  const ownNames = () => {
+    if (!lan) return ['localhost', '127.0.0.1'];
+    const name = hostname().toLowerCase();
+    const addresses = Object.values(networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal).map(i => i.address);
+    return ['localhost', '127.0.0.1', name, `${name.split('.')[0]}.local`, ...addresses];
+  };
+  const isAllowedHost = host => ownNames().some(name => host === `${name}:${actualPort()}`);
+  const isAllowedOrigin = origin => ownNames().some(name => origin === `http://${name}:${actualPort()}`);
+
+  const isGuest = req => lan && !LOOPBACK.has(req.socket.remoteAddress);
+  const frame = snapshot => `event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`;
 
   function openStream(req, res) {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-    res.write(`event: snapshot\ndata: ${JSON.stringify(getSnapshot())}\n\n`);
+    res.guest = isGuest(req);
+    res.write(frame(res.guest ? guestSnapshot(getSnapshot()) : getSnapshot()));
     clients.add(res);
     req.on('close', () => clients.delete(res));
   }
@@ -80,6 +118,8 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
       if (!isAllowedHost(req.headers.host ?? '')) return send(res, 403, 'text/plain', 'forbidden host');
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${actualPort()}`);
       const path = url.pathname;
+      const guest = isGuest(req);
+      if (guest && !(req.method === 'GET' && GUEST_PATH.test(path))) return send(res, 403, 'text/plain', 'forbidden');
       let m;
       // The dashboard holds the token: it is never shown inside a frame, not even a world's own.
       if (path === '/' || path.startsWith('/api/')) {
@@ -96,7 +136,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
       }
 
       if (req.method === 'GET') {
-        if (path === '/') return send(res, 200, 'text/html; charset=utf-8', readFileSync(webFile, 'utf8').replace('__TRACKER_TOKEN__', token));
+        if (path === '/') return send(res, 200, 'text/html; charset=utf-8', readFileSync(webFile, 'utf8').replace('__TRACKER_TOKEN__', guest ? '' : token));
         if ((m = path.match(/^\/([a-z]+)\.js$/))) { // the page's scripts, from web/ by plain name only
           let code;
           try { code = readFileSync(join(dirname(webFile), `${m[1]}.js`), 'utf8'); } catch { return send(res, 404, 'text/plain', 'not found'); }
@@ -128,7 +168,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           res.writeHead(200, headers);
           return createReadStream(found.real).on('error', () => res.destroy()).pipe(res);
         }
-        if (path === '/api/state') return sendJson(res, 200, getSnapshot());
+        if (path === '/api/state') return sendJson(res, 200, guest ? guestSnapshot(getSnapshot()) : getSnapshot());
         if (path === '/api/events') return openStream(req, res);
         if ((m = path.match(/^\/api\/agent\/([\w:-]+)\/feed$/))) {
           const feed = getFeed(m[1], clampInt(url.searchParams.get('limit'), 1, 200, 200));
@@ -267,11 +307,11 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
     server,
     listen: () => new Promise((resolve, reject) => {
       server.once('error', reject);
-      server.listen(port, '127.0.0.1', () => resolve(server.address().port));
+      server.listen(port, lan ? '0.0.0.0' : '127.0.0.1', () => resolve(server.address().port));
     }),
     broadcast(snapshot) {
-      const data = `event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`;
-      for (const c of clients) c.write(data);
+      let full, redacted;
+      for (const c of clients) c.write(c.guest ? (redacted ??= frame(guestSnapshot(snapshot))) : (full ??= frame(snapshot)));
     },
     /** A world's files changed (or '*': the SDK, or the list): the page reloads it, or its list. */
     broadcastWorlds(change) {

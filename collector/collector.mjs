@@ -10,6 +10,7 @@ import { Conversation } from './transcript/conversation.mjs';
 import { earlierHistory } from './transcript/backfill.mjs';
 import { readRegistry } from './sources/registry.mjs';
 import { readAgentsCli } from './sources/agents-cli.mjs';
+import { CodexThread, listCodexThreads } from './sources/codex.mjs';
 import { childrenIndex, findCodexRoots, findPidByArg, isShellCommand, readPs, shellsOf, treeStats } from './sources/ps.mjs';
 import { GIT_ENV, RepoResolver, githubSlug, repoStatus } from './sources/git.mjs';
 import { deployStatus, pullRequests } from './sources/gh.mjs';
@@ -106,7 +107,7 @@ async function quickLookPicture(real) {
   }
 }
 
-export async function startCollector({ root, claudeDir = join(homedir(), '.claude'), claudeBin = 'claude', home = homedir(), scratchBase = `/private/tmp/claude-${process.getuid?.() ?? 0}`, port: portOverride, deliveryTimeoutMs = 5000, helperTimeoutMs = 30_000, notify = notifyMac, launch = args => run('osascript', args, { timeoutMs: 15_000 }), sessionProcs = systemProcs, endWaitMs = 8000, readProcs = readPs, deployStatusOf = deployStatus, pullRequestsOf = pullRequests, githubSlugOf = githubSlug, ticketMs = 600_000, quickLook = quickLookPicture, folderRoots = [home, '/Volumes'], chooseFolder = chooseFolderMac, stopWaitMs = 3000, revealFile = real => run('open', ['-R', real], { timeoutMs: 10_000 }), openFolder = dir => run('open', ['-a', 'Finder', dir], { timeoutMs: 10_000 }), log = makeLogger(join(root, 'logs')) }) {
+export async function startCollector({ root, claudeDir = join(homedir(), '.claude'), claudeBin = 'claude', home = homedir(), codexDir = join(home, '.codex'), scratchBase = `/private/tmp/claude-${process.getuid?.() ?? 0}`, port: portOverride, deliveryTimeoutMs = 5000, helperTimeoutMs = 30_000, notify = notifyMac, launch = args => run('osascript', args, { timeoutMs: 15_000 }), sessionProcs = systemProcs, endWaitMs = 8000, readProcs = readPs, deployStatusOf = deployStatus, pullRequestsOf = pullRequests, githubSlugOf = githubSlug, ticketMs = 600_000, quickLook = quickLookPicture, folderRoots = [home, '/Volumes'], chooseFolder = chooseFolderMac, stopWaitMs = 3000, revealFile = real => run('open', ['-R', real], { timeoutMs: 10_000 }), openFolder = dir => run('open', ['-a', 'Finder', dir], { timeoutMs: 10_000 }), log = makeLogger(join(root, 'logs')) }) {
   // readProcs, deployStatusOf, pullRequestsOf and githubSlugOf read the machine and GitHub; a test or the demo video passes stand-ins.
   const stateDir = join(root, 'state');
   const pendingDir = join(stateDir, 'pending');
@@ -148,6 +149,8 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   }
   const token = loadToken(join(stateDir, 'token'));
   const tail = new TailReader();
+  const codexTurns = new Map(), codexMeta = new Map(); // thread id → its turn, rollout path → its first line
+  let codexList = [], codexListedAt = 0;
   const sessions = new Map();
   const cpuHist = new Map();
   const resolver = new RepoResolver();
@@ -307,6 +310,27 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     }
   }
 
+  // Codex runs its threads in one shared process, so its agents are the threads its rollouts
+  // show at work lately, not its processes.
+  function codexBases(now) {
+    if (now - codexListedAt >= cfg.agentsCliPollMs) {
+      codexListedAt = now;
+      codexList = listCodexThreads(codexDir, now - cfg.staleAfterHours * 3_600_000, codexMeta);
+      const listed = new Set(codexList.map(t => `codex:${t.id}`));
+      for (const [id, turn] of codexTurns) {
+        if (listed.has(id)) continue;
+        tail.forget(turn.path);
+        codexTurns.delete(id);
+      }
+    }
+    return codexList.map(t => {
+      const id = `codex:${t.id}`;
+      if (!codexTurns.has(id)) codexTurns.set(id, Object.assign(new CodexThread(t.mtimeMs), { path: t.path }));
+      codexTurns.get(id).applyLines(tail.read(t.path));
+      return { id, kind: 'codex', name: t.name, cwd: t.cwd };
+    });
+  }
+
   async function tick(isFull) {
     const now = Date.now();
     if (isFull) {
@@ -334,14 +358,14 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     }
 
     const idx = childrenIndex(procs);
-    const codex = findCodexRoots(procs).map(p => ({ id: `codex:${p.pid}`, kind: 'codex', name: 'Codex (VS Code)', cwd: '', pid: p.pid }));
+    const codex = findCodexRoots(procs).length ? codexBases(now) : [];
     const agents = [];
     for (const base of [...bases.values(), ...codex]) {
       const proc = base.pid ? treeStats(procs, base.pid, idx) : null;
       if (isFull && proc) recordCpu(base.id, now, proc.cpu, proc.rssMb);
       const rec = base.kind === 'codex' ? undefined : sessions.get(base.id);
       const agent = buildAgent({
-        base, model: rec?.model ?? null, registry: base.registry, proc, command: base.pid ? procs.get(base.pid)?.command : undefined, cpuHistory: cpuHist.get(base.id) ?? [],
+        base, model: rec?.model ?? null, codex: codexTurns.get(base.id), registry: base.registry, proc, command: base.pid ? procs.get(base.pid)?.command : undefined, cpuHistory: cpuHist.get(base.id) ?? [],
         childModels: rec?.childModels, offer: offers.get(base.id), beacon: beacons.get(base.id), repoOf: p => resolver.lookup(p), now, cfg, home,
         asides: asidesOf(base.id, asideAnswers.get(base.id) ?? [], now), setting: settingOf(settingResults.get(base.id)?.[0], now),
         shells: base.pid && base.kind !== 'codex' ? shellsOf(procs, base.pid, now, idx) : undefined,

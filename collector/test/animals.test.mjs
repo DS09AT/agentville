@@ -639,3 +639,147 @@ test('errands: a gag’s errand is let go by release; one you asked for is not, 
   assert.equal(e.has('a'), false);
   assert.equal(e.has('b'), true, 'your errand stays');
 });
+
+/* ---------- two of a kind, dens and the nap habit ---------- */
+
+const BASKET = { x: 40, y: 140, w: 20, h: 10 }, DEN = [50, 148], MOSS = [50, 215]; // a den inside what they keep off; another outside the yard
+const CATS = [{ kind: 'cat', look: 'grey', name: 'Grey cat', habits: ['nap'], lines: { cuddle: ['purr…'] } }, { kind: 'cat', look: 'black', name: 'Black cat', habits: ['nap'], lines: { cuddle: ['purr…'] } }];
+const allowed = (x, y) => inside(YARD, x, y) && !inside(BASKET, x, y);
+
+test('two cast entries of one kind keep their own ids, looks and names', () => {
+  const k = load();
+  const a = k.makeAnimals([...CATS, { kind: 'cow', count: 2 }], { random: k.seededRandom(2) });
+  a.place({ roam: [YARD], avoid: [] });
+  assert.deepEqual(plain(a.list()).map(c => c.id), ['cat-0', 'cat-1', 'cow-0', 'cow-1']);
+  assert.deepEqual(['cat-0', 'cat-1'].map(id => a.menu(id).title), ['Grey cat', 'Black cat']);
+});
+
+test('nap: a cat walks into a den it may not otherwise stand in, sleeps there a long while, and walks back out (it is never moved)', () => {
+  for (const den of [DEN, MOSS]) {
+    const k = load();
+    const a = k.makeAnimals([CATS[0]], { random: k.seededRandom(4) });
+    a.place({ roam: [YARD], avoid: [BASKET], dens: [den] });
+    let prev = plain(a.list())[0], slept = 0, back = false, far = 0;
+    for (let i = 0; i < 9000 && !back; i++) {
+      a.tick(0.1);
+      const c = plain(a.list())[0];
+      far = Math.max(far, Math.hypot(c.x - prev.x, c.y - prev.y));
+      if (c.asleep) { slept++; assert.equal(c.pose, 'sleep'); assert.deepEqual([Math.abs(c.x - den[0]), c.y], [4, den[1]], 'beside the middle of its den'); }
+      else if (c.den === undefined) assert.ok(slept ? true : allowed(c.x, c.y), `awake at ${c.x},${c.y}`);
+      back = slept > 0 && c.den === undefined && allowed(c.x, c.y) && prev.den === undefined && allowed(prev.x, prev.y);
+      prev = c;
+    }
+    assert.ok(slept >= 450, `it slept ${slept / 10} s in the den at ${den}`);
+    assert.ok(back, 'and came back to where it may be');
+    assert.ok(far <= 4, `it walked the whole way (longest step ${far})`);
+  }
+});
+
+test('nap: now and then the second cat curls up beside the first: the other side, facing it, with hearts and a line', () => {
+  const k = load();
+  let cuddled = null;
+  for (let seed = 1; seed <= 12 && !cuddled; seed++) {
+    const a = k.makeAnimals(CATS, { random: k.seededRandom(seed) }), fx = [];
+    a.place({ roam: [YARD], avoid: [BASKET], dens: [DEN, MOSS] });
+    for (let i = 0; i < 12000 && !cuddled; i++) {
+      a.tick(0.1, { crew: { fx: (kind, at) => fx.push([kind, at]) } });
+      const [g, b] = plain(a.list());
+      if (g.asleep && b.asleep && g.den === b.den) cuddled = { g, b, fx: [...fx], said: plain(a.bubbles()).map(s => s.text) };
+    }
+  }
+  assert.ok(cuddled, 'within twenty minutes, on one of twelve farms');
+  assert.equal(Math.abs(cuddled.g.x - cuddled.b.x), 8, 'side by side');
+  assert.equal(cuddled.g.y, cuddled.b.y);
+  assert.deepEqual(cuddled.fx.at(-1)[0], 'hearts');
+  assert.deepEqual(cuddled.said, ['purr…']);
+});
+
+test('nap: a den moved or gone wakes its sleeper, which ends up where it may be; a den a gag has borrowed is left alone', () => {
+  const k = load();
+  const a = k.makeAnimals([CATS[0]], { random: k.seededRandom(4) });
+  a.place({ roam: [YARD], avoid: [BASKET], dens: [DEN] });
+  for (let i = 0; i < 9000 && !plain(a.list())[0].asleep; i++) a.tick(0.1);
+  assert.ok(plain(a.list())[0].asleep);
+  a.place({ roam: [YARD], avoid: [BASKET], dens: [] });
+  const c = plain(a.list())[0];
+  assert.ok(c.den === undefined && allowed(c.x, c.y), `put back at ${c.x},${c.y}`);
+
+  const lion = { id: 'fits', needs: { lion: 1, spot: 'basket' }, steps: [{ go: 'lion', to: 'spot:basket' }, { stay: 'lion', is: 'sleep', ms: 600000 }] };
+  const b = k.makeAnimals({ cast: [CATS[0], { kind: 'lion' }], gags: [lion] }, { random: k.seededRandom(4) });
+  b.place({ roam: [YARD], avoid: [BASKET], dens: [DEN], spots: { basket: DEN } });
+  const crew = fakeCrew([]);
+  for (let i = 0; i < 3000; i++) {
+    b.tick(0.1, { crew });
+    const cat = plain(b.list()).find(o => o.kind === 'cat');
+    if (b.gagNow()) assert.ok(!cat.asleep || !b.gagNow(), 'never both in the basket');
+    if (cat.den !== undefined) assert.equal(b.gagNow(), null, 'no gag takes the basket while the cat is on its way or in it');
+  }
+});
+
+test('a gag may take two of a kind: the second is <kind>2, the one nearest the first', () => {
+  const k = load();
+  const gossip = { id: 'gossip', needs: { cow: 2 }, steps: [{ go: 'cow2', to: 'cow' }, { say: 'cow', line: 'a' }, { wait: 500 }, { say: 'cow2', line: 'b' }, { wait: 500 }] };
+  const warns = [];
+  const a = k.makeAnimals({ cast: [{ kind: 'cow', count: 2, lines: { a: ['did you hear?'], b: ['moo. scandalous.'] } }], gags: [gossip, { id: 'three', needs: { cow: 3 }, steps: [{ pose: 'cow3', is: 'happy', ms: 100 }] }, { id: 'bad', needs: { cow: 2 }, steps: [{ pose: 'cow3', is: 'happy', ms: 100 }] }] }, { random: k.seededRandom(1), warn: m => warns.push(m) });
+  a.place({ roam: [YARD], avoid: [] });
+  assert.deepEqual(warns, ["Animals: the gag bad was dropped: it has a role it wasn't cast (cow3)"]);
+  const crew = fakeCrew([]), said = new Set();
+  for (let i = 0; i < 1300 && !a.gagNow(); i++) a.tick(0.1, { crew });
+  assert.equal(a.gagNow()?.id, 'gossip', 'the one that needs three cows never starts with two');
+  let near = Infinity;
+  for (let i = 0; i < 600 && a.gagNow(); i++) { a.tick(0.1, { crew }); const [c1, c2] = plain(a.list()); near = Math.min(near, Math.hypot(c1.x - c2.x, c1.y - c2.y)); for (const s of plain(a.bubbles())) said.add(s.text); }
+  assert.equal(a.gagNow(), null);
+  assert.ok(near <= 12, `the second cow walked up to the first (${near})`);
+  assert.deepEqual([...said], ['did you hear?', 'moo. scandalous.']);
+});
+
+/* ---------- a shy visitor ---------- */
+
+const UNICORN = { kind: 'unicorn', name: 'Unicorn', visits: { every: [30, 60], stay: [10, 20] }, actions: [], lines: {} };
+
+test('a visitor is away at first, comes now and then to somewhere it may be, stays a while and is gone; the rest never notice', () => {
+  const k = load();
+  const a = k.makeAnimals([UNICORN, { kind: 'cow' }], { random: k.seededRandom(6) }), fx = [];
+  a.place({ roam: [YARD], avoid: [POND, HENHOUSE] });
+  const one = () => plain(a.list()).find(o => o.kind === 'unicorn');
+  assert.equal(one().away, true, 'not there when the world opens');
+  assert.equal(a.at(one().x, one().y), null, 'nor to be clicked');
+  const visits = [];
+  let since = null;
+  for (let i = 0; i < 6000; i++) {
+    a.tick(0.1, { crew: { fx: (kind, at) => fx.push([kind, at]) } });
+    const u = one();
+    if (!u.away) assert.ok(inside(YARD, u.x, u.y) && !inside(POND, u.x, u.y) && !inside(HENHOUSE, u.x, u.y), `there at ${u.x},${u.y}`);
+    if (!u.away && since === null) since = i;
+    if (u.away && since !== null) { visits.push((i - since) / 10); since = null; }
+  }
+  assert.ok(visits.length >= 5 && visits.length <= 14, `${visits.length} visits in ten minutes, one every 30 to 60 s`);
+  for (const s of visits) assert.ok(s >= 10 && s <= 30, `a visit of ${s} s (10 to 20, and its last steps)`);
+  assert.ok(fx.length >= visits.length * 2 && fx.every(f => f[0] === 'sparkle'), 'sparks when it comes and when it goes');
+  a.place({ roam: [YARD], avoid: [POND, HENHOUSE] });
+  assert.equal(one().away, true, "a new yard doesn't bring it");
+});
+
+test('touched, a visitor bolts and is gone within a second; it has no menu; the others don’t mind a touch', () => {
+  const k = load();
+  const a = k.makeAnimals([UNICORN, { kind: 'cow', actions: [{ label: 'Pet' }, { label: 'Feed' }] }], { random: k.seededRandom(6) });
+  a.place({ roam: [YARD], avoid: [POND, HENHOUSE] });
+  const one = () => plain(a.list()).find(o => o.kind === 'unicorn');
+  assert.equal(a.touch('unicorn-0'), false, 'away: nothing to touch');
+  assert.equal(a.touch('cow-0'), false);
+  for (let i = 0; i < 700 && one().away; i++) a.tick(0.1, { crew: {} });
+  const was = one();
+  assert.ok(!was.away, 'it came');
+  assert.equal(a.at(was.x, was.y - 4), 'unicorn-0');
+  assert.equal(a.touch('unicorn-0'), true);
+  assert.equal(a.touch('unicorn-0'), true, 'a second touch changes nothing');
+  let gone = null;
+  for (let i = 1; i <= 15 && gone === null; i++) { a.tick(0.1, { crew: {} }); const u = one(); if (u.away) gone = i / 10; else assert.ok(inside(YARD, u.x, u.y) && !inside(POND, u.x, u.y), `bolting through ${u.x},${u.y}`); }
+  assert.ok(gone !== null && gone <= 0.8, `gone after ${gone} s`);
+  assert.equal(a.at(was.x, was.y - 4), null);
+
+  for (let i = 0; i < 700 && one().away; i++) a.tick(0.1, { crew: {} });
+  a.tick(0.1, { still: true });
+  assert.equal(a.touch('unicorn-0'), true);
+  assert.equal(one().away, true, 'motion off: gone where it stands');
+});
