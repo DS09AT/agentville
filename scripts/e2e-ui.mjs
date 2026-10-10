@@ -626,7 +626,9 @@ try {
   check(/Bell: on/.test(await fjs("document.querySelector('[data-farm-bell]').textContent")) && await until("localStorage.getItem('tracker-bell') === 'on'"), 'the Bell switch turns on the chime for agents that start waiting');
   await fjs("document.querySelector('[data-farm-bell]').click()");
   // Animals: on by default; a click opens one's menu; a farmer walks over (or you do it); the pond opens the ducks; the switch hides them.
-  check(await funtil("window.Agentville.animalsNow().length === 13"), 'thirteen animals live on the farm');
+  check(await funtil("window.Agentville.animalsNow().filter(a => !a.away).length === 17"), 'seventeen animals live on the farm');
+  check(await fjs("JSON.stringify(window.Agentville.animalsNow().filter(a => a.away).map(a => a.kind))") === '["unicorn"]', 'and a unicorn that is not there yet: it only visits');
+  check(await fjs("window.Agentville.animalsNow().filter(a => a.kind === 'cat').map(a => a.id).join()") === 'cat-0,cat-1', 'two of them cats, a grey one and a black one');
   const cow = JSON.parse(await fjs("JSON.stringify(window.Agentville.animalsNow().find(a => a.kind === 'cow'))"));
   await fjs(clickFarm(cow.x, cow.y - 4));
   check(await funtil("/Pet/.test(document.querySelector('.px-animal-menu')?.textContent ?? '')"), `clicking a cow opens its menu (the cow at ${cow.x},${cow.y})`);

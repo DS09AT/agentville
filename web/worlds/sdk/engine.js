@@ -256,7 +256,7 @@ function makePixelView(th, prefs) {
   const kit = cast.length && typeof makeAnimals === 'function' ? makeAnimals(animalWorld, { random: seededRandom(cast.length * 7919) }) : null;
   let animalsOn = prefs.get('animals') !== 'off';
   const animalsShown = () => Boolean(kit && animalsOn);
-  const placeAnimals = () => kit?.place({ roam: th.roam?.() ?? [], avoid: th.avoid?.() ?? [], perches: th.perches?.() ?? [], spots: th.spots?.() ?? {}, blocked: (x, y) => Boolean(th.fieldAt(x, y) || th.buildingAt?.(x, y)) }); // never on a field or a building, whatever roam says
+  const placeAnimals = () => kit?.place({ roam: th.roam?.() ?? [], avoid: th.avoid?.() ?? [], perches: th.perches?.() ?? [], spots: th.spots?.() ?? {}, dens: th.dens?.() ?? [], blocked: (x, y) => Boolean(th.fieldAt(x, y) || th.buildingAt?.(x, y)) }); // never on a field or a building, whatever roam says
   const animalSays = new Map(); // creature id → its bubble element
   let stillAt = 0; // when the animals were last drawn still: their lines keep time with motion off
   if (typeof window !== 'undefined' && window.Agentville) window.Agentville.animalsNow = () => (kit ? kit.list() : []); // read-only: where they are (the browser test)
@@ -316,6 +316,7 @@ function makePixelView(th, prefs) {
     const [x, y] = r.at;
     if (r.fx === 'hearts') pop(x, y - 12, '♥', 'good');
     if (r.fx === 'crumbs') for (let k = 0; k < 12; k++) addPart({ x: x + rand(-8, 8), y: y - 2, vx: rand(-14, 14), vy: rand(-22, -8), g: 70, life: 0.8, max: 0.8, size: 1, color: '#e9c46a' });
+    if (r.fx === 'sparkle') for (let k = 0; k < 16; k++) addPart({ x: x + rand(-8, 8), y: y - rand(1, 12), vx: rand(-12, 12), vy: rand(-26, -6), g: 18, life: 0.9, max: 0.9, size: 1, color: ['#ffffff', '#ffd43b', '#ff7eb6', '#5ab4ff', '#b388ff'][k % 5] });
     if (r.fx === 'dust') for (let k = 0; k < 8; k++) addPart({ x: x + rand(-4, 4), y: y - 1, vx: rand(-18, 18), vy: rand(-12, -4), g: 30, life: 0.5, max: 0.5, size: rand(1, 2), color: '#c9a46a', alpha: 0.7 });
   }
   function onMenuKey(e) { if (e.key === 'Escape' && menuFor) closeMenu(); }
@@ -461,6 +462,7 @@ function makePixelView(th, prefs) {
     if (!drag) {
       const id = botAt(e);
       setHover(id);
+      if (!id && animalsShown()) { const pt = farmPoint(e), shy = pt && kit.at(...pt); if (shy) kit.touch(shy); } // the pointer on a shy visitor: it bolts
       if (!id && canvas) { const pt = farmPoint(e), k = pt && th.buildingAt?.(...pt); canvas.style.cursor = k ? 'pointer' : ''; canvas.title = k ? th.buildingTip(k) : ''; }
       return;
     }
@@ -995,6 +997,7 @@ function makePixelView(th, prefs) {
     if (hit) { opts.onPickAgent?.(hit); return; }
     const [x, y] = farmPoint(e);
     const animal = animalsShown() ? kit.at(x, y) ?? kit.homeAt(x, y) : null; // farmers first, then animals, then an animal's home
+    if (animal && kit.touch(animal)) return; // a shy visitor: gone, no menu
     if (animal) { openMenu(animal); return; }
     const building = th.buildingAt?.(x, y);
     if (building) { openBuilding(building); return; }

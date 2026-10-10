@@ -1364,3 +1364,34 @@ test('the collector starts and runs with a damaged helper.json or names.json', a
     await handle.stop();
   }
 });
+
+test('a Codex thread shows as an agent in its folder while Codex runs, and not once Codex has gone', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'tracker-root-codex-'));
+  mkdirSync(join(root, 'web'));
+  writeFileSync(join(root, 'web', 'index.html'), '<html></html>');
+  writeFileSync(join(root, 'config.json'), JSON.stringify({ port: 0, pollMs: 200, agentsCliPollMs: 200, deployRepos: {} }));
+  const claudeDir = mkdtempSync(join(tmpdir(), 'tracker-claude-'));
+  mkdirSync(join(claudeDir, 'sessions'));
+  const codexDir = mkdtempSync(join(tmpdir(), 'tracker-codex-'));
+  mkdirSync(join(codexDir, 'sessions', '2026', '10', '10'), { recursive: true });
+  const iso = ms => new Date(ms).toISOString();
+  const now = Date.now();
+  writeFileSync(join(codexDir, 'sessions', '2026', '10', '10', 'rollout-x.jsonl'), `${[
+    JSON.stringify({ timestamp: iso(now - 9000), type: 'session_meta', payload: { id: 't-1', cwd: '/p/shop', thread_source: 'user' } }),
+    JSON.stringify({ timestamp: iso(now - 8000), type: 'event_msg', payload: { type: 'task_started' } }),
+    JSON.stringify({ timestamp: iso(now - 2000), type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'Cart fixed.' } }),
+  ].join('\n')}\n`);
+  writeFileSync(join(codexDir, 'session_index.jsonl'), `${JSON.stringify({ id: 't-1', thread_name: 'Fix the cart' })}\n`);
+
+  let ps = '900 1 900 01:00 0.0 2048 /usr/local/bin/codex app-server --listen unix://';
+  const handle = await startCollector({ root, claudeDir, codexDir, readProcs: async () => parsePs(ps), claudeBin: '/usr/bin/false', notify: () => {}, log: () => {} });
+  try {
+    const codex = () => handle.getSnapshot().agents.filter(a => a.kind === 'codex');
+    assert.deepEqual(codex().map(a => [a.id, a.name, a.cwd, a.state, a.lastReply, a.pid]), [['codex:t-1', 'Fix the cart', '/p/shop', 'yourTurn', 'Cart fixed.', undefined]]);
+    ps = '901 1 901 01:00 0.0 2048 /bin/zsh';
+    for (let i = 0; i < 40 && codex().length; i++) await new Promise(r => setTimeout(r, 100));
+    assert.deepEqual(codex(), []);
+  } finally {
+    await handle.stop();
+  }
+});

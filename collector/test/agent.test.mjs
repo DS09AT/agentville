@@ -39,10 +39,13 @@ test('name falls back to the transcript title, then the folder name', () => {
   assert.equal(bare.name, 'site');
 });
 
-test('codex agents take their state from CPU and have no feed', () => {
-  const a = buildAgent({ base: { id: 'codex:200', kind: 'codex', name: 'Codex (VS Code)', cwd: '', pid: 200 }, model: null, proc: { cpu: 30, rssMb: 50, childCount: 0, children: [] }, cpuHistory: [{ at: at(0), cpu: 30 }], repoOf, now: at(1), cfg, home: '/h' });
-  assert.equal(a.state, 'working');
+test('codex agents take their state and last reply from their thread, their name from their folder, and have no feed', () => {
+  const base = { id: 'codex:t1', kind: 'codex', name: undefined, cwd: '/p/shop' };
+  const a = buildAgent({ base, model: null, codex: { turnOpen: true, lastActivityAt: at(0), lastTurnEndAt: 0, lastReply: null }, repoOf, now: at(1), cfg, home: '/h' });
+  assert.deepEqual([a.state, a.name, a.cwd, a.lastActivityAt], ['working', 'shop', '/p/shop', at(0)]);
   assert.deepEqual(a.feed, []);
+  const done = buildAgent({ base: { ...base, name: 'Fix the cart' }, model: null, codex: { turnOpen: false, lastActivityAt: at(5), lastTurnEndAt: at(5), lastReply: 'Done.' }, repoOf, now: at(9), cfg, home: '/h' });
+  assert.deepEqual([done.state, done.name, done.lastReply, done.sinceHint], ['yourTurn', 'Fix the cart', 'Done.', at(5)]);
 });
 
 test("a subagent's own transcript keeps it running, and its calls count as the parent's touches", () => {

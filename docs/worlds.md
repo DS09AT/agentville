@@ -499,6 +499,7 @@ A hook you give always wins over its default.
 | `roam` | `()` | `[]`: rectangles `{ x, y, w, h }` where they may walk. Keep them off anything that shows data |
 | `avoid` | `()` | `[]`: rectangles inside those that they keep off (a pond, a henhouse) |
 | `perches` | `()` | `[]`: `[x, y, lift]` points a climber stands on, `lift` pixels up (a woodpile, a rock). One it can't reach is skipped |
+| `dens` | `()` | `[]`: `[x, y]` points where a creature with the `nap` habit sleeps long (a basket, a hollow under a tree), two side by side at most. A den may be inside an `avoid` rectangle or up to 48 px outside `roam`: only a napper is let in, from the nearest place it may stand |
 | `spots` | `()` | `{}`: named points gags go to (`{ hammock: [x, y] }`), and `huddle`, where they gather in winter. A spot may be inside an `avoid` rectangle: only a gag goes in |
 | `spotFree` | `(name)` | `true`: may a gag use that spot now (the farm's hammock is taken while an agent naps) |
 
@@ -546,7 +547,9 @@ in their own bubbles, and do what you click. They never stand for data. A world 
 - They wander inside `roam`, never into `avoid` (no part of them: a tall one doesn't reach over
   it), never onto what your `fieldAt` and `buildingAt` report, and never across any of it on the way.
   A creature with a `home` keeps to it (the farm's ducks keep to the pond). With no `roam`, the rest
-  aren't shown.
+  aren't shown. With several `roam` areas, a place to go is picked by their size, so a narrow way
+  between two yards (the farm's path beside the hammocks) doesn't fill up. Make sure the areas join
+  up for your widest creature, or those on one side never reach the other: none is ever moved.
 - At night most sleep (the lion and the cat wander); with motion off they all doze where they are.
 - Now and then one says a line from `lines.idle`: at most two bubbles at once, 4 s each, 40 characters
   at most, shown as text (never HTML). A bubble moves out of the way of an agent's bubble or name,
@@ -576,20 +579,33 @@ A creature in `animals()`:
 | `kind` | One of the library's creatures (below). Never one of your `taken` shapes |
 | `count` | How many (1) |
 | `looks` | One look per creature, in order (the duck's `drake`, `hen`, `duckling`) |
+| `visits` | `{ every: [s, s], stay: [s, s] }`: a shy visitor (the farm's unicorn). It isn't there at first; every `every` seconds (a time between the two) it appears somewhere it may be, lives like the rest for `stay` seconds and is gone, with `sparkle` both times. With the pointer on it, or clicked, it bolts and is gone within a second, and it has no menu (`actions: []`). It takes no part in gags |
+| `look` | The look of them all, when `looks` gives none (the cat's `grey` or `black`). Two entries of one kind (a grey cat with its own name and lines, then a black one) are numbered on: `cat-0`, `cat-1` |
 | `name` | The menu's title (the kind) |
 | `home` | `{ x, y, w, h }`: it keeps to this area, and clicking it opens its menu |
 | `bank` | `[[x, y], …]`: where an agent stands to do something with one that has a `home` (the nearest is used); else beside it |
 | `actions` | Its menu, 2 to 4: `{ label, fx?, pose?, line?, run?, gather?, steal?, ms? }`. `fx` is `'hearts'`, `'crumbs'` or `'dust'`; `pose` what it does meanwhile (`happy` by default); `line` a key of `lines` it says; `run` makes it run off; `gather` brings every one of its kind to it (feeding the ducks); `steal`, with `gather`, sends its last `duckling` look first, fast, to say `lines.bread`; `ms` how long (2500) |
 | `lines` | `{ idle: […], <key>: […] }`: what it says, now and then (`idle`), after an action (`line`), in a gag (`say`) and when it reacts (the event's kind). 40 characters at most each |
-| `habits` | What it does now and then, of: `climb` (onto a `perch`), `circles`, `hide` (the ostrich's head in the ground; it hides from a failed deploy too), `yawn`, `stretch`, `roll` (onto its back), `chaseTail`, `pounce`, `fetch` (runs off and back), `laps` |
+| `habits` | What it does now and then, of: `climb` (onto a `perch`), `circles`, `hide` (the ostrich's head in the ground; it hides from a failed deploy too), `yawn`, `stretch`, `roll` (onto its back), `chaseTail`, `pounce`, `fetch` (runs off and back), `laps`, `nap` (a long sleep in a den, below) |
 | `reacts` | `{ <event kind>: what }`, over the defaults: `'scatter'`, `'hop'`, `'gather'`, `'hide'` or `'run'` (to where it happened); `null` for nothing |
 
 The library's creatures, each drawn on its feet, facing either way: `cow`, `goat`, `sheepdog` (with a
-red bandana), `ostrich`, `lion`, `tiger`, `duck` (looks `drake`, `hen`, `duckling`), `cat`, `dog`,
-`pigeon`, `mouse` and `fish`. Their poses: `stand`, `walk`, `run`, `eat`, `sleep`, `happy`, `yawn`,
+red bandana), `ostrich`, `lion`, `tiger`, `duck` (looks `drake`, `hen`, `duckling`), `cat` (looks `grey`,
+`black`), `dog`, `pigeon`, `mouse`, `fish` and `unicorn` (it twinkles). Their poses: `stand`, `walk`, `run`, `eat`, `sleep`, `happy`, `yawn`,
 `startled`, `stretch`, `roll`; the duck's `swim`, `dabble` and `slide` (on ice); the ostrich's `hide`.
 What they can wear (the kit puts it on): a goat's scarf and a hat (a farmer's, in a gag), the
-ostrich's bucket.
+ostrich's bucket (a cat's lies beside it, pushed over).
+
+**Dens and the `nap` habit.** A creature with `nap` among its `habits` now and then walks to one of
+your `dens()`, sleeps there for 45 to 105 s and walks back out the way it came. A den holds two of a
+kind: one that finds its kind asleep in a den mostly lies down on the other side, facing it, says
+`lines.cuddle` and gives off hearts, and one time in five the other follows it in. A den is never
+shared with another kind, and none is used while a gag has a spot there (within 12 px); a gag doesn't
+take a spot that is someone's den just now. Clicked in its sleep, it does the action and then
+leaves. Draw the den yourself (in `ground()`; the farm's basket is drawn only while `PXG.animals`),
+keep the others out with an `avoid` rectangle round it, and return the same point from frame to
+frame: a den that moves or goes wakes its sleeper and puts it back where it may be. Not in winter
+(no habits then).
 
 ### Reactions
 
@@ -618,7 +634,8 @@ first says `lines[<kind>]` if it has one.
 `needs` says who it takes: creatures of a kind (awake, not busy with something else), an agent
 (`farmer`), a subagent's chicken within 40 px of the first creature, a free spot. A gag starts only
 when all are there. Its roles are the kinds it needs (the first of each picked), `'farmer'` (the agent
-nearest it) and `'chicken'`. The steps run one at a time:
+nearest it) and `'chicken'`. With two or more of a kind (`cow: 2`), the others are `<kind>2`,
+`<kind>3`…: `{ needs: { cow: 2 }, steps: [{ go: 'cow2', to: 'cow' }, { say: 'cow', line: 'gossip' }] }`. The steps run one at a time:
 
 | Step | What it does |
 |---|---|
@@ -628,7 +645,7 @@ nearest it) and `'chicken'`. The steps run one at a time:
 | `{ pose: role, is, ms }` | A pose for `ms` |
 | `{ wear: role, what: 'hat' \| 'bucket', on }` | A hat is the agent's own (the agent is drawn `hatless` meanwhile); the bucket is in `PXG.taken` |
 | `{ wait: ms }` | A pause |
-| `{ fx: 'hearts' \| 'crumbs' \| 'dust', at: role }` | An effect |
+| `{ fx: 'hearts' \| 'crumbs' \| 'dust' \| 'sparkle', at: role }` | An effect |
 | `{ stay: role, is?, ms, while: 'spot:<name>' }` | Stays (asleep by default) while `spotFree(name)` says the spot is free |
 
 The rules the engine keeps for the agents a gag borrows:

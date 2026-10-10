@@ -22,7 +22,7 @@
 
   // What a creature does when something happens, unless its cast entry says otherwise (reacts).
   const REACTS = { deployFailed: 'scatter', deployOk: 'hop', harvest: 'gather', merged: null, arrive: null };
-  const HABITS = new Set(['climb', 'circles', 'hide', 'yawn', 'stretch', 'chaseTail', 'pounce', 'fetch', 'roll', 'laps']);
+  const HABITS = new Set(['climb', 'circles', 'hide', 'yawn', 'stretch', 'chaseTail', 'pounce', 'fetch', 'roll', 'laps', 'nap']);
 
   const STEPS = ['go', 'chase', 'say', 'pose', 'wear', 'wait', 'fx', 'stay'];
   const plainObject = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
@@ -32,6 +32,7 @@
     if (g.needs.farmer !== undefined && g.needs.farmer !== 'idle' && g.needs.farmer !== 'busy') return `its farmer is ${g.needs.farmer} (idle or busy)`;
     if (!Array.isArray(g.steps) || !g.steps.length) return 'its steps are not a list';
     const roles = new Set(Object.keys(g.needs).filter(k => k !== 'spot' && k !== 'farmer' && k !== 'chicken'));
+    for (const k of [...roles]) for (let j = 2; j <= (Number(g.needs[k]) || 1); j++) roles.add(`${k}${j}`); // two of a kind: cat, cat2
     if (g.needs.farmer) roles.add('farmer');
     if (g.needs.chicken) roles.add('chicken');
     for (const st of g.steps) {
@@ -77,13 +78,13 @@
     const gags = Array.isArray(world) ? [] : readGags(world?.gags);
     const plays = Array.isArray(world) ? [] : readGags(world?.play);
     const lib = typeof CREATURES === 'object' ? CREATURES : {};
-    const ones = [];
+    const ones = [], seen = new Map(); // how many of each kind so far: two cast entries of one kind (a grey cat, a black cat) keep their own ids
     for (const def of cast ?? []) {
       if (!lib[def.kind]) throw new Error(`Animals: no creature called ${def.kind}.`);
-      for (let i = 0; i < (def.count ?? 1); i++) ones.push({ id: `${def.kind}-${i}`, kind: def.kind, def, look: def.looks?.[i] ?? def.look, x: 0, y: 0, face: 1, pose: 'stand', to: null, wait: random() * 3, act: null, fast: false, away: true, lift: 0, wear: {} });
+      for (let i = 0; i < (def.count ?? 1); i++, seen.set(def.kind, (seen.get(def.kind) ?? 0) + 1)) ones.push({ id: `${def.kind}-${seen.get(def.kind) ?? 0}`, kind: def.kind, def, look: def.looks?.[i] ?? def.look, x: 0, y: 0, face: 1, pose: 'stand', to: null, wait: random() * 3, act: null, fast: false, away: true, lift: 0, wear: {} });
     }
     const byId = id => ones.find(o => o.id === id);
-    let roam = [], avoid = [], blocked = () => false, perches = [], spots = {}, T = 0, says = [], quiet = 8, winter = false; // the first idle line after 8 s
+    let roam = [], avoid = [], blocked = () => false, perches = [], spots = {}, dens = [], frozen = false, T = 0, says = [], quiet = 8, winter = false; // the first idle line after 8 s
     const reactedAt = new Map();
     let running = [], nextGag = 60 + random() * 60, lastCrew = null; // the gags (and play) under way; when the next gag may start; the crew last lent
     const taken = new Set();
@@ -119,8 +120,10 @@
     /** A spot it may be (near a point, for a gathering), reachable from where it is when `reach`; null when there is none. */
     function somewhere(o, { near = null, reach = false, spread = 1 } = {}) {
       const areas = o.def.home ? [o.def.home] : roam;
+      const total = areas.reduce((t, r) => t + Math.max(1, r.w * r.h), 0);
       for (let k = 0; k < 60 && areas.length; k++) {
-        const r = areas[Math.floor(random() * areas.length)];
+        let t = random() * total; // by size: a narrow way between two yards isn't where half of them stand
+        const r = areas.find(z => (t -= Math.max(1, z.w * z.h)) < 0) ?? areas.at(-1);
         const x = Math.round(near ? near[0] + (random() - 0.5) * 24 * spread : r.x + random() * r.w), y = Math.round(near ? near[1] + (random() - 0.5) * 12 * spread : r.y + random() * r.h);
         if (okAt(o, x, y) && (!reach || okPath(o, x, y))) return [x, y];
       }
@@ -156,7 +159,8 @@
     /** Something it does for a while: a pose, a route to follow (checked), fast or not; then back to its own life. */
     function doing(o, { pose, route = [], s, fast = false, perch = null, spin = false, then = null }) {
       if (!perch) o.lift = 0; // off its perch first
-      o.act = { pose, route: route ?? [], until: T + s, perch, spin, then };
+      const out = o.gagSpot === 'den' ? o.act?.out ?? null : null; // woken in its den: it still leaves the way it came
+      o.act = { pose, route: route ?? [], until: T + s, perch, spin, then, out };
       o.fast = fast;
       o.to = null;
     }
@@ -167,6 +171,35 @@
       o.to = null;
       endAct(o);
       if (at) { [o.x, o.y] = at; o.away = false; } else o.away = true;
+    }
+    /** A step aside, for one whose walk grazed a corner of what it keeps off: the nearest place it may be within 5 px, a pixel clear of the edge; false when there is none. */
+    function aside(o) {
+      for (const d of [1, 2, 3, 4]) for (let k = 0; k < 8; k++) {
+        const dx = Math.cos((k / 8) * 2 * Math.PI), dy = Math.sin((k / 8) * 2 * Math.PI);
+        if (okAt(o, o.x + dx * d, o.y + dy * d) && okAt(o, o.x + dx * (d + 1), o.y + dy * (d + 1))) { o.x += dx * (d + 1); o.y += dy * (d + 1); return true; }
+      }
+      return false;
+    }
+    const between = ([lo, hi]) => lo + random() * (hi - lo);
+    /**
+     * A shy visitor (visits: { every: [s, s], stay: [s, s] }): away most of the time. Now and then it is there, somewhere
+     * it may be, lives like the rest for a while and is gone again; touched (touch()), it bolts and is gone at once.
+     */
+    function visiting(o, dt) {
+      const v = o.def.visits;
+      if (!o.away) { if (T >= o.leaveAt && !o.act) vanish(o); return; }
+      if ((o.nextVisit = (o.nextVisit ?? between(v.every)) - dt) > 0) return;
+      o.nextVisit = between(v.every);
+      const at = somewhere(o);
+      if (!at) return;
+      endAct(o);
+      Object.assign(o, { x: at[0], y: at[1], away: false, to: null, wait: 1 + random() * 2, pose: 'stand', leaveAt: T + between(v.stay) });
+      lastCrew?.fx?.('sparkle', at);
+    }
+    function vanish(o) {
+      lastCrew?.fx?.('sparkle', [Math.round(o.x), Math.round(o.y)]);
+      endAct(o);
+      Object.assign(o, { to: null, away: true, nextVisit: between(o.def.visits.every) });
     }
     const water = o => Boolean(lib[o.kind].water);
     const movingPose = o => (water(o) ? (winter ? 'slide' : 'swim') : 'walk');
@@ -191,9 +224,36 @@
         case 'chaseTail': doing(o, { pose: 'run', s: 3, spin: true }); return true;
         case 'pounce': { const to = somewhere(o, { near: [x, y], reach: true, spread: 0.8 }); if (!to) return false; doing(o, { pose: 'run', route: [to], s: 3, fast: true, then: 'happy' }); return true; }
         case 'fetch': { const to = somewhere(o, { near: [x, y], reach: true, spread: 2.5 }), r = to && routeOf(o, [to, [x, y]]); if (!r) return false; doing(o, { pose: 'run', route: r, s: 8, fast: true }); return true; }
+        case 'nap': return nap(o);
         case 'laps': { const r = routeOf(o, [[x + 20, y], [x - 20, y], [x + 20, y], [x - 20, y], [x, y]]); if (!r) return false; doing(o, { pose: 'run', route: r, s: 10, fast: true }); return true; }
         default: return false;
       }
+    }
+    const DEN_REACH = 48, DEN_SIDE = 4;
+    const lengthOf = (o, route) => { let d = 0, [ax, ay] = [o.x, o.y]; for (const [bx, by] of route) { d += Math.hypot(bx - ax, by - ay); [ax, ay] = [bx, by]; } return d; };
+    /**
+     * A long sleep in one of the world's dens (a basket, a hollow at the wood's edge): now and then beside one
+     * of its kind already asleep there, curled up together, else in an empty one. A den may be where it may not
+     * walk (inside avoid, outside roam): it is let in from the nearest place it may be, and leaves that way.
+     */
+    function nap(o) {
+      const open = dens.map((at, i) => ({ at, i, mates: ones.filter(z => z !== o && !z.away && z.act?.den === i) }))
+        .filter(e => e.mates.length < 2 && e.mates.every(z => z.kind === o.kind && !z.act.route.length) && !running.some(g => { const s = spots[g.def.needs?.spot]; return Array.isArray(s) && Math.hypot(s[0] - e.at[0], s[1] - e.at[1]) < 12; })); // not one a gag has borrowed
+      const shared = open.filter(e => e.mates.length), empty = open.filter(e => !e.mates.length);
+      const pool = shared.length && (random() < 0.75 || !empty.length) ? shared : empty;
+      const e = pool[Math.floor(random() * pool.length)];
+      if (!e) return false;
+      const mate = e.mates[0] ?? null, side = mate ? -mate.act.side : random() < 0.5 ? -1 : 1;
+      const at = [e.at[0] + DEN_SIDE * side, e.at[1]], direct = okAt(o, at[0], at[1]);
+      const door = direct ? at : nearestAllowed(o, at);
+      if (!door || Math.hypot(door[0] - at[0], door[1] - at[1]) > DEN_REACH) return false;
+      const way = routeTo(o, door);
+      if (!way) return false;
+      const route = direct ? way : [...way, at];
+      doing(o, { pose: movingPose(o), route, s: lengthOf(o, route) / lib[o.kind].speed + 45 + random() * 60 });
+      Object.assign(o.act, { den: e.i, denAt: [...e.at], side, mate: mate?.id ?? null, out: direct ? null : [door] });
+      if (!direct) o.gagSpot = 'den';
+      return true;
     }
     /** A duckling follows the one ahead of it (the hen, then each duckling the one before): 8 px behind, in its home. */
     function leaderOf(o) {
@@ -216,6 +276,7 @@
       const lead = first?.length ? first[Math.floor(random() * first.length)] : null;
       if (lead) { roles[lead.kind] = lead.id; used.add(lead.id); }
       if (g.needs.spot && !(Array.isArray(spots[g.needs.spot]) && crew.spotFree(g.needs.spot))) return null;
+      if (g.needs.spot && ones.some(z => z.act?.den != null && Math.hypot(z.act.denAt[0] - spots[g.needs.spot][0], z.act.denAt[1] - spots[g.needs.spot][1]) < 12)) return null; // someone sleeps there
       if (g.needs.farmer) {
         const pool = g.needs.farmer === 'busy' ? crew.busy() : longIdle ? crew.longIdle() : crew.idle();
         const near = f => (lead ? Math.hypot(f.x - lead.x, f.y - lead.y) : 0);
@@ -228,10 +289,10 @@
         if (!c) return null;
         roles.chicken = c;
       }
-      for (const k of kinds.slice(1)) { // the rest of its creatures: the nearest to the first
+      for (const k of kinds) for (let j = k === kinds[0] ? 2 : 1; j <= (Number(g.needs[k]) || 1); j++) { // the rest of its creatures: the nearest to the first (a second of a kind is <kind>2)
         const o = ones.filter(z => z.kind === k && free(z) && !used.has(z.id)).sort((a, b) => (lead ? Math.hypot(a.x - lead.x, a.y - lead.y) - Math.hypot(b.x - lead.x, b.y - lead.y) : 0))[0];
         if (!o) return null;
-        roles[k] = o.id;
+        roles[j === 1 ? k : `${k}${j}`] = o.id;
         used.add(o.id);
       }
       return roles;
@@ -380,10 +441,13 @@
         blocked = typeof world?.blocked === 'function' ? world.blocked : () => false;
         perches = Array.isArray(world?.perches) ? world.perches : [];
         spots = world?.spots && typeof world.spots === 'object' ? world.spots : {};
+        dens = Array.isArray(world?.dens) ? world.dens.filter(b => Array.isArray(b)) : [];
         for (const g of [...running]) if (!gagFits(g)) endGag(g, lastCrew, { snap: true }); // the yard changed under a gag: it ends, everyone back where they may be
         for (const o of ones) {
-          if (o.gagSpot && !o.inGag && !(o.act?.route ?? []).every(p => okAt(o, p[0], p[1]))) { o.gagSpot = false; endAct(o); } // on its way out of a spot that no longer leads anywhere
+          if (o.def.visits && o.away) continue; // a visitor that isn't here: it comes when it comes
+          if (o.gagSpot && !o.inGag && !(o.act?.route ?? []).slice(0, o.act?.den != null ? -1 : undefined).every(p => okAt(o, p[0], p[1]))) { o.gagSpot = false; endAct(o); } // on its way out of a spot (or into a den: all but the den itself) that no longer leads anywhere
           if (o.act?.perch && !perches.some(q => q[0] === o.act.perch[0] && q[1] === o.act.perch[1])) endAct(o); // its perch is gone
+          if (o.act?.den != null && !(dens[o.act.den]?.[0] === o.act.denAt[0] && dens[o.act.den]?.[1] === o.act.denAt[1])) { o.gagSpot = false; endAct(o); } // its den is gone, or moved
           if (o.away || (!o.gagSpot && !okAt(o, o.x, o.y))) { rehome(o); continue; }
           if (o.gagSpot) continue; // let into its gag's spot: the way was checked (gagFits)
           if (o.to && !okPath(o, o.to[0], o.to[1])) o.to = null;
@@ -399,19 +463,33 @@
           if (o.kind === 'goat') o.wear.scarf = winter || undefined;
           if (water(o)) o.wear.ice = winter || undefined;
         }
+        frozen = still;
         if (still) { for (const o of ones) o.pose = 'sleep'; return; }
+        for (const o of ones) if (o.def.visits) visiting(o, dt);
         for (const o of shown()) {
-          if (!o.gagSpot && !okAt(o, o.x, o.y)) { rehome(o); continue; } // somewhere it may not be (the yard changed under it): moved back in
-          if (o.act && T >= o.act.until) endAct(o);
+          if (!o.gagSpot && !okAt(o, o.x, o.y) && !aside(o)) { rehome(o); continue; } // somewhere it may not be (the yard changed under it): moved back in
+          if (o.act && T >= o.act.until) { // done; one let into a den walks back out the way it came; a visitor that bolted is gone
+            const out = o.act.out, bolted = o.act.bolt;
+            endAct(o);
+            if (bolted) { vanish(o); continue; }
+            if (out && !okAt(o, o.x, o.y)) { doing(o, { pose: movingPose(o), route: out, s: 10 }); o.act.leaving = true; }
+          }
           if (o.act) {
             const a = o.act;
             if (a.route.length) {
               o.pose = a.pose;
               if (walk(o, a.route[0], dt)) a.route.shift();
+              if (!a.route.length && a.leaving) { endAct(o); o.pose = 'stand'; o.wait = 1 + random() * 2; continue; } // out of its den
+              if (!a.route.length && a.den != null) { // in its den: curled up, facing the middle; a second one in is a cuddle
+                o.face = -a.side;
+                if (a.mate && byId(a.mate)?.act?.den === a.den) { say(o, 'cuddle'); lastCrew?.fx?.('hearts', [dens[a.den][0], Math.round(o.y - 5)]); }
+                else if (!a.mate) { const pal = ones.find(z => z !== o && z.kind === o.kind && free(z) && z.def.habits?.includes('nap')); if (pal && random() < 0.2) nap(pal); } // now and then its friend comes too
+              }
               if (!a.route.length && a.perch) { o.lift = a.perch[2]; a.until = T + 5 + random() * 3; o.pose = 'stand'; } // up on its perch
               if (!a.route.length && a.then) o.pose = a.then;
             } else if (!a.perch || o.lift) o.pose = a.then && !a.route.length && a.pose === 'run' && a.then ? a.then : a.pose;
             if (a.perch && o.lift) o.pose = 'stand';
+            if (a.den != null && !a.route.length) o.pose = 'sleep';
             if (a.spin) o.face = Math.floor(T * 4) % 2 ? 1 : -1;
             continue;
           }
@@ -501,6 +579,17 @@
         const stand = o.def.bank?.length ? o.def.bank.reduce((best, b) => (Math.hypot(b[0] - o.x, b[1] - o.y) < Math.hypot(best[0] - o.x, best[1] - o.y) ? b : best)) : [Math.round(o.x - 10 * o.face), Math.round(o.y)];
         return { x: o.x, y: o.y - (o.lift || 0), h: lib[o.kind].h, stand };
       },
+      /** Touched (the pointer on it, or a click): a shy visitor bolts a few steps and is gone; true when it was one (it has no menu). */
+      touch(id) {
+        const o = byId(id);
+        if (!o?.def.visits || o.away) return false;
+        if (frozen) { vanish(o); return true; } // motion off: gone where it stands
+        if (o.act?.bolt) return true;
+        const best = [0, 1, 2, 3, 4, 5].map(() => somewhere(o, { reach: true })).filter(Boolean).sort((a, b) => Math.hypot(b[0] - o.x, b[1] - o.y) - Math.hypot(a[0] - o.x, a[1] - o.y))[0];
+        doing(o, { pose: 'run', route: best ? [best] : [], s: 0.6, fast: true });
+        o.act.bolt = true;
+        return true;
+      },
       menu(id) {
         const o = byId(id);
         return o && !o.away ? { id, kind: o.kind, title: o.def.name ?? o.kind, actions: (o.def.actions ?? []).map(a => a.label) } : null;
@@ -539,7 +628,7 @@
       gagNow() { const g = running.find(r => !r.play); return g ? { id: g.def.id } : null; },
       /** What the animals have taken just now ('bucket'): the world doesn't draw it where it was. */
       taken() { return new Set(taken); },
-      list() { return ones.map(o => ({ id: o.id, kind: o.kind, x: Math.round(o.x), y: Math.round(o.y), pose: o.pose, lift: o.lift || 0, wear: { ...o.wear }, ...(o.away ? { away: true } : {}) })); },
+      list() { return ones.map(o => ({ id: o.id, kind: o.kind, x: Math.round(o.x), y: Math.round(o.y), pose: o.pose, lift: o.lift || 0, wear: { ...o.wear }, ...(o.act?.den != null ? { den: o.act.den, asleep: !o.act.route.length } : {}), ...(o.away ? { away: true } : {}) })); },
     };
   }
 

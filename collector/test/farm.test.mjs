@@ -515,16 +515,19 @@ test('the farm reaches the page only through what it is handed: no storage, netw
   }
 });
 
-test('the farm’s animals: seven kinds, thirteen animals; never a chicken, the Explore dog or a pigeon; lines of 40 at most; 2 to 4 actions each', () => {
+test('the farm’s animals: nine kinds, seventeen animals, and a unicorn that only visits; never a chicken, the Explore dog or a pigeon; lines of 40 at most; 2 to 4 actions each', () => {
   const window = { Agentville: { raw: () => {} } };
   vm.runInNewContext(`${code}\n;window.CREATURES = CREATURES;`, { window, console, Math, Date, JSON, Map, Set });
   const th = window.AgentvilleFarm.makeFarm();
   const cast = plain(th.animals().cast); // animals() is { cast, gags, play }
-  assert.deepEqual(cast.map(c => [c.kind, c.count ?? 1]), [['cow', 2], ['goat', 2], ['sheepdog', 1], ['ostrich', 1], ['lion', 1], ['tiger', 1], ['duck', 5]]);
+  assert.deepEqual(cast.map(c => [c.kind, c.count ?? 1]), [['cow', 2], ['goat', 2], ['sheepdog', 1], ['ostrich', 1], ['lion', 1], ['tiger', 1], ['duck', 5], ['cat', 1], ['cat', 1], ['mouse', 2], ['unicorn', 1]]);
+  const unicorn = cast.find(c => c.kind === 'unicorn');
+  assert.deepEqual([unicorn.actions, unicorn.lines, unicorn.visits.every[0] >= 120, unicorn.visits.stay[1] <= 60], [[], {}, true, true], 'shy: no menu, nothing to say, rare and brief');
+  assert.deepEqual(cast.filter(c => c.kind === 'cat').map(c => [c.look, c.name, c.habits.includes('nap')]), [['grey', 'Grey cat', true], ['black', 'Black cat', true]]);
   for (const c of cast) {
     assert.ok(window.CREATURES[c.kind], c.kind);
     assert.ok(!['chicken', 'dog', 'pigeon'].includes(c.kind), `${c.kind} is taken on the farm`);
-    assert.ok(c.actions.length >= 2 && c.actions.length <= 4, `${c.kind} actions`);
+    assert.ok(c.visits || (c.actions.length >= 2 && c.actions.length <= 4), `${c.kind} actions`);
     for (const lines of Object.values(c.lines)) for (const l of lines) assert.ok(l.length <= 40, `${c.kind}: ${l}`);
   }
   const ducks = cast.find(c => c.kind === 'duck');
@@ -576,7 +579,7 @@ test('the farm’s gags, play and habits are written right: known steps, roles i
   const { cast, gags, play } = plain(th.animals());
   const kinds = new Set(cast.map(c => c.kind));
   const STEPS = new Set(['go', 'chase', 'say', 'pose', 'wear', 'wait', 'fx', 'stay']);
-  assert.deepEqual(gags.map(g => g.id).sort(), ['bucket', 'hammock', 'hat', 'nibble', 'startled', 'tag'].sort());
+  assert.deepEqual(gags.map(g => g.id).sort(), ['bucket', 'hammock', 'hat', 'nibble', 'startled', 'tag', 'mouse', 'tables', 'herding', 'gravity', 'mouseking', 'fits', 'faint', 'gossip'].sort());
   for (const g of [...gags, ...play]) {
     for (const k of Object.keys(g.needs)) assert.ok(kinds.has(k) || ['farmer', 'chicken', 'spot'].includes(k), `${g.id}: ${k}`);
     for (const s of g.steps) assert.ok(Object.keys(s).some(k => STEPS.has(k)), `${g.id}: ${JSON.stringify(s)}`);
@@ -641,4 +644,55 @@ test('the goats get up on both the woodpile and the rock, and neither is on the 
     for (let i = 0; i < 24000 && used.size < perches.length; i++) { a.tick(0.1); for (const o of a.list()) if (o.kind === 'goat' && o.lift) used.add(`${o.x},${o.y}`); }
   }
   assert.equal(used.size, perches.length, `goats stood on ${[...used].join(' ')} of ${perches.map(p => `${p[0]},${p[1]}`).join(' ')}`);
+});
+
+test('the cats sleep in the basket and on the moss at the wood’s edge and curl up together; every farmerless gag runs; nothing else is ever in either, and no animal is ever moved: they walk, round the pond too', () => {
+  const window = { Agentville: { raw: () => {} } };
+  vm.runInNewContext(`${code}\n;window.__kit = { makeAnimals, seededRandom };`, { window, console, Math, Date, JSON, Map, Set });
+  const farm = window.AgentvilleFarm, th = farm.makeFarm(), L = th.relayout(farm.layoutFor([{ key: '/a', name: 'a' }]));
+  th.setScene({ plan: null, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  const dens = plain(th.dens()), avoid = plain(th.avoid()), [roam] = plain(th.roam()), spots = plain(th.spots());
+  const within = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+  const basket = avoid.find(r => within(r, dens[0][0], dens[0][1]));
+  assert.ok(basket, 'the basket is kept clear of the others');
+  assert.deepEqual(spots.basket, dens[0], 'and is the spot the lion borrows');
+  const wood = avoid.find(r => within(r, dens[1][0], dens[1][1]));
+  assert.ok(wood && wood !== basket && within(roam, dens[1][0], dens[1][1]) && wood.y + wood.h < L.GRID.y1 - 8, 'the moss is at the wood’s edge in the yard, kept clear too, above where idle farmers stand');
+
+  const warns = [], ran = new Set(), slept = new Set(), crossed = new Set();
+  let cuddled = false, far = 0;
+  const want = ['mouse', 'tables', 'herding', 'gravity', 'mouseking', 'fits', 'faint', 'gossip', 'hammock', 'tag'];
+  for (const seed of [1, 2, 3]) {
+    const a = window.__kit.makeAnimals(th.animals(), { random: window.__kit.seededRandom(seed), warn: m => warns.push(m) });
+    a.place({ roam: th.roam(), avoid: th.avoid(), perches: th.perches(), spots: th.spots(), dens: th.dens(), blocked: (x, y) => Boolean(th.fieldAt(x, y) || th.buildingAt?.(x, y)) });
+    const crew = { idle: () => [], busy: () => [], longIdle: () => [], at: () => null, state: () => undefined, send: () => false, release() {}, flag() {}, chickens: () => [], spotFree: n => th.spotFree(n), fx() {} };
+    let prev = new Map(a.list().map(o => [o.id, o]));
+    for (let i = 0; i < 72000 && !(cuddled && slept.size === 4 && crossed.size >= 4 && want.every(id => ran.has(id))); i++) {
+      a.tick(0.1, { crew });
+      for (const o of a.list()) {
+        const p = prev.get(o.id);
+        if (o.away || p.away) continue; // the unicorn, not here (or just come)
+        far = Math.max(far, Math.hypot(o.x - p.x, o.y - p.y));
+        if (o.kind !== 'duck' && (o.y < 210) !== (p.y < 210) && !(o.x > 84 && o.x < 108)) crossed.add(o.kind); // from one side of the pond and hammocks to the other (not the cow in the hammock)
+      }
+      prev = new Map(a.list().map(o => [o.id, o]));
+      const gag = a.gagNow()?.id;
+      if (gag) ran.add(gag);
+      const all = a.list(), cats = all.filter(o => o.kind === 'cat');
+      for (const c of cats) if (c.asleep) slept.add(`${c.id}@${c.den}`);
+      cuddled ||= cats.every(c => c.asleep) && cats[0].den === cats[1].den;
+      for (const o of all) {
+        if (o.kind === 'cat' || o.kind === 'duck' || o.away) continue;
+        const inside = r => o.x > r.x && o.x < r.x + r.w && o.y > r.y && o.y < r.y + r.h; // on its edge is beside it
+        assert.ok(!inside(basket) || (o.kind === 'lion' && gag === 'fits'), `${o.id} in the cats’ basket at ${o.x},${o.y}`);
+        assert.ok(!inside(wood), `${o.id} under the trees at the wood’s edge at ${o.x},${o.y}`);
+      }
+    }
+  }
+  assert.deepEqual(warns, [], 'no gag is dropped');
+  assert.deepEqual([[...new Set([...slept].map(s => s.split('@')[0]))].sort(), [...new Set([...slept].map(s => s.split('@')[1]))].sort()], [['cat-0', 'cat-1'], ['0', '1']], `both cats slept, and in both dens (${[...slept]})`);
+  assert.ok(cuddled, 'and once together');
+  assert.ok(far <= 8, `every step was a step: none was moved across the yard (longest ${far})`);
+  assert.ok(crossed.has('cat') && crossed.size >= 4, `they walk from one half of the yard to the other, by the path beside the hammocks (${[...crossed]})`);
+  assert.deepEqual(want.filter(id => !ran.has(id)), [], 'every gag that needs no farmer ran');
 });

@@ -2543,3 +2543,27 @@ test("the click guard holds a dialog a world raised, whoever handles its buttons
   await page.clickButton('turn-off', { pluginOp: 'disable', plugin: 'crops@farm-market' });
   assert.deepEqual(page.posts.filter(x => x.path === '/api/actions/plugin').map(x => x.body), [{ id: 'crops@farm-market', op: 'disable' }], 'once the guard lifts, Turn off works');
 });
+
+test("a guest's snapshot (a visitor from the network) draws the list and an agent's panel, with none of what was said", async () => {
+  const { guestSnapshot } = await import('../server.mjs');
+  const said = {
+    lastPrompt: 'fix the cart bug', lastReply: 'Patched the total.', question: 'Shall I push it?',
+    tasks: { done: 1, total: 2, items: [{ text: 'Write the regression test', status: 'completed' }, { text: 'Ship', status: 'pending' }] },
+    children: [{ id: 'c1', kind: 'subagent', agentType: 'Explore', label: 'Find the callers', state: 'running', startedAt: Date.now() - 4000, lastAt: Date.now() - 1000, lastSaid: 'Three so far.' }],
+    docs: [{ path: '/w/plan.md', wrote: true, at: Date.now() }],
+  };
+  const words = /fix the cart bug|Patched the total|Shall I push it|regression test|Find the callers|Three so far|plan\.md|npm test/;
+  const full = loadPage();
+  full.push(richSnapshot([richAgent(said)]));
+  assert.match(full.list() + full.side(), words, 'the page itself shows them');
+  const guest = loadPage();
+  guest.push(guestSnapshot(richSnapshot([richAgent(said)])));
+  assert.match(guest.list(), /busy-one/);
+  assert.match(guest.side(), /busy-one/);
+  assert.doesNotMatch(guest.list() + guest.side(), words);
+  const window = {};
+  vm.runInNewContext(readFileSync(fileURLToPath(new URL('../../web/scene.js', import.meta.url)), 'utf8'), { window, console });
+  const scene = window.AgentvilleScene.toScene({ repos: [], ...guestSnapshot(richSnapshot([richAgent(said)])) }, { cpuAlertPct: 90 });
+  assert.deepEqual([scene.agents.length, scene.agents[0].name, scene.agents[0].state], [1, 'busy-one', 'working']);
+  assert.doesNotMatch(JSON.stringify(scene), words);
+});
