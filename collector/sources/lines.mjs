@@ -3,7 +3,7 @@ import { modAtLeast } from './pending.mjs';
 // Animal lines (✨ Helper): Haiku writes what the animals on screen say about what is happening, through
 // an open session's mod. This decides what is news (events), what is sent (facts only: names, states, a
 // step word, counts, events; never a path, a command, a branch or anyone's words), which session runs a
-// call, when a batch is due, and which reply rows are kept (docs/worlds.md, README "✨ Helper").
+// call, when a batch is due, and which reply rows are kept (docs/worlds-legacy.md, README "✨ Helper").
 export const SITUATIONS = ['idle', 'deployFailed', 'deployOk', 'harvest', 'merged', 'arrive'];
 export const CREATURE_KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'pig', 'sheep', 'horse', 'goose', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'robodog', 'vacuum']; // creatures.js (a test fails when they drift)
 export const SILENT_KINDS = ['unicorn']; // creatures with nothing to say: they get no lines (the farm's unicorn only visits)

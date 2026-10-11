@@ -9,19 +9,25 @@
   const NAV = new Set(['list', 'session', 'setup', 'side', 'theme', 'worlds', 'broadcast']);
   const STATES = new Set(['waiting', 'working', 'turn', 'idle', 'stale']);
   const PREF_NAME = /^[a-z][a-z0-9-]{0,31}$/;
-  // The creature library's kinds (sdk/creatures.js) and the situations the helper writes for (collector/sources/lines.mjs):
+  // The creature library's kinds (legacy/creatures.js) and the situations the helper writes for (collector/sources/lines.mjs):
   // a world's cast names only these. Copies: worlds.test.mjs fails when they drift.
   const CREATURE_KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'pig', 'sheep', 'horse', 'goose', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'robodog', 'vacuum'];
   const SITUATIONS = ['idle', 'deployFailed', 'deployOk', 'harvest', 'merged', 'arrive'];
   // The built-in worlds the helper's lines are written for by name (the mod has its own words for each): a cast names
   // its world only if it is one of these, and not private. Copy: worlds.test.mjs fails when it drifts.
   const LINE_WORLDS = ['farm', 'factory'];
-  // The worlds the collector moves for everyone who watches (collector/live.mjs, LIVE_WORLDS): the page joins such a world's room (web/live.js).
+  // LEGACY: the built-in worlds of the pixel engine the collector moves for everyone who watches (collector/live.mjs, LIVE_WORLDS):
+  // the page joins such a world's room (web/live.js). A built-in world of api 2 is moved there without being named here.
   const LIVE_WORLDS = ['farm', 'factory'];
+  const LEGACY_API = 1; // the pixel engine's worlds (collector/worlds.mjs)
   const OWN_WORLD = /^u\/[a-z0-9][a-z0-9-]{0,39}$/; // a world from your folder: moved by the collector too, in a process of its own (unless it draws itself)
   const ANIMAL_ID = /^[a-z]{1,16}-\d{1,3}$/, RID = /^[\w-]{1,40}$/;
   const CONTROL = /[\x00-\x1f\x7f-\x9f]/g;
   const PREF_MAX = 16_384, DIARY_MAX = 20, IN_FLIGHT_MAX = 4, ID_MAX = 200, PATH_MAX = 4096;
+  // A file a world may ask for as bytes: one of its own, in its assets folder (web/worlds/sdk/core/manifest.js, ASSET: a copy,
+  // worlds.test.mjs fails when they drift). A frame can't fetch (its policy), so the page reads it and hands it over.
+  const ASSET = /^assets\/[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*)*\.(glb|png|webp|jpe?g)$/;
+  const ASSET_PATH_MAX = 120, ASSET_BYTES_MAX = 16 * 1024 * 1024;
   // A world keeps at most 64 settings, 64 KB in all (names and values, what is saved already included):
   // it can't fill the page's storage, after which the page's own settings would stop saving.
   const STORE_KEYS_MAX = 64, STORE_TOTAL_MAX = 65_536;
@@ -119,6 +125,10 @@
       case 'request': {
         if (!Number.isInteger(m.id)) return null;
         const refuse = error => ({ kind: 'refuse', id: m.id, error });
+        if (m.kind === 'asset') { // one of the world's own files: nothing of yours, so a private world may have it too
+          if (ctx.inFlight >= IN_FLIGHT_MAX) return refuse('Too many requests at once.');
+          return short(m.path, ASSET_PATH_MAX) && ASSET.test(m.path) ? { kind: 'request', id: m.id, what: 'asset', path: m.path } : refuse("That is not a file in the world's assets folder.");
+        }
         if (ctx.private) return refuse("This world can't see files: switch on “Can see what agents say” for it in the list of worlds.");
         if (ctx.inFlight >= IN_FLIGHT_MAX) return refuse('Too many requests at once.');
         if (m.kind === 'agentFiles' && agent(m.agentId)) return { kind: 'request', id: m.id, what: 'agentFiles', agentId: m.agentId };
@@ -174,7 +184,20 @@
     el.innerHTML = entries.map(l => `<li class="st-${l.state}"><i></i><span>${l.who ? `<b>${esc(noBidi(l.who))}</b> ` : ''}${esc(noBidi(l.text))}</span><time>${ago(l.at)}</time></li>`).join('') || '<li class="faint">Quiet so far.</li>';
   }
 
-  /** One of the two things a world may ask for, fetched with the token. */
+  /** One of a world's own files, as bytes: from this dashboard's server, from inside the world's folder, and no larger than a world's file may be. */
+  async function fetchAsset(key, path) {
+    try {
+      const r = await fetch(`/world/${key}/${path}`, { cache: 'no-store', ...(typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? { signal: AbortSignal.timeout(FETCH_MS) } : {}) });
+      if (!r.ok) return { ok: false, status: r.status, error: 'That file is not there.' };
+      if (Number(r.headers.get('content-length') ?? 0) > ASSET_BYTES_MAX) return { ok: false, status: 413, error: 'That file is too large (16 MB at most).' };
+      const data = await r.arrayBuffer();
+      return data.byteLength > ASSET_BYTES_MAX ? { ok: false, status: 413, error: 'That file is too large (16 MB at most).' } : { ok: true, status: r.status, data };
+    } catch (err) {
+      return { ok: false, status: 0, error: String(err?.message ?? err) };
+    }
+  }
+
+  /** One of the two things of yours a world may ask for, fetched with the token. */
   async function fetchFor(token, act) {
     const url = act.what === 'agentFiles' ? `/api/agent/${encodeURIComponent(act.agentId)}/files` : `/api/repo/touched?path=${encodeURIComponent(act.repo)}`;
     try {
@@ -211,7 +234,7 @@
   let hidden = false; // the world is out of sight (the list view is showing): it can't make the page do anything
   // A built-in world on the dashboard is moved by the collector, for everyone watching alike; the test page's (made-up data, kept in memory) moves itself.
   let drawsItself = false; // the frame's world registered with Agentville.raw: there is no engine in it to tell where anyone is
-  const liveFor = key => Boolean(window.TrackerLive) && (LIVE_WORLDS.includes(key) || (OWN_WORLD.test(key) && !drawsItself)) && !opts.memory;
+  const liveFor = key => Boolean(window.TrackerLive) && (LIVE_WORLDS.includes(key) || (OWN_WORLD.test(key) && !drawsItself) || (info.key === key && info.builtIn && Number.isInteger(info.api) && info.api !== LEGACY_API)) && !opts.memory;
   const settingsNow = () => {
     const nav = opts.navState?.() ?? {};
     return { still: Boolean(opts.still), theme: nav.theme ?? 'auto', nav, bell: store.get('tracker-bell') === 'on', awake: opts.isAwake?.() === true, sim: liveFor(world) };
@@ -278,7 +301,7 @@
   // posted to the frame with the port transferred alongside it (see handle('loaded')); nothing else uses
   // the window. A world that navigates its frame away takes the port's realm with it, so the page posts
   // scenes into a dead port and the page they went to hears nothing.
-  const post = message => { if (port) port.postMessage(message); };
+  const post = (message, transfer = []) => { if (port) port.postMessage(message, transfer); };
   /** Lets go of the port to a frame that is going away, so the next frame gets a fresh one. */
   function closePort() { if (port) { try { port.close(); } catch { /* already gone */ } port = null; } }
   function pushSettings() {
@@ -413,10 +436,11 @@
       case 'request': {
         const mine = generation;
         inFlight++; // counts every fetch still running, whichever frame asked
-        // the test page answers with made-up data (opts.answer); the dashboard fetches it with the token
-        void (opts.answer ? Promise.resolve(opts.answer(act)) : fetchFor(opts.token, act)).then(r => {
+        // a world's own file is read from its folder; for the rest the test page answers with made-up data (opts.answer), the dashboard fetches it with the token
+        void (act.what === 'asset' ? fetchAsset(world, act.path) : opts.answer ? Promise.resolve(opts.answer(act)) : fetchFor(opts.token, act)).then(r => {
           inFlight--;
           if (mine !== generation) return; // the world was replaced, or its frame loaded again, meanwhile
+          if (act.what === 'asset') { post({ type: 'reply', id: act.id, ...r }, r.data ? [r.data] : []); return; } // the bytes are handed over, not copied
           if (r.ok && act.what === 'agentFiles') {
             const paths = sentPaths.get(act.agentId) ?? new Set();
             for (const f of r.data?.memory ?? []) if (typeof f?.path === 'string') paths.add(f.path);

@@ -17,14 +17,14 @@ const WORLDS = [
 ];
 
 async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false, listFails = false, reveal = { ok: true, path: '/w' }, mounted = true, canStayAwake = true } = {}) {
-  const posted = [], calls = [], listeners = {}, fetches = [], held = [], warnings = [], made = [], frames = [], timers = [], signals = [], windowPosts = [], bodies = [];
+  const posted = [], calls = [], listeners = {}, fetches = [], held = [], warnings = [], made = [], frames = [], timers = [], signals = [], windowPosts = [], bodies = [], handedOver = [];
   // The page carries all traffic over a MessageChannel once the frame has loaded. The stub records what
   // the page posts over its port into `posted` (as frame.contentWindow.postMessage already does for the
   // one `start` message), and `from` (below) delivers the frame's messages back over that port.
   let pagePort = null;
   class FakeMessageChannel {
     constructor() {
-      const record = m => posted.push(JSON.parse(JSON.stringify(m)));
+      const record = (m, transfer = []) => { posted.push(JSON.parse(JSON.stringify(m))); if (transfer.length) handedOver.push({ id: m.id, data: m.data, transferred: transfer.includes(m.data) }); }; // handedOver: what went with its bytes handed over, not copied
       this.port1 = { onmessage: null, postMessage: record, start() {}, close() { this.onmessage = null; } }; // closed: it delivers nothing more
       this.port2 = { onmessage: null, postMessage() {}, start() {}, close() {} };
       pagePort = this.port1;
@@ -113,6 +113,7 @@ async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false
     fromWindow: data => listeners.message?.({ source: frames.at(-1)?.contentWindow, data }),
     signals,
     windowPosts, // what the page posted straight to frame.contentWindow (over the window), with any ports transferred
+    handedOver,
   };
 }
 const snap = { generatedAt: NOW, collisions: [], agents: [{ id: 'a1', name: 'cart-ui', kind: 'interactive', cwd: '/code/shop/web', state: 'working', feed: [], children: [], touching: [] }], repos: [{ path: '/code/shop/web', name: 'web', branch: 'main' }] };
@@ -1370,4 +1371,88 @@ test('the Screen switch: a world asks the page to keep the screen on; the page s
   no.from({ type: 'awake', on: true });
   await no.settle();
   assert.equal(no.posted.filter(m => m.type === 'settings').at(-1)?.settings.awake ?? false, false, 'where the browser cannot, the switch is shown off again');
+});
+
+/* ---------- a world's own files, as bytes (a world of api 2 asks for its models this way) ---------- */
+
+/** The page, with a server that has these world files: { '/world/<key>/<path>': bytes | { status } | { length, bytes } }. */
+async function withFiles(files, options = {}) {
+  const p = await page(options);
+  const asked = [], own = p.ctx.fetch;
+  p.ctx.fetch = (url, init) => {
+    if (!String(url).startsWith('/world/')) return own(url, init);
+    asked.push([url, init?.headers ?? null, init?.cache]);
+    const f = files[url];
+    if (!f || f.status) return Promise.resolve({ ok: false, status: f?.status ?? 404, headers: { get: () => null } });
+    const bytes = f.bytes ?? f;
+    return Promise.resolve({ ok: true, status: 200, headers: { get: h => (h === 'content-length' ? String(f.length ?? bytes.byteLength) : null) }, arrayBuffer: async () => bytes });
+  };
+  return { p, asked };
+}
+
+test("a world may ask for a file of its own assets folder as bytes: read from its own folder, with no token, and handed over", async () => {
+  const bytes = new Uint8Array([103, 108, 84, 70]).buffer;
+  const { p, asked } = await withFiles({ '/world/farm/assets/tree.glb': bytes });
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'request', id: 3, kind: 'asset', path: 'assets/tree.glb' });
+  await p.settle();
+  assert.deepEqual(asked, [['/world/farm/assets/tree.glb', null, 'no-store']], "this world's folder, and no token: a world's files need none");
+  assert.deepEqual(p.posted.find(m => m.type === 'reply' && m.id === 3), { type: 'reply', id: 3, ok: true, status: 200, data: {} });
+  assert.deepEqual(p.handedOver, [{ id: 3, data: bytes, transferred: true }], 'the very bytes, handed over to the frame');
+  p.from({ type: 'request', id: 4, kind: 'asset', path: 'assets/none.glb' });
+  await p.settle();
+  assert.deepEqual(p.posted.find(m => m.id === 4), { type: 'reply', id: 4, ok: false, status: 404, error: 'That file is not there.' });
+});
+
+test('an asset is a file in the assets folder and nothing else: no way out of it, no other kind of file, no other world', async () => {
+  const { p, asked } = await withFiles({});
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  const bad = ['world.js', 'assets/../world.json', '../farm/assets/x.glb', 'assets/.hidden.glb', '/assets/x.glb', 'assets/x.js', 'assets/x.glb?y=1', 'assets\\x.glb', 'assets//x.glb', `assets/${'a'.repeat(120)}.glb`, 5, null, ['assets/x.glb']];
+  bad.forEach((path, i) => p.from({ type: 'request', id: 100 + i, kind: 'asset', path }));
+  await p.settle();
+  assert.deepEqual(asked, [], 'none of them is asked of the server');
+  for (let i = 0; i < bad.length; i++) assert.deepEqual(p.posted.find(m => m.id === 100 + i), { type: 'reply', id: 100 + i, ok: false, status: 403, error: "That is not a file in the world's assets folder." }, String(bad[i]));
+});
+
+test('a file larger than a world\'s file may be is not handed over, whatever the server says of its size', async () => {
+  const big = { byteLength: 17 * 1024 * 1024 };
+  const { p } = await withFiles({ '/world/farm/assets/said.glb': { length: 17 * 1024 * 1024, bytes: new ArrayBuffer(4) }, '/world/farm/assets/is.glb': { length: 4, bytes: big } });
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'request', id: 1, kind: 'asset', path: 'assets/said.glb' });
+  p.from({ type: 'request', id: 2, kind: 'asset', path: 'assets/is.glb' });
+  await p.settle();
+  for (const id of [1, 2]) assert.deepEqual(p.posted.find(m => m.id === id), { type: 'reply', id, ok: false, status: 413, error: 'That file is too large (16 MB at most).' });
+  assert.deepEqual(p.handedOver, []);
+});
+
+test("a world that can't see what agents say may still have its own files; they count among the four requests at once", async () => {
+  const { p, asked } = await withFiles({ '/world/u/space/assets/a.png': new ArrayBuffer(2) }, { stored: { 'tracker-world': 'u/space' }, hold: true });
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'request', id: 1, kind: 'agentFiles', agentId: 'a1' });
+  await p.settle();
+  assert.equal(p.posted.find(m => m.id === 1).status, 403, 'private: nothing of yours');
+  p.from({ type: 'request', id: 2, kind: 'asset', path: 'assets/a.png' });
+  await p.settle();
+  assert.deepEqual(asked.map(a => a[0]), ['/world/u/space/assets/a.png']);
+  assert.equal(p.posted.find(m => m.id === 2).ok, true);
+});
+
+test('a built-in world of api 2 joins its room without being on any list; one of the pixel engine only when it is on the list', async () => {
+  const worlds = [...WORLDS, { key: 'tennis', builtIn: true, api: 2, name: 'Tennis club', icon: '🎾', description: '', nouns: {}, preview: null, error: null }, { key: 'museum', builtIn: true, api: 1, name: 'Museum', icon: '🏛', description: '', nouns: {}, preview: null, error: null }];
+  const p = await page({ stored: { 'tracker-world': 'tennis' }, worlds });
+  const live = liveStub(p);
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  assert.deepEqual(live.joins, [['tennis', 'tok']]);
+  assert.equal(p.posted.find(m => m.type === 'start').settings.sim, true);
+  const q = await page({ stored: { 'tracker-world': 'museum' }, worlds });
+  const none = liveStub(q);
+  q.farm.update(snap);
+  q.from({ type: 'loaded' });
+  assert.deepEqual(none.joins, [], 'a built-in world of the pixel engine that the collector does not move');
+  assert.equal(q.posted.find(m => m.type === 'start').settings.sim, false);
 });

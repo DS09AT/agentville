@@ -131,7 +131,7 @@ test('dueLines: the first at once; an event once 5 minutes have passed; else eve
 });
 
 test('the kinds and situations match the creature library and the kit (drift fails here)', () => {
-  const src = f => readFileSync(fileURLToPath(new URL(`../../web/worlds/sdk/${f}`, import.meta.url)), 'utf8');
+  const src = f => readFileSync(fileURLToPath(new URL(`../../web/worlds/legacy/${f}`, import.meta.url)), 'utf8');
   const lib = vm.runInContext(`${src('creatures.js')}; Object.keys(CREATURES)`, vm.createContext({ px() {} }));
   assert.deepEqual([...lib].filter(k => !SILENT_KINDS.includes(k)).sort(), [...CREATURE_KINDS].sort(), 'every creature that has something to say');
   assert.deepEqual(SITUATIONS, ['idle', 'deployFailed', 'deployOk', 'harvest', 'merged', 'arrive']);

@@ -4,10 +4,11 @@
 // frame (the SDK and world.js, never drawn), twenty steps a second, and only while someone watches. Colyseus
 // carries it: a room for each world, its state sent as binary changes.
 //
-// A built-in world's code is this repo's: it runs in the collector's own process (live-world.mjs). A world from
-// your folder is yours: it runs shut in, inside QuickJS (a JavaScript engine in WebAssembly, the same on every
-// system) in a thread of its own (spawnWorld, live-child.mjs), started when the first browser shows it and
-// stopped when the last one leaves, a few at a time at most.
+// A world of api 2 (the SDK's simulation and the world's sim.js) runs shut in, inside QuickJS (a JavaScript
+// engine in WebAssembly, the same on every system) in a thread of its own (spawnWorld, live-child.mjs), started
+// when the first browser shows it and stopped when the last one leaves; of the worlds from your folder, a few
+// at a time at most. LEGACY: a built-in world of the pixel engine runs in the collector's own process
+// (live-world.mjs, loadWorld); one from your folder in a thread, as above.
 //
 // What goes out is made from the guest's snapshot (server.mjs, guestSnapshot): who is where, in what state,
 // with what tool. Nothing an agent or you said is in a room, so a guest's room and yours are the same room. A
@@ -26,9 +27,10 @@ import { join } from 'node:path';
 import { matchMaker, Room } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { schema, t } from '@colyseus/schema';
-import { loadWorld, SDK, TICK_MS } from './live-world.mjs';
+import { CORE, loadWorld, PLUGINS, SDK, TICK_MS } from './live-world.mjs';
+import { LEGACY_API } from './worlds.mjs';
 
-/** The built-in worlds: their code is this repo's, and runs in the collector's own process. */
+/** LEGACY. The built-in worlds of the pixel engine that are moved here: their code runs in the collector's own process. (A built-in world of api 2 is moved here without being named.) */
 export const LIVE_WORLDS = ['farm', 'factory'];
 /** A world from your folder: its key. */
 export const OWN_WORLD = /^u\/[a-z0-9][a-z0-9-]{0,39}$/;
@@ -76,23 +78,27 @@ function boot() {
   return booted;
 }
 
-/** A built-in world, run in this process without a page. Every call in is cut off when it never returns. */
+/** LEGACY. A built-in world of the pixel engine, run in this process without a page. Every call in is cut off when it never returns. */
 export function makeWorld(key, webDir, { warn = () => {} } = {}) {
   if (!LIVE_WORLDS.includes(key)) throw new Error(`no such world: ${key}`);
   return loadWorld({ webDir, worldFile: join(webDir, 'worlds', key, 'world.js'), scenes: 'snapshot', timeout: 250, warn });
 }
 
-/* ---------- a world from your folder: a thread of its own, shut in ---------- */
+/* ---------- a world in a thread of its own, shut in ---------- */
 
 let threads = 0;
 /**
- * A world from your folder, started in a thread of its own, inside QuickJS: what makeWorld gives, but every call
- * answers later (a promise), and one that is not answered in time ends the thread. The thread is handed the text
- * of the SDK and of world.js, and nothing else: no environment, no arguments, a small heap. `onGone(why)` when it
- * is no more.
+ * A world started in a thread of its own, inside QuickJS: every call answers later (a promise), and one that is
+ * not answered in time ends the thread. `source`: what the world is moved with (worlds.mjs, source()). The thread
+ * is handed text and nothing else (the SDK's simulation, the world's world.json and its sim.js; LEGACY: the pixel
+ * engine's scripts and the world's world.js): no environment, no arguments, a small heap. `onGone(why)` when it is
+ * no more.
  */
-export function spawnWorld({ worldFile, webDir, warn = () => {}, onGone = () => {} }) {
-  const workerData = { sdk: SDK.map(f => [f, readFileSync(join(webDir, f), 'utf8')]), world: readFileSync(worldFile, 'utf8') };
+export function spawnWorld({ source, webDir, warn = () => {}, onGone = () => {} }) {
+  const read = f => readFileSync(join(webDir, f), 'utf8');
+  const workerData = source.api === LEGACY_API
+    ? { api: source.api, sdk: SDK.map(f => [f, read(f)]), world: readFileSync(source.world, 'utf8') }
+    : { api: source.api, core: CORE.map(f => [f, read(`worlds/sdk/core/${f}`)]), plugins: read(PLUGINS), manifest: readFileSync(source.json, 'utf8'), sim: source.sim ? readFileSync(source.sim, 'utf8') : null };
   const worker = new Worker(CHILD, { workerData, env: {}, argv: [], execArgv: [], stdin: false, stdout: true, stderr: true, resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16, stackSizeMb: 4 } });
   worker.stdout.resume(); // (nothing of ours writes there: read away, never shown)
   worker.stderr.resume();
@@ -143,8 +149,8 @@ function makePrivatizer(webDir) {
   const window = {};
   const context = vm.createContext({ window });
   vm.runInContext(readFileSync(join(webDir, 'scene.js'), 'utf8'), context, { filename: 'scene.js' });
-  vm.runInContext('window.priv = json => JSON.stringify(window.AgentvilleScene.privateScene(window.AgentvilleScene.toScene(JSON.parse(json)))); window.names = () => JSON.stringify(window.AgentvilleScene.standIns());', context);
-  return { scene: json => window.priv(json), names: () => window.names() };
+  vm.runInContext('window.priv = json => JSON.stringify(window.AgentvilleScene.privateScene(window.AgentvilleScene.toScene(JSON.parse(json)))); window.whole = json => JSON.stringify(window.AgentvilleScene.toScene(JSON.parse(json))); window.names = () => JSON.stringify(window.AgentvilleScene.standIns());', context);
+  return { scene: json => window.priv(json), whole: json => window.whole(json), names: () => window.names() };
 }
 
 /* ---------- what a world from your folder says is looked at before it goes on to anyone ---------- */
@@ -212,7 +218,10 @@ class WorldRoom extends Room {
     if (!live) throw new Error('no such dashboard');
     this.live = live;
     this.key = options.world;
-    this.own = OWN_WORLD.test(this.key); // a world from your folder: a thread of its own
+    const source = LIVE_WORLDS.includes(this.key) ? { api: LEGACY_API } : live.source(this.key);
+    if (!source) throw new Error('no such world');
+    this.own = OWN_WORLD.test(this.key); // a world from your folder: it gets the private scene
+    this.shutIn = this.own || source.api !== LEGACY_API; // in a thread of its own: it answers later, and what it says is looked at
     this.state = new WorldState();
     Object.assign(this.state, { t: 0, wall: Date.now(), flights: '[]', taken: '', over: '{}', spare: 0, jobs: 0, names: '[]' });
     this.patchRate = TICK_MS;
@@ -229,17 +238,15 @@ class WorldRoom extends Room {
     this.chatterAt = null;
     this.watchers = new Map(); // a browser's own key → { id (its number here), clients: Set, gone: timer }
     this.nextViewer = 0;
-    if (this.own) {
-      const file = live.ownFile(this.key);
-      if (!file) throw new Error('no such world');
-      this.sim = live.start(this.key, file, why => { if (this.sim) { this.sim = null; live.log(`live: ${this.key} is moved by its browsers again: ${why}`); try { this.disconnect().catch(() => {}); } catch { /* still being made */ } } });
+    if (this.shutIn) {
+      this.sim = live.start(this.key, source, why => { if (this.sim) { this.sim = null; live.log(`live: ${this.key} is moved by its browsers again: ${why}`); try { this.disconnect().catch(() => {}); } catch { /* still being made */ } } });
       await this.sim.ready;
     } else {
       this.sim = makeWorld(this.key, live.webDir, { warn: m => live.log(`live: ${this.key}: ${m}`) });
     }
     live.rooms.add(this);
     await this.feed(live.guestJson(), live.chatter());
-    try { const st = await this.sim.step(0); this.show(this.own ? cleanState(st) : st); } catch (err) { this.fail(err); } // how it stands now: whoever joins is told at once, not a step later
+    try { const st = await this.sim.step(0); this.show(this.shutIn ? cleanState(st) : st); } catch (err) { this.fail(err); } // how it stands now: whoever joins is told at once, not a step later
     this.onMessage('act', (client, m) => this.act(client, m));
     this.onMessage('touch', (client, m) => this.touched(client, m));
     this.onMessage('name', (client, m) => this.named(client, m));
@@ -301,6 +308,7 @@ class WorldRoom extends Room {
         if (this.sim) put(this.state, 'names', this.live.private.names());
         return;
       }
+      if (this.shutIn) { await this.sim.scene(this.live.private.whole(json)); return; } // a built-in world of api 2: the whole scene, made here
       this.sim.scene(json);
       if (chatter && chatter.at !== this.chatterAt) { this.chatterAt = chatter.at; this.sim.chatter(chatter.lines); }
     } catch (err) { this.fail(err); }
@@ -310,7 +318,7 @@ class WorldRoom extends Room {
     this.late = Math.min(this.late + ms, 4 * TICK_MS); // never more than four steps behind: a stall is not caught up in a burst
     const n = Math.floor(this.late / TICK_MS);
     if (!n) return;
-    if (this.own) { // a thread of its own answers when it has stepped: no second step is asked meanwhile
+    if (this.shutIn) { // a thread of its own answers when it has stepped: no second step is asked meanwhile
       if (this.busy) return;
       this.late -= n * TICK_MS;
       this.busy = true;
@@ -448,22 +456,22 @@ class WorldRoom extends Room {
  * A tracker server's side of the rooms: the matchmaking request its page sends (joinOrCreate, reconnect), the
  * WebSocket its page then opens (on the server's own port), and the snapshots the rooms are fed.
  * `allowed(req)`: the request is to one of this dashboard's own names, from one of its own pages.
- * `ownFile(key)`: the real path of world.js of a world from your folder, or null when there is no such world.
+ * `source(key)`: what a world is moved with (worlds.mjs, source()), or null when there is no such world.
  */
-export function createLive({ httpServer, token, lan = false, webDir, getGuestJson, getChatter = () => null, ownFile = () => null, allowed = () => true, log = () => {} }) {
+export function createLive({ httpServer, token, lan = false, webDir, getGuestJson, getChatter = () => null, source = () => null, allowed = () => true, log = () => {} }) {
   const id = `d${++seq}${Math.random().toString(36).slice(2, 8)}`;
   const troubled = new Map(); // a world of yours → { n: how often it failed, until: left alone till then }
   const selfDrawn = new Set(); // worlds of yours that draw themselves (Agentville.raw): nothing in them to move, until their files change
   let privatizer = null, running = 0;
   const me = {
-    token, lan, webDir, rooms: new Set(), log, guestJson: getGuestJson, chatter: getChatter, ownFile,
+    token, lan, webDir, rooms: new Set(), log, guestJson: getGuestJson, chatter: getChatter, source,
     get private() { return (privatizer ??= makePrivatizer(webDir)); },
-    /** A world of yours, started in its own thread; counted, so only a few run at once. */
-    start(key, file, onGone) {
-      running++;
-      return spawnWorld({ worldFile: file, webDir, warn: m => log(`live: ${key}: ${m}`), onGone: why => {
-        running--;
-        if (why !== 'stopped') me.trouble(key);
+    /** A world started in its own thread. One of yours is counted, so only a few run at once, and is left alone for a while when it keeps failing. */
+    start(key, src, onGone) {
+      const mine = OWN_WORLD.test(key);
+      if (mine) running++;
+      return spawnWorld({ source: src, webDir, warn: m => log(`live: ${key}: ${m}`), onGone: why => {
+        if (mine) { running--; if (why !== 'stopped') me.trouble(key); }
         onGone(why);
       } });
     },
@@ -488,7 +496,9 @@ export function createLive({ httpServer, token, lan = false, webDir, getGuestJso
   /** May this world be moved here now? Why not, else null. */
   function refused(key) {
     if (LIVE_WORLDS.includes(key)) return null;
-    if (!OWN_WORLD.test(key) || !ownFile(key)) return 'no such world';
+    const src = source(key);
+    if (!src) return 'no such world';
+    if (!OWN_WORLD.test(key)) return src.api === LEGACY_API ? 'no such world' : null; // built in: a world of api 2 is moved here
     if (selfDrawn.has(key)) return 'it draws itself: there is nothing here to move';
     if ([...me.rooms].some(r => r.key === key)) return null; // it runs already: one more watcher costs nothing
     if ((troubled.get(key)?.until ?? 0) > Date.now()) return 'it failed too often: left alone for a few minutes';

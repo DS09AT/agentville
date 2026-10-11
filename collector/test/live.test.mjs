@@ -268,7 +268,7 @@ test("the page's library is this collector's own copy of the installed SDK, and 
 test("the factory shares where its AGVs drive: another factory takes it as it is, and, told, drives none itself", () => {
   const window = { Agentville: { raw() {} }, devicePixelRatio: 1 };
   const ctx = vm.createContext({ window, console });
-  for (const f of ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js', 'worlds/factory/world.js']) vm.runInContext(readFileSync(`${WEB}${f}`, 'utf8'), ctx, { filename: f });
+  for (const f of ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js', 'worlds/factory/world.js']) vm.runInContext(readFileSync(`${WEB}${f}`, 'utf8'), ctx, { filename: f });
   const F = window.AgentvilleFactory, plain = v => JSON.parse(JSON.stringify(v));
   const t = Date.now(), snap = snapshot();
   snap.agents[2] = { ...snap.agents[2], mcp: [{ server: 'notes', at: t }], now: { ...snap.agents[2].now, startedAt: t } };
@@ -370,8 +370,8 @@ test('a watcher names itself: plain text, told apart from the others, once a sec
 /** A folder of worlds: the starter under each name, and whatever `more` adds ({ name: world.js }). */
 function folder(names, more = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-live-'));
-  for (const name of names) cpSync(`${WEB}worlds/starter`, join(dir, name), { recursive: true });
-  for (const [name, js] of Object.entries(more)) { cpSync(`${WEB}worlds/starter`, join(dir, name), { recursive: true }); writeFileSync(join(dir, name, 'world.js'), js); }
+  for (const name of names) cpSync(`${WEB}worlds/legacy-starter`, join(dir, name), { recursive: true });
+  for (const [name, js] of Object.entries(more)) { cpSync(`${WEB}worlds/legacy-starter`, join(dir, name), { recursive: true }); writeFileSync(join(dir, name, 'world.js'), js); }
   return dir;
 }
 
@@ -492,11 +492,11 @@ test('the list of worlds says how many look at each just now: what its chip says
   const d = await dashboard({ userDir: folder(['demo']) });
   const list = async () => Object.fromEntries((await (await fetch(`${d.url}/api/worlds`, { headers: { 'x-tracker-token': 'tok' } })).json()).worlds.map(w => [w.key, w.online]));
   const settles = async (ok, ms = 6000) => { for (let t = 0; t < ms; t += 50) { if (await ok()) return true; await sleep(50); } return ok(); }; // (what is asked is itself awaited)
-  assert.deepEqual(await list(), { farm: 0, factory: 0, 'u/demo': 0 }, 'before anyone watches: nothing is started to count');
+  assert.deepEqual(await list(), { farm: 0, factory: 0, tennis: 0, 'u/demo': 0 }, 'before anyone watches: nothing is started to count');
   const a = await new Client(d.url).joinOrCreate('world', { world: 'farm', token: 'tok', viewer: 'viewer-aaaaaaaa' }), b = await new Client(d.url).joinOrCreate('world', { world: 'farm', viewer: 'viewer-bbbbbbbb' });
   const c = await new Client(d.url).joinOrCreate('world', { world: 'u/demo', viewer: 'viewer-bbbbbbbb' });
   try {
-    assert.deepEqual(await list(), { farm: 2, factory: 0, 'u/demo': 1 });
+    assert.deepEqual(await list(), { farm: 2, factory: 0, tennis: 0, 'u/demo': 1 });
     b.send('see', { on: false }); // its tab went out of sight
     assert.ok(await settles(async () => (await list()).farm === 1), 'one that looks away is not counted, as on the chip');
   } finally { await a.leave(); await b.leave(); await c.leave(); }
@@ -511,7 +511,7 @@ test("a guest may see which worlds there are (each is a room to watch), never wh
   writeFileSync(join(dir, 'broken', 'world.json'), '{ not json');
   const d = await dashboard({ lan: true, userDir: dir });
   const theirs = await (await fetch(`http://${own}:${d.port}/api/worlds`)).json();
-  assert.deepEqual(theirs.worlds.map(w => [w.key, w.error]), [['farm', null], ['factory', null], ['u/broken', 'It has something wrong with it.'], ['u/demo', null]]);
+  assert.deepEqual(theirs.worlds.map(w => [w.key, w.error]), [['farm', null], ['factory', null], ['tennis', null], ['u/broken', 'It has something wrong with it.'], ['u/demo', null]]);
   assert.equal(theirs.folder, null);
   assert.doesNotMatch(JSON.stringify(theirs), new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal((await fetch(`${d.url}/api/worlds`)).status, 403, 'on this Mac the token is still asked for');

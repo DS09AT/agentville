@@ -1,27 +1,63 @@
 // Worlds on disk. The built-in ones live in web/worlds/<key>/, the SDK in web/worlds/sdk/; each world is
-// a folder with world.json and world.js. This serves a world's files from inside its own folder only
-// (no way out through .., a hidden name or a symlink), and writes the page its sandboxed frame loads.
-// No dependencies.
+// a folder with world.json and what that names (docs/worlds.md, "What a world is"). This serves a world's
+// files from inside its own folder only (no way out through .., a hidden name or a symlink), and writes the
+// page its sandboxed frame loads.
+//
+// Two kinds of world run for now. A world of api 2 is the standard: its world.json describes it, the SDK
+// draws it with three.js. A world of api 1 is drawn by the pixel engine in web/worlds/legacy/, kept while
+// the worlds made for it are moved over: everything here that serves it is marked LEGACY, and
+// web/worlds/legacy/README.md lists what goes with it.
+import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, watch } from 'node:fs';
-import { extname, isAbsolute, join, sep } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, extname, isAbsolute, join, sep } from 'node:path';
+import { readManifest } from '../web/worlds/sdk/core/manifest.js';
 
-export const API_VERSION = 1;
+export const API_VERSION = 2;
+export const LEGACY_API = 1; // LEGACY: the pixel engine's worlds
 export const WORLD_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const RESERVED = new Set(['sdk', 'starter', 'test', 'u']);
-const HIDDEN = new Set(['starter']); // built in and runnable (the test page, new-world's template), never in the list
+const RESERVED = new Set(['sdk', 'legacy', 'starter', 'legacy-starter', 'test', 'u']);
+const HIDDEN = new Set(['starter', 'legacy-starter']); // built in and runnable (the test page, new-world's template), never in the list
 const TYPES = {
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css; charset=utf-8',
-  '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff2': 'font/woff2',
-  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
+  '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.woff2': 'font/woff2',
+  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.glb': 'model/gltf-binary',
 };
+// three.js, which draws the worlds of api 2: the files of the installed package the SDK loads, each under
+// the name the frame asks for (/world/sdk/three/…), and nothing else of it.
+const THREE_FILES = {
+  'three/three.module.js': 'build/three.module.js', 'three/three.core.js': 'build/three.core.js',
+  'three/addons/loaders/GLTFLoader.js': 'examples/jsm/loaders/GLTFLoader.js',
+  'three/addons/utils/BufferGeometryUtils.js': 'examples/jsm/utils/BufferGeometryUtils.js',
+  'three/addons/utils/SkeletonUtils.js': 'examples/jsm/utils/SkeletonUtils.js',
+};
+let threeDir;
+/** Where the three package is installed, or null where it is not (no `npm install` yet): a world of api 2 then can't draw. */
+function threeRoot() {
+  if (threeDir === undefined) {
+    try { threeDir = dirname(dirname(createRequire(import.meta.url).resolve('three'))); } catch { threeDir = null; }
+  }
+  return threeDir;
+}
 // The frame: a sandbox of its own even when opened in a tab, scripts only from the dashboard, no request
 // a world can read (no fetch, event stream, form or worker; pictures, fonts and sounds only from the
 // dashboard), and no other page loaded in a frame it makes. Only the dashboard may embed it. What a
 // frame can still signal (a connection hint, WebRTC, its one leaving request) is in docs/worlds.md,
 // "The gaps".
 export const FRAME_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+const IMPORT_MAP = /<script type="importmap">([\s\S]*?)<\/script>/;
+/**
+ * The policy a frame's page is served with: FRAME_CSP, and for a frame with an import map (a world of api 2:
+ * it tells the browser where `three` is) that one inline block, by its hash. No other inline script runs.
+ */
+export function frameCsp(html) {
+  const map = IMPORT_MAP.exec(html);
+  return map ? FRAME_CSP.replace("script-src 'self'", `script-src 'self' 'sha256-${createHash('sha256').update(map[1]).digest('base64')}'`) : FRAME_CSP;
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NOUN_KEYS = ['agent', 'agents', 'repo', 'repos', 'start', 'diary'];
+/** A frame's template with its `__NAME__` marks filled in, in one pass: what is written in is never read for marks again, so a world's name or its world.json can't stand in for one. */
+const fill = (html, parts) => html.replace(/__([A-Z]+)__/g, (mark, name) => (Object.hasOwn(parts, name) ? parts[name] : mark));
+const NOUN_KEYS = ['agent', 'agents', 'repo', 'repos', 'place', 'start', 'diary'];
 const MAX_JSON = 64 * 1024;
 const NOT_FOUND = { status: 404, error: 'not found' };
 
@@ -31,9 +67,11 @@ export function checkWorldJson(j) {
   if (typeof j.name !== 'string' || !j.name.trim() || j.name.length > 40) return 'world.json needs a "name", up to 40 characters.';
   if (j.icon !== undefined && (typeof j.icon !== 'string' || [...j.icon].length > 8)) return 'world.json: "icon" is one emoji.';
   if (j.description !== undefined && (typeof j.description !== 'string' || j.description.length > 140)) return 'world.json: "description" is up to 140 characters.';
-  if (!Number.isInteger(j.api) || j.api < 1) return 'world.json needs "api": 1.';
+  if (!Number.isInteger(j.api) || j.api < 1) return `world.json needs "api": ${API_VERSION}.`;
   if (j.api > API_VERSION) return `This world needs a newer Agentville (it was made for api ${j.api}; this one has ${API_VERSION}).`;
   if (j.nouns !== undefined && (!j.nouns || typeof j.nouns !== 'object' || Array.isArray(j.nouns) || NOUN_KEYS.some(k => j.nouns[k] !== undefined && (typeof j.nouns[k] !== 'string' || j.nouns[k].length > 30)))) return 'world.json: "nouns" are short words.';
+  if (j.api !== LEGACY_API) { try { readManifest(j); return null; } catch (err) { return err.message; } }
+  // LEGACY: what only a world of the pixel engine says
   if (j.taken !== undefined && (!Array.isArray(j.taken) || j.taken.length > 16 || j.taken.some(k => typeof k !== 'string' || !/^[a-z][a-z0-9-]{0,23}$/.test(k)))) return 'world.json: "taken" is a list of up to 16 short kind names (the shapes this world already uses for data).';
   return null;
 }
@@ -86,7 +124,7 @@ export function makeWorlds({ builtinDir, userDir = null, home = null }) {
   const DEAD_ERR = "This folder is a link to something that isn't there.";
   /** A world's folder from its key ('sdk' is the SDK's, 'u/<name>' one of yours); null for a key that names none. */
   function dirOf(key) {
-    if (key === 'sdk') return join(builtinDir, 'sdk');
+    if (key === 'sdk' || key === 'legacy') return join(builtinDir, key); // (LEGACY: 'legacy', the pixel engine's files)
     if (key.startsWith('u/')) {
       const name = key.slice(2);
       if (!userDir || !WORLD_NAME.test(name)) return null;
@@ -100,8 +138,12 @@ export function makeWorlds({ builtinDir, userDir = null, home = null }) {
   function file(key, rel) {
     const dir = dirOf(key), type = TYPES[extname(rel).toLowerCase()];
     if (!dir || !type || rel.split('/').some(p => p === '' || p === '..' || p.startsWith('.'))) return NOT_FOUND;
-    if (key === 'sdk' && rel === 'frame.html') return NOT_FOUND;
     try {
+      if (key === 'sdk' && rel.startsWith('three/')) { // three.js: from the installed package, by name
+        if (!Object.hasOwn(THREE_FILES, rel) || !threeRoot()) return NOT_FOUND;
+        const real = realpathSync(join(threeRoot(), THREE_FILES[rel]));
+        return { real, type, size: statSync(real).size };
+      }
       const root = realpathSync(dir), real = realpathSync(join(dir, rel)), st = statSync(real);
       if (!real.startsWith(root + sep) || !st.isFile()) return NOT_FOUND;
       return { real, type, size: st.size };
@@ -116,14 +158,21 @@ export function makeWorlds({ builtinDir, userDir = null, home = null }) {
     else if (meta.size > MAX_JSON) error = 'world.json is too large (over 64 KB).';
     else try { if (!meta.real) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); j = JSON.parse(readFileSync(meta.real, 'utf8')); }
     catch (err) { error = err.code === 'ENOENT' ? 'world.json is missing.' : `world.json can't be read: ${String(err.message).slice(0, 120)}`; }
-    error ??= checkWorldJson(j) ?? (file(key, 'world.js').real ? null : 'world.js is missing (or is a link out of the folder).');
+    const api = Number.isInteger(j?.api) ? j.api : null;
+    error ??= checkWorldJson(j);
+    if (!error && api === LEGACY_API && !file(key, 'world.js').real) error = 'world.js is missing (or is a link out of the folder).'; // LEGACY
+    if (!error && api !== LEGACY_API) {
+      const gone = readManifest(j).assets.find(a => !file(key, a).real);
+      if (gone) error = `${gone} is missing (or is a link out of the folder).`;
+      else if (!threeRoot()) error = 'three.js is not installed: install Agentville again.';
+    }
     return {
-      key, builtIn, error,
+      key, builtIn, error, api,
       name: typeof j?.name === 'string' && j.name.trim() ? j.name.slice(0, 40) : key.replace(/^u\//, ''),
       icon: typeof j?.icon === 'string' && j.icon.trim() &&[...j.icon].length <= 8 ? j.icon : '🧩',
       description: typeof j?.description === 'string' ? j.description.slice(0, 140) : '',
       nouns: !error && j.nouns ? Object.fromEntries(NOUN_KEYS.filter(k => typeof j.nouns[k] === 'string').map(k => [k, j.nouns[k]])) : {},
-      taken: !error && Array.isArray(j?.taken) ? [...j.taken] : [], // the shapes it uses for data: its creatures can't (docs/worlds.md, "Creatures")
+      taken: !error && Array.isArray(j?.taken) ? [...j.taken] : [], // LEGACY: the shapes it uses for data: its creatures can't (docs/worlds-legacy.md, "Creatures")
       preview: file(key, 'preview.png').real ? `/world/${key}/preview.png` : null,
     };
   }
@@ -154,15 +203,34 @@ export function makeWorlds({ builtinDir, userDir = null, home = null }) {
     const w = HIDDEN.has(key) ? describe(key, true) : list().find(x => x.key === key);
     return w && !w.error ? w : null;
   }
-  /** The page a world's frame loads (web/worlds/sdk/frame.html filled in), or null for a world that can't run. */
+  /** The page a world's frame loads (the SDK's frame.html filled in), or null for a world that can't run. */
   function frame(key) {
     const w = info(key);
     if (!w) return null;
-    return readFileSync(join(builtinDir, 'sdk', 'frame.html'), 'utf8')
-      .replaceAll('__TITLE__', () => esc(w.name))
-      .replaceAll('__BASE__', () => `/world/${key}/`);
+    if (w.api === LEGACY_API) { // LEGACY: the pixel engine's frame
+      return fill(readFileSync(join(builtinDir, 'legacy', 'frame.html'), 'utf8'), { TITLE: esc(w.name), BASE: `/world/${key}/` });
+    }
+    // Every address in it is relative to the frame's own (/world/<key>/), so a guest's pass in the path carries over.
+    const worlds = key.startsWith('u/') ? '../../' : '../';
+    const script = name => `<script src="${name}.js" crossorigin="anonymous"></script>`;
+    const world = JSON.stringify({ key, manifest: JSON.parse(readFileSync(file(key, 'world.json').real, 'utf8')) }).replaceAll('<', '\\u003c'); // (a "<" could end the block it is written into)
+    return fill(readFileSync(join(builtinDir, 'sdk', 'frame.html'), 'utf8'), {
+      TITLE: esc(w.name), ROOT: `${worlds}../`, WORLDS: worlds, WORLD: world,
+      SIM: file(key, 'sim.js').real ? script('sim') : '', // its own code, where it has any: rules for who stands where,
+      VIEW: file(key, 'view.js').real ? script('view') : '', // and looks of its own
+    });
   }
-  return { dirOf, file, info, list, frame, userDir };
+  /**
+   * What the collector moves a world with (collector/live.mjs): { api, json, sim } for a world of api 2 (its
+   * world.json, and its sim.js or null), { api, world } for one of the pixel engine (its world.js); null for a
+   * world that can't run. Real paths, inside the world's folder.
+   */
+  function source(key) {
+    const w = info(key);
+    if (!w) return null;
+    return w.api === LEGACY_API ? { api: w.api, world: file(key, 'world.js').real } : { api: w.api, json: file(key, 'world.json').real, sim: file(key, 'sim.js').real ?? null };
+  }
+  return { dirOf, file, info, list, frame, source, userDir };
 }
 
 /**
@@ -182,7 +250,7 @@ export function watchWorlds({ builtinDir, userDir }, onChange, { quietMs = 200 }
     const top = String(rel ?? '').split(/[\\/]/)[0];
     if (!top) return null;
     if (mine) return WORLD_NAME.test(top) ? `u/${top}` : null;
-    if (top === 'sdk') return '*';
+    if (top === 'sdk' || top === 'legacy') return '*';
     return WORLD_NAME.test(top) && (!RESERVED.has(top) || HIDDEN.has(top)) ? top : null;
   };
   const watchDir = (dir, mine) => {

@@ -49,7 +49,7 @@
     send('see', { on });
   }
 
-  /** A state, as the world's frame takes it (sdk/engine.js, makeMirror): plain lists, positions in world pixels, of what the world shares only what changed. */
+  /** A state, as the world's frame takes it (sdk/core/wire.js, fromWire; LEGACY: legacy/engine.js, makeMirror): plain lists, positions in the room's measure, of what the world shares only what changed. */
   function hand(state) {
     if (!handlers || !state?.bodies) return;
     tellWatchers(state);
@@ -62,8 +62,10 @@
     for (const [id, text] of own) says.set(id, text);
     let w = null;
     state.shared.forEach((json, k) => { if (sentShared.get(k) !== json) { sentShared.set(k, json); (w ??= {})[k] = json; } });
+    let wk = null; // the keys the world shares now, said when one of them is gone (a world of api 2 then forgets it)
+    for (const k of [...sentShared.keys()]) if (!state.shared.has(k)) { sentShared.delete(k); wk = [...sentShared.keys()]; }
     const f = state.flights === lastFlights ? flights : (flights = (v => (Array.isArray(v) ? v : []))(parse(lastFlights = state.flights)));
-    handlers.state({ t: state.t, wl: state.wall, b, a, says: [...says], taken: state.taken ? state.taken.split(',') : [], o: parse(state.over), sp: state.spare, j: state.jobs, f, ...(w ? { w } : {}) });
+    handlers.state({ t: state.t, wl: state.wall, b, a, says: [...says], taken: state.taken ? state.taken.split(',') : [], o: parse(state.over), sp: state.spare, j: state.jobs, f, ...(w ? { w } : {}), ...(wk ? { wk } : {}) });
   }
 
   /**

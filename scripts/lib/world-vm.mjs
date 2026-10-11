@@ -1,3 +1,4 @@
+// LEGACY: check-world for a world of the pixel engine (api 1); a world of api 2 is checked by sim-check.mjs.
 // A world run headless, for check-world and its tests: the SDK and a world's world.js in a node:vm context,
 // with a stand-in DOM and canvases that record what they draw. Each stop of the tour (web/worlds/test/tour.js)
 // is given to the world as the page would give it, frames are stepped by hand, and every exception is caught
@@ -15,15 +16,15 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WEB = join(ROOT, 'web');
 // The frame's scripts before world.js, in frame.html's order (the animals kit's when it is there); scene.js
 // too, for toScene and privateScene, as the page has them.
-const SDK = ['scene.js', 'brand.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js'].filter(f => existsSync(join(WEB, f)));
+const SDK = ['scene.js', 'brand.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'].filter(f => existsSync(join(WEB, f)));
 const TOUR = join(WEB, 'worlds', 'test', 'tour.js');
 /** Every file a check reads besides the world's own folder: this module, what it imports, the SDK and the tour. */
-export const FILES = [fileURLToPath(import.meta.url), join(ROOT, 'collector', 'worlds.mjs'), join(ROOT, 'scripts', 'lib', 'plain-text.mjs'), ...SDK.map(f => join(WEB, f)), TOUR];
+export const FILES = [fileURLToPath(import.meta.url), join(ROOT, 'collector', 'worlds.mjs'), ...['manifest.js', 'steps.js'].map(f => join(WEB, 'worlds', 'sdk', 'core', f)), join(ROOT, 'scripts', 'lib', 'plain-text.mjs'), ...SDK.map(f => join(WEB, f)), TOUR];
 const REQUIRED = ['W', 'slots', 'drawChar', 'bg', 'grid'];
 const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h.toString(36); };
 const NUMBERS = new Set(['offsetWidth', 'offsetHeight', 'clientWidth', 'clientHeight', 'scrollLeft', 'scrollTop', 'scrollWidth', 'scrollHeight', 'width', 'height', 'length', 'size']);
 
-// The animals kit's rules (docs/worlds.md, "Creatures"). The effects the engine draws for an action
+// The animals kit's rules (docs/worlds-legacy.md, "Creatures"). The effects the engine draws for an action
 // (engine.js, showFx); the poses every creature is drawn in (creatures.js, its POSE_AS too, and
 // animals.js's stand and happy), and the duck's and the ostrich's own (the duck's slide is on ice);
 // the looks a kind has (the duck's, creatures.js); 40 characters a line (animals.js, LINE_MAX).

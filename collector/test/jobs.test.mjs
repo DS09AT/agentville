@@ -1,4 +1,4 @@
-// What is asked of the animals (web/worlds/sdk/animals.js, makeJobs): who goes, in what order, how many at once,
+// What is asked of the animals (web/worlds/legacy/animals.js, makeJobs): who goes, in what order, how many at once,
 // and what a watcher's kit is told of the animals (state, adopt). A little world of its own stands in for the
 // engine: farmers walk straight to wherever their job sends them, at a farmer's pace.
 import { test } from 'node:test';
@@ -12,7 +12,7 @@ function load() {
   const window = { Agentville: {} };
   const sandbox = { window, console, Math, Date, JSON, Map, Set, __ctx: { fillRect() {}, set fillStyle(_) {} } };
   vm.createContext(sandbox);
-  vm.runInContext(`${['worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js'].map(web).join('\n;\n')}\n;PXG.ctx = __ctx; window.kit = { makeAnimals, seededRandom, makeJobs };`, sandbox);
+  vm.runInContext(`${['worlds/legacy/pixel.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js'].map(web).join('\n;\n')}\n;PXG.ctx = __ctx; window.kit = { makeAnimals, seededRandom, makeJobs };`, sandbox);
   return window.kit;
 }
 const plain = v => JSON.parse(JSON.stringify(v));

@@ -1,5 +1,5 @@
 // The farm: the first world. Every agent is a farmer, every repo a field. It runs in a sandboxed frame
-// (web/worlds/sdk/frame.html) and reaches the page only through the bridge (web/worlds/sdk/bridge.js).
+// (web/worlds/legacy/frame.html) and reaches the page only through the bridge (web/worlds/sdk/bridge.js).
 // Classic script, no dependencies. The canvas code reads only the scene farmScene() builds from the
 // page's scene; text (names, signs, counts) is HTML laid over the canvas so it stays crisp.
 (() => {
@@ -1758,7 +1758,7 @@
       px(pony - 3 + step, y - 1, 1, 2, '#6b4320'); px(pony + 1 - step, y - 1, 1, 2, '#6b4320'); px(pony - dir * 4, y - 4, 1, 2, '#4e3626');
     }
     const FIREFLIES = [[20, 150], [60, 160], [92, 176], [30, 232], [74, 196], [50, 252], [100, 250], [14, 262], [88, 140], [96, 214], [240, 92], [330, 70]];
-    // The farm's animals (sdk/animals.js): just for fun, never data. What lives on a farm: cows, goats, sheep, a pig, a
+    // The farm's animals (legacy/animals.js): just for fun, never data. What lives on a farm: cows, goats, sheep, a pig, a
     // horse, a goose, a sheepdog, ducks, cats and mice (and a unicorn that only visits). They keep to the pasture (the yard and
     // the meadow below the fields: roam()), never on a bed, in use or fallow (its crops, hay, crates and mailbox are the repo's
     // state), into a building, the hammocks or the henhouse. No chickens (subagents), and the dog is a sheepdog (the Explore dog
@@ -1814,7 +1814,7 @@
       // A unicorn, now and then (every 3 to 8 minutes, for 20 to 40 s), anywhere the animals may walk: shy, with nothing to say and no menu. Touch it and it is gone.
       { kind: 'unicorn', name: 'Unicorn', visits: { every: [180, 480], stay: [20, 40] }, reacts: { deployFailed: 'scatter', deployOk: null, harvest: null }, actions: [], lines: {} },
     ];
-    // Now and then they get up to something (sdk/animals.js, gags): the steps play out with farmers the engine lends.
+    // Now and then they get up to something (legacy/animals.js, gags): the steps play out with farmers the engine lends.
     const FARM_GAGS = [
       { id: 'hat', needs: { goat: 1, farmer: 'idle' }, steps: [{ go: 'goat', to: 'farmer' }, { wear: 'goat', what: 'hat', on: true }, { say: 'goat', line: 'hat' }, { go: 'goat', to: 'away', run: true, ms: 3000 }, { chase: 'farmer', after: 'goat', ms: 3000 }, { wear: 'goat', what: 'hat', on: false }] },
       { id: 'nibble', needs: { goat: 1, farmer: 'busy' }, steps: [{ go: 'goat', to: 'farmer', ms: 6000 }, { wear: 'goat', what: 'hat', on: true }, { say: 'goat', line: 'nibble' }, { wait: 3000 }, { wear: 'goat', what: 'hat', on: false }, { go: 'goat', to: 'away' }] }, // it keeps working, hatless 3 s

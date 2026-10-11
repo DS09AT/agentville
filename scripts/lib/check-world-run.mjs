@@ -1,3 +1,4 @@
+// LEGACY: for a world of the pixel engine (api 1); check-sim-run.mjs is the one for a world of api 2.
 // The contained half of npm run check-world (scripts/check-world.mjs starts it): checks one world and prints
 // the report. It runs only under Node's permission model with no writes, programs or workers allowed
 // (scripts/lib/contained.mjs), and refuses to run otherwise. Every word of the world's in the report goes

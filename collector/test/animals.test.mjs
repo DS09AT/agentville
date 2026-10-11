@@ -1,4 +1,4 @@
-// The animals kit (web/worlds/sdk/animals.js), on a seeded random source and a stand-in canvas:
+// The animals kit (web/worlds/legacy/animals.js), on a seeded random source and a stand-in canvas:
 // where creatures may be, what they do over time, clicks, lines, actions; who goes, and errands.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,7 @@ function load() {
   const window = { Agentville: {} };
   const sandbox = { window, console, Math, Date, JSON, Map, Set, __ctx: { fillRect() {}, set fillStyle(_) {} } };
   vm.createContext(sandbox);
-  vm.runInContext(`${['worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js'].map(web).join('\n;\n')}\n;PXG.ctx = __ctx; window.kit = { makeAnimals, seededRandom, chooseDoer, makeErrands, CREATURES };`, sandbox);
+  vm.runInContext(`${['worlds/legacy/pixel.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js'].map(web).join('\n;\n')}\n;PXG.ctx = __ctx; window.kit = { makeAnimals, seededRandom, chooseDoer, makeErrands, CREATURES };`, sandbox);
   return window.kit;
 }
 const plain = v => JSON.parse(JSON.stringify(v));
@@ -247,7 +247,7 @@ test('a world of your own may use the same short names as the kit (INK, inRect, 
   const window = { Agentville: {} };
   const sandbox = { window, console, Math, Date, JSON, Map, Set };
   vm.createContext(sandbox);
-  assert.doesNotThrow(() => vm.runInContext(`${['worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js'].map(web).join('\n;\n')}\n;const INK = 1, inRect = 2, legStep = 3, LINE_MAX = 4, LINE_S = 5, LINES_AT_ONCE = 6;`, sandbox));
+  assert.doesNotThrow(() => vm.runInContext(`${['worlds/legacy/pixel.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js'].map(web).join('\n;\n')}\n;const INK = 1, inRect = 2, legStep = 3, LINE_MAX = 4, LINE_S = 5, LINES_AT_ONCE = 6;`, sandbox));
 });
 
 test('with motion off, time still passes for the lines: they go after 4 s, though nothing moves', () => {
@@ -518,9 +518,9 @@ test('a gag whose creature can’t get to its farmer (in a field) ends: no hat t
   assert.ok(!near.log.some(l => l[0] === 'send'), 'a busy farmer is never sent');
 });
 
-test('the guide’s cat with a gag runs as written (docs/worlds.md, "Gags and play")', () => {
+test('the guide’s cat with a gag runs as written (docs/worlds-legacy.md, "Gags and play")', () => {
   const k = load();
-  const guide = readFileSync(fileURLToPath(new URL('../../docs/worlds.md', import.meta.url)), 'utf8');
+  const guide = readFileSync(fileURLToPath(new URL('../../docs/worlds-legacy.md', import.meta.url)), 'utf8');
   const block = guide.split('The same cat with habits')[1].match(/```js\n([\s\S]*?)```/)[1];
   const hooks = vm.runInNewContext(`({ ${block} })`, {});
   const warns = [];

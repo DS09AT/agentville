@@ -1,0 +1,96 @@
+{
+  "name": "Tennis club",
+  "icon": "🎾",
+  "description": "Every agent a player, every repo a court",
+  "api": 2,
+  "nouns": { "agent": "player", "agents": "players", "repo": "court", "repos": "courts", "place": "club", "start": "clubhouse", "diary": "Club diary" },
+  "help": "Players at work rally on their repo's court. Whoever needs you waits at reception, in front of the clubhouse; the rest sit on the terrace.",
+  "ground": { "size": [46, 28], "color": "#3f7d4a" },
+  "camera": { "view": "tilt", "yaw": -24, "pitch": 30 },
+  "sky": { "day": "#bfe3ff", "night": "#0c1330" },
+  "spawn": [6, 6.2],
+  "figure": {
+    "model": "assets/player.glb",
+    "height": 1.75,
+    "tint": "Shirt",
+    "hand": "HandR",
+    "clips": { "idle": "Stand", "walk": "Walk", "work": "Swing", "wait": "Wave", "sleep": "Rest" }
+  },
+  "steps": {
+    "edit": { "model": "assets/racket.glb" },
+    "write": { "model": "assets/racket.glb" },
+    "test": { "model": "assets/racket.glb" },
+    "build": { "model": "assets/racket.glb" },
+    "shell": { "model": "assets/racket.glb" },
+    "lint": { "model": "assets/racket.glb" },
+    "other": { "model": "assets/racket.glb" }
+  },
+  "places": {
+    "wait": { "name": "Reception", "row": { "from": [11.5, 7.2], "step": [1.25, 0], "count": 12 } },
+    "idle": { "name": "Terrace", "grid": { "from": [33, 3.6], "step": [1.5, 1.9], "cols": 6, "count": 12 }, "face": [0, 1] }
+  },
+  "plots": {
+    "grid": { "origin": [6.4, 13.4], "step": [6.6, 5], "cols": 6 },
+    "size": [5.8, 3.9],
+    "work": [[-1.7, 0], [1.7, 0], [-1.7, 0.95], [1.7, -0.95], [-1.7, -0.95], [1.7, 0.95]],
+    "face": { "to": [0, 0] },
+    "label": [0, 2.1],
+    "scenery": [
+      { "shape": "plane", "size": [5.8, 3.9], "color": "#2f6fa8" },
+      { "shape": "plane", "size": [5.3, 0.07], "each": [[0, -1.7], [0, 1.7]], "y": 0.02, "color": "#ffffff" },
+      { "shape": "plane", "size": [0.07, 3.4], "each": [[-2.65, 0], [2.65, 0], [-1.3, 0], [1.3, 0]], "y": 0.02, "color": "#ffffff" },
+      { "shape": "plane", "size": [2.6, 0.07], "at": [0, 0], "y": 0.02, "color": "#ffffff" },
+      { "shape": "box", "size": [0.05, 0.5, 3.6], "at": [0, 0], "y": 0.05, "color": "#f4ecd8", "opacity": 0.55 },
+      { "shape": "cylinder", "size": [0.09, 0.62, 0.09], "each": [[0, -1.82], [0, 1.82]], "color": "#3a3a40" },
+      { "shape": "plane", "size": [5.3, 0.2], "at": [0, 1.86], "y": 0.03, "color": "#ffd43b", "shows": "context", "tip": "How much of their context the players here have used" },
+      { "shape": "cylinder", "size": [0.08, 1.5, 0.08], "at": [2.72, -1.82], "color": "#3a3a40" },
+      { "shape": "box", "size": [0.75, 0.48, 0.08], "at": [2.3, -1.82], "y": 1.05, "color": "#9aa4ad", "shows": "deploy", "tip": "The scoreboard: the last deploy (green ok, red failed, amber running)" },
+      { "shape": "cone", "size": [0.5, 0.75, 0.5], "at": [2.6, 1.5], "color": "#ff8c42", "shows": "collision", "tip": "Two agents write here at once" },
+      { "shape": "cylinder", "size": [0.1, 2.6, 0.1], "at": [-2.75, -1.82], "color": "#5f6b7a", "shows": "busy" },
+      { "shape": "box", "size": [0.6, 0.22, 0.3], "at": [-2.6, -1.75], "y": 2.5, "color": "#fff4d6", "glow": true, "shows": "busy" }
+    ],
+    "empty": [
+      { "shape": "plane", "size": [5.8, 3.9], "color": "#4a8a55" },
+      { "shape": "plane", "size": [5.3, 0.07], "each": [[0, -1.7], [0, 1.7]], "y": 0.02, "color": "#6aa474" },
+      { "shape": "plane", "size": [0.07, 3.4], "each": [[-2.65, 0], [2.65, 0]], "y": 0.02, "color": "#6aa474" }
+    ]
+  },
+  "paths": [
+    [[1.5, 8.9], [44.5, 8.9]],
+    [[2.7, 8.9], [2.7, 26.2]],
+    [[43.5, 8.9], [43.5, 26.2]],
+    [[23, 8.9], [23, 26.2]],
+    [[9.7, 10.9], [9.7, 26.2]],
+    [[16.3, 10.9], [16.3, 26.2]],
+    [[29.5, 10.9], [29.5, 26.2]],
+    [[36.1, 10.9], [36.1, 26.2]],
+    [[2.7, 10.9], [43.5, 10.9]],
+    [[2.7, 15.9], [43.5, 15.9]],
+    [[2.7, 20.9], [43.5, 20.9]],
+    [[2.7, 26.2], [43.5, 26.2]]
+  ],
+  "prefabs": {
+    "chair": [
+      { "shape": "box", "size": [0.9, 0.08, 0.5], "y": 0.32, "color": "#f4ecd8" },
+      { "shape": "box", "size": [0.9, 0.6, 0.08], "at": [0, -0.24], "y": 0.32, "color": "#3d7be0" },
+      { "shape": "box", "size": [0.08, 0.32, 0.5], "each": [[-0.4, 0], [0.4, 0]], "color": "#c3cbd2" }
+    ],
+    "parasol": [
+      { "shape": "cylinder", "size": [0.08, 2.3, 0.08], "color": "#c3cbd2" },
+      { "shape": "cone", "size": [2.6, 0.7, 2.6], "y": 2.1, "color": "#e04a3a" }
+    ]
+  },
+  "scenery": [
+    { "shape": "plane", "size": [43, 1.3], "at": [23, 8.9], "color": "#d9c7a0" },
+    { "shape": "plane", "size": [11, 5.4], "at": [36.7, 4.3], "color": "#c9a46a" },
+    { "shape": "box", "size": [7, 3, 4], "at": [6, 3.4], "color": "#f4ecd8", "opens": "session", "tip": "The clubhouse: start a session" },
+    { "shape": "box", "size": [7.6, 0.4, 4.6], "at": [6, 3.4], "y": 3, "color": "#2c4a85", "opens": "session", "tip": "The clubhouse: start a session" },
+    { "shape": "box", "size": [1.2, 2, 0.1], "at": [6, 5.42], "color": "#2c4a85", "opens": "session", "tip": "The clubhouse: start a session" },
+    { "shape": "box", "size": [1, 0.9, 0.1], "each": [[3.9, 5.42], [8.1, 5.42]], "y": 1.2, "color": "#ffe8a3", "glow": true },
+    { "shape": "box", "size": [2.6, 1.5, 0.12], "at": [27, 4.6], "y": 0.8, "color": "#f4ecd8", "opens": "board", "tip": "The notice board: what your projects remember" },
+    { "shape": "cylinder", "size": [0.14, 0.8, 0.14], "each": [[26, 4.6], [28, 4.6]], "color": "#3a3a40" },
+    { "use": "chair", "each": [[33, 3.1], [34.5, 3.1], [36, 3.1], [37.5, 3.1], [39, 3.1], [40.5, 3.1], [33, 5], [34.5, 5], [36, 5], [37.5, 5], [39, 5], [40.5, 5]] },
+    { "use": "parasol", "each": [[32.2, 2.4], [36.7, 2.4], [41.2, 2.4]] },
+    { "model": "assets/cypress.glb", "each": [[1.4, 1.6], [1.4, 5.2], [13, 2], [17.5, 2.6], [22, 1.8], [44.6, 1.8], [44.8, 11.5], [44.8, 16.5], [44.8, 21.5], [44.8, 26.3], [1.2, 12], [1.2, 17], [1.2, 22], [1.2, 26.5]] }
+  ]
+}

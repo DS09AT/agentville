@@ -23,8 +23,9 @@ async function start(opts = {}) {
   writeFileSync(join(webFile, '..', 'base.css'), ':root { --page: #fff; }');
   const builtinDir = join(webFile, '..', 'worlds');
   mkdirSync(join(builtinDir, 'sdk'), { recursive: true });
+  mkdirSync(join(builtinDir, 'legacy'));
   mkdirSync(join(builtinDir, 'farm'));
-  writeFileSync(join(builtinDir, 'sdk', 'frame.html'), '<title>__TITLE__</title><script src="__BASE__world.js"></script>');
+  writeFileSync(join(builtinDir, 'legacy', 'frame.html'), '<title>__TITLE__</title><script src="__BASE__world.js"></script>');
   writeFileSync(join(builtinDir, 'sdk', 'bridge.js'), '// bridge');
   writeFileSync(join(builtinDir, 'farm', 'world.json'), JSON.stringify({ name: 'Farm', icon: '🌾', api: 1 }));
   writeFileSync(join(builtinDir, 'farm', 'world.js'), '// farm');
@@ -121,7 +122,7 @@ test('the world test page: no token, never framed, its scripts by plain name onl
     assert.ok(!page.body.includes('secret'), 'no token in the page');
     assert.ok(page.body.includes('__TRACKER_TOKEN__'), 'its placeholder is left as it is');
     assert.match(page.headers['content-security-policy'], /frame-ancestors 'none'/);
-    assert.match(page.headers['content-security-policy'], /(^|; )connect-src 'none'(;|$)/, 'it fetches nothing, by policy: not even /api/state');
+    assert.match(page.headers['content-security-policy'], new RegExp(`(^|; )connect-src http://127\\.0\\.0\\.1:${port}/world/(;|$)`), "it fetches a world's own files and nothing else, by policy: not even /api/state");
     assert.equal(page.headers['x-frame-options'], 'DENY');
     assert.equal((await get('/worlds/test/tour.js')).status, 200);
     assert.equal((await get('/worlds/test/tour.js')).headers['content-type'], 'text/javascript; charset=utf-8');
@@ -619,7 +620,7 @@ test("a world's files: typed, sandboxed, never cached (they change while you wri
   assert.equal(js.headers['cache-control'], 'no-store');
   assert.equal((await request(port, { path: '/world/sdk/bridge.js' })).body, '// bridge');
   // (A literal /world/farm/%2e%2e/ is folded to /world/ by the URL parser before routing, so it can't escape either.)
-  for (const path of ['/world/farm/art%2f..%2f..%2fsdk%2fbridge.js', '/world/farm/..%2fsdk%2fbridge.js', '/world/sdk/frame.html', '/world/farm/world.json%00.js']) {
+  for (const path of ['/world/farm/art%2f..%2f..%2fsdk%2fbridge.js', '/world/farm/..%2fsdk%2fbridge.js', '/world/legacy/frame.html', '/world/farm/world.json%00.js']) {
     assert.equal((await request(port, { path })).status, 404, path);
   }
   await srv.close();

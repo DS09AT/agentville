@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A picture of the people and props kits for docs/worlds.md (docs/kits.png): every hat, top, bottom and
+// A picture of the people and props kits for docs/worlds-legacy.md (docs/kits.png): every hat, top, bottom and
 // extra, from the front, behind and the side and in the walking frames, and every prop in a person's hands,
 // drawn by the kits themselves. Run it when a kit changes. No dependencies; needs Chrome (CHROME to set its path).
 //
@@ -12,7 +12,7 @@ import { openChrome, sleep } from './lib/cdp.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const at = process.argv.indexOf('--out');
 const OUT = join(ROOT, at > 0 ? process.argv[at + 1] : 'docs/kits.png');
-const sdk = f => readFileSync(join(ROOT, 'web', 'worlds', 'sdk', f), 'utf8').replaceAll('</script', '<\\/script');
+const sdk = f => readFileSync(join(ROOT, 'web', 'worlds', 'legacy', f), 'utf8').replaceAll('</script', '<\\/script');
 // Drawn in the page: sections of labelled cells, 12 to a line, 4× scale.
 const SHEET = `(() => {
   const P = window.Agentville.people, K = window.Agentville.props, S = 4, CELL = 26, PER = 12, LABEL = 16, TITLE = 26, PAD = 16;

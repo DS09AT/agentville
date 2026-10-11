@@ -1,4 +1,4 @@
-// A world the collector moves, from both ends (web/worlds/sdk/engine.js): the collector's (headless: it steps the
+// A world the collector moves, from both ends (web/worlds/legacy/engine.js): the collector's (headless: it steps the
 // world and says how it stands) and a browser's (it is told, and only shows). A stand-in DOM, frames stepped by hand.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const web = f => readFileSync(fileURLToPath(new URL(`../../web/${f}`, import.meta.url)), 'utf8');
-const code = ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js'].map(web).join('\n;\n');
+const code = ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'].map(web).join('\n;\n');
 const plain = v => JSON.parse(JSON.stringify(v));
 
 // Every element and canvas context is a proxy that takes any call and answers with another.

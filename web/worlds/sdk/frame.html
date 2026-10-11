@@ -3,18 +3,14 @@
 <head>
 <meta charset="utf-8">
 <title>__TITLE__</title>
-<link rel="stylesheet" href="/base.css">
-<link rel="stylesheet" href="/world/sdk/engine.css">
-<script src="/world/sdk/bridge.js" crossorigin="anonymous"></script>
-<script src="/brand.js"></script>
-<script src="/world/sdk/pixel.js" crossorigin="anonymous"></script>
-<script src="/world/sdk/people.js" crossorigin="anonymous"></script>
-<script src="/world/sdk/props.js" crossorigin="anonymous"></script>
-<script src="/world/sdk/creatures.js" crossorigin="anonymous"></script>
-<script src="/world/sdk/animals.js" crossorigin="anonymous"></script>
-<script src="/world/sdk/grid.js" crossorigin="anonymous"></script>
-<script src="/world/sdk/engine.js" crossorigin="anonymous"></script>
-<script src="__BASE__world.js" crossorigin="anonymous"></script>
+<script type="importmap">{"imports":{"three":"__WORLDS__sdk/three/three.module.js","three/addons/":"__WORLDS__sdk/three/addons/"}}</script>
+<link rel="stylesheet" href="__ROOT__base.css">
+<link rel="stylesheet" href="__WORLDS__sdk/world.css">
+<script src="__WORLDS__sdk/bridge.js" crossorigin="anonymous"></script>
+<script src="__ROOT__brand.js"></script>
+<script src="__WORLDS__sdk/plugins.js" crossorigin="anonymous"></script>
+__SIM____VIEW__
+<script type="module" src="__WORLDS__sdk/runtime.js" crossorigin="anonymous"></script>
 </head>
-<body><div id="farm"></div></body>
+<body><div id="farm"></div><script type="application/json" id="world">__WORLD__</script></body>
 </html>

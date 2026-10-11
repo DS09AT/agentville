@@ -1,4 +1,4 @@
-// The props kit: what a person holds for each kind of step (docs/worlds.md, "The props kit"). Every step
+// The props kit: what a person holds for each kind of step (docs/worlds-legacy.md, "The props kit"). Every step
 // Claude Code takes has a plain prop here; a world draws its own for the ones it likes and keeps the rest.
 // A prop is drawn around a 14 × 16 person: rp paints in its pixels (the person spans x 1–12, y 0–15; the
 // right hand is at x 11–12, y 11–12). A classic script in a world's frame, after pixel.js (blink, PXG, SC);

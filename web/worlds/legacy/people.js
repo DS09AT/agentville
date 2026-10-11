@@ -1,4 +1,4 @@
-// The people kit: a person in pixels, from a body and an outfit (docs/worlds.md, "The people kit").
+// The people kit: a person in pixels, from a body and an outfit (docs/worlds-legacy.md, "The people kit").
 // 14 × 16 pixels, seen from the front, from behind and from the side (the other side is its mirror),
 // standing or in a walking frame. The farm's farmers are this kit in farm clothes. A classic script in a
 // world's frame, after pixel.js (makeSprite, ink, shade); it adds only window.Agentville.people.

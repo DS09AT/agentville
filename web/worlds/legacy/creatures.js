@@ -1,4 +1,4 @@
-// The creature library: plain pixel creatures any world can use (docs/worlds.md, "Creatures"). Each
+// The creature library: plain pixel creatures any world can use (docs/worlds-legacy.md, "Creatures"). Each
 // draws itself standing on (x, y), facing right (face 1) or left (-1), in a pose: stand, walk, run,
 // eat, sleep, happy (and the duck's swim and dabble, the ostrich's hide). Sizes and speeds are in world
 // pixels. A plain script in a world's frame, after pixel.js. Only CREATURES and creaturePainter are
