@@ -77,3 +77,12 @@ test('with the network open, a visitor from it gets no token, no words and no wa
     await srv.close();
   }
 });
+
+test('a guest snapshot has your accounts by name and limits only, and none of the helper’s lines', () => {
+  const plan = { windows: [{ kind: 'seven_day', percentUsed: 40 }] };
+  const g = guestSnapshot({ ...snapshot, accounts: [{ key: 'main', name: 'Work', email: 'me@example.com', org: 'Acme', signedIn: true, plan, open: 2, costUsd: 12 }], chatter: { at: 1, lines: [{ kind: 'cat', when: 'idle', text: 'the cart test failed again' }] } });
+  assert.deepEqual(g.accounts, [{ key: 'main', name: 'Work', plan }]);
+  assert.equal(g.chatter, null);
+  assert.doesNotMatch(JSON.stringify(g), /example\.com|Acme|cart test/);
+  assert.deepEqual(guestSnapshot(snapshot).accounts, [], 'a snapshot without accounts: none');
+});

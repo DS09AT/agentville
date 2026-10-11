@@ -13,6 +13,7 @@ import { createTrackerServer } from '../collector/server.mjs';
 import { makeWorlds } from '../collector/worlds.mjs';
 import { GOLDEN_NOW, goldenSnapshot, goldenTouched } from './golden/fixture.mjs';
 import { openChrome, sleep } from './lib/cdp.mjs';
+import { freezeScript } from './lib/freeze.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const record = process.argv.includes('--record');
@@ -28,20 +29,12 @@ const VIEWS = [
   { name: 'sidebar', stored: { 'tracker-farm-sky': 'day', 'tracker-farm-side': 'open' } },
   { name: 'worlds', stored: { 'tracker-farm-sky': 'day' }, onPage: "document.querySelector('[data-farm-nav=\"worlds\"]').click(); true", pageReady: "document.getElementById('worlds-dlg').open && document.querySelectorAll('.world-pick').length > 0" },
   { name: 'closeup', stored: { 'tracker-farm-sky': 'day' }, then: "document.querySelector('[data-farm-field$=\"/shop/web\"]').click(); true", ready: "document.querySelectorAll('.fv-f').length > 0" },
+  // The robot factory, chosen in the list of worlds: by day, and by night (motion off, as every view: its lamps, screens and stack lights glow still).
+  { name: 'factory-day', stored: { 'tracker-world': 'factory', 'tracker-world:factory:sky': 'day', 'tracker-world:factory:animals': 'off' } },
+  { name: 'factory-night', stored: { 'tracker-world': 'factory', 'tracker-world:factory:sky': 'night', 'tracker-world:factory:animals': 'off' } },
 ];
 // Before any script of the page or a frame runs: one moment in time, and the same "random" numbers.
-const FREEZE = `(() => {
-  const NOW = ${GOLDEN_NOW}, Real = Date;
-  globalThis.Date = class extends Real { constructor(...a) { super(...(a.length ? a : [NOW])); } static now() { return NOW; } };
-  let seed = 7;
-  Math.random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  // The "need you" button and the status dots pulse in CSS whatever the media query says: hold every animation at its start.
-  addEventListener('DOMContentLoaded', () => {
-    const s = document.createElement('style');
-    s.textContent = '*,*::before,*::after{animation:none!important;transition:none!important}';
-    document.documentElement.append(s);
-  });
-})();`;
+const FREEZE = freezeScript(GOLDEN_NOW);
 
 const snapshot = goldenSnapshot();
 const none = async () => ({ status: 404, error: 'Not in the reference pictures.' });

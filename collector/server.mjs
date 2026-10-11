@@ -9,7 +9,7 @@ const MESSAGE_LIMIT = 90 * 1024 * 1024; // up to six 10 MB attached files, base6
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const GUEST_PATH = /^\/($|[a-z]+\.(js|css)$|world\/|api\/(state|events)$)/;
-const GUEST_AGENT = ['id', 'kind', 'cliId', 'name', 'startedAt', 'cwd', 'model', 'modelLabel', 'fast', 'contextTokens', 'compactions', 'lastCompactAt', 'wakeAt', 'state', 'stateReason', 'stateSince', 'mode', 'effort', 'turn', 'usage', 'lastActivityAt', 'mcp', 'touching', 'proc', 'activity', 'timeline', 'work'];
+const GUEST_AGENT = ['id', 'kind', 'cliId', 'name', 'startedAt', 'cwd', 'model', 'modelLabel', 'fast', 'contextTokens', 'compactions', 'lastCompactAt', 'wakeAt', 'state', 'stateReason', 'stateSince', 'mode', 'effort', 'turn', 'usage', 'lastActivityAt', 'mcp', 'touching', 'proc', 'activity', 'timeline', 'work', 'account'];
 const stepOnly = now => (now ? { tool: now.tool, step: now.step, startedAt: now.startedAt } : undefined);
 
 /**
@@ -19,6 +19,8 @@ const stepOnly = now => (now ? { tool: now.tool, step: now.step, startedAt: now.
 export function guestSnapshot(snapshot) {
   return {
     ...snapshot,
+    accounts: (snapshot.accounts ?? []).map(a => ({ key: a.key, name: a.name, plan: a.plan })), // their names and limits (the silos' tags): never an email, an organisation or what they cost
+    chatter: null, // the helper's lines for the animals: written from what is going on here
     agents: snapshot.agents.map(a => ({
       ...Object.fromEntries(GUEST_AGENT.filter(k => a[k] !== undefined).map(k => [k, a[k]])),
       now: stepOnly(a.now),
@@ -84,7 +86,7 @@ function clampInt(value, min, max, fallback) {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 }
 
-export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed, getConversation, getPrompts, getNotes, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, listDirs, shellOutput, namedFiles, getTranscriptHtml, getDoc, listFiles, readFile, repoTouched, actions, pastSessions, worlds, log = () => {}, lan = process.env.TRACKER_LAN === '1' }) {
+export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed, getConversation, getPrompts, getNotes, getHeld = () => null, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, listDirs, shellOutput, namedFiles, getTranscriptHtml, getDoc, listFiles, readFile, repoTouched, actions, pastSessions, worlds, log = () => {}, lan = process.env.TRACKER_LAN === '1' }) {
   const clients = new Set();
   let server;
   const actualPort = () => server.address()?.port ?? port;
@@ -168,6 +170,18 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           res.writeHead(200, headers);
           return createReadStream(found.real).on('error', () => res.destroy()).pipe(res);
         }
+        if (path === '/worlds/test') { // a world's test page: no token and no real data (web/worlds/test/)
+          let html;
+          try { html = readFileSync(join(dirname(webFile), 'worlds', 'test', 'index.html'), 'utf8'); } catch { return send(res, 404, 'text/plain', 'not found'); }
+          // connect-src 'none': it fetches nothing (no list of worlds, made-up answers), so /api/state, which needs no token, is out of its reach by policy.
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; connect-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", 'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
+          return res.end(html);
+        }
+        if ((m = path.match(/^\/worlds\/test\/([a-z]+)\.js$/))) { // its scripts, by plain name only
+          let code;
+          try { code = readFileSync(join(dirname(webFile), 'worlds', 'test', `${m[1]}.js`), 'utf8'); } catch { return send(res, 404, 'text/plain', 'not found'); }
+          return send(res, 200, 'text/javascript; charset=utf-8', code);
+        }
         if (path === '/api/state') return sendJson(res, 200, guest ? guestSnapshot(getSnapshot()) : getSnapshot());
         if (path === '/api/events') return openStream(req, res);
         if ((m = path.match(/^\/api\/agent\/([\w:-]+)\/feed$/))) {
@@ -176,7 +190,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
         }
         // A session's whole conversation, or a subagent's prompt, steps and result: token only, like files.
         // The id comes encoded from the page (a subagent's is session:call), so it is decoded, then checked.
-        if ((m = path.match(/^\/api\/agent\/([^/]+)\/(conversation|subagent|prompts|notes)$/))) {
+        if ((m = path.match(/^\/api\/agent\/([^/]+)\/(conversation|subagent|prompts|notes|held)$/))) {
           if (req.headers['x-tracker-token'] !== token) return sendJson(res, 403, { error: 'forbidden' });
           let id = '';
           try { id = decodeURIComponent(m[1]); } catch { /* not an id */ }
@@ -184,6 +198,10 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           if (m[2] === 'subagent') {
             const sub = id.includes(':') ? getSubagent(id) : null;
             return sub ? sendJson(res, 200, sub) : sendJson(res, 404, { error: 'That subagent is not known.' });
+          }
+          if (m[2] === 'held') { // what you sent it while it worked, waiting for its turn to end
+            const got = id.includes(':') ? null : getHeld(id);
+            return got ? sendJson(res, 200, got) : sendJson(res, 404, { error: 'That session is not on the dashboard.' });
           }
           if (m[2] === 'notes') { // your notes on it, for later
             const got = id.includes(':') ? null : getNotes(id);
@@ -251,7 +269,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
         }
       }
 
-      const isBodyAction = ['/api/actions/rm', '/api/actions/answer', '/api/actions/permit', '/api/actions/always', '/api/actions/plugin', '/api/actions/reload', '/api/actions/mcp', '/api/actions/rule', '/api/actions/message', '/api/actions/start', '/api/actions/fork', '/api/actions/restore', '/api/actions/note', '/api/actions/helper', '/api/actions/name', '/api/actions/end', '/api/actions/restart', '/api/actions/setting', '/api/actions/aside', '/api/actions/reveal', '/api/actions/reveal-worlds', '/api/actions/mkdir', '/api/actions/choose-folder', '/api/actions/stop-shell'].includes(path);
+      const isBodyAction = ['/api/actions/rm', '/api/actions/answer', '/api/actions/permit', '/api/actions/always', '/api/actions/plugin', '/api/actions/reload', '/api/actions/mcp', '/api/actions/rule', '/api/actions/message', '/api/actions/start', '/api/actions/fork', '/api/actions/restore', '/api/actions/note', '/api/actions/held', '/api/actions/helper', '/api/actions/name', '/api/actions/animals', '/api/actions/end', '/api/actions/restart', '/api/actions/setting', '/api/actions/aside', '/api/actions/reveal', '/api/actions/reveal-worlds', '/api/actions/mkdir', '/api/actions/choose-folder', '/api/actions/stop-shell'].includes(path);
       if (req.method === 'POST' && (isBodyAction || /^\/api\/actions\/open\/[\w-]+$/.test(path))) {
         if (req.headers['x-tracker-token'] !== token || !isAllowedOrigin(req.headers.origin ?? '')) {
           return sendJson(res, 403, { error: 'forbidden' });
@@ -276,8 +294,10 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
         if (path === '/api/actions/fork') return sendJson(res, 200, await actions.fork(body));
         if (path === '/api/actions/restore') return sendJson(res, 200, await actions.restore(body));
         if (path === '/api/actions/note') return sendJson(res, 200, await actions.note(body));
+        if (path === '/api/actions/held') return sendJson(res, 200, await actions.held(body));
         if (path === '/api/actions/helper') return sendJson(res, 200, await actions.helper(body));
         if (path === '/api/actions/name') return sendJson(res, 200, await actions.name(body));
+        if (path === '/api/actions/animals') return sendJson(res, 200, await actions.animals(body));
         if (path === '/api/actions/setting') return sendJson(res, 200, await actions.setting(body));
         if (path === '/api/actions/aside') return sendJson(res, 200, await actions.aside(body));
         if (path === '/api/actions/reveal') return sendJson(res, 200, await actions.reveal(body));

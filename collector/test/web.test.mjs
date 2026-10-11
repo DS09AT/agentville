@@ -78,6 +78,8 @@ function loadPage({ stored = {}, storageThrows = false, files = {}, replies = {}
     click: id => clickWith({ closest: sel => (sel === 'button' ? ctx.document.getElementById(id) : null) }),
     el: id => ctx.document.getElementById(id),
     side: () => ctx.document.getElementById('center-body').innerHTML,
+    // the farm sidebar's drawn parts, top to bottom: its header, the agents that need you and its question; Now; the chat; the box
+    farmSide: () => ['fs-head', 'fs-ask-box', 'fs-now', 'fs-chat-bar', 'farm-agent', 'fs-compose'].map(id => ctx.document.getElementById(id).innerHTML).join('\n'),
     tabs: () => ctx.document.getElementById('center-tabs').innerHTML,
     tree: () => ctx.document.getElementById('tree').innerHTML,
     settle: async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); },
@@ -530,13 +532,13 @@ test('markdown renders headings, lists, code, tables and quotes, and never passe
 });
 
 test('after Send the box empties and says it was sent, right under the box', async () => {
-  const page = loadPage();
+  const page = loadPage({ replies: { '/api/actions/message': { ok: true, held: true, count: 1 } } }); // the collector holds a message to a working session
   page.push(richSnapshot([richAgent({ mod: { version: '0.3.1', live: true }, state: 'working' })]));
   await page.openAgent('r1');
   page.edit('input', { tagName: 'TEXTAREA', value: 'Also update the README', dataset: { msgAgent: 'r1' } });
   await page.clickButton('msg-send', { agent: 'r1' });
   assert.match(page.side(), /<textarea id="msg-text"[^>]*><\/textarea>/);
-  assert.match(page.side(), /id="msg-status"[^>]*>Queued for busy-one/);
+  assert.match(page.side(), /id="msg-status"[^>]*>Waiting for busy-one to finish/);
 });
 
 test('if the session did not take the message, the text stays in the box and the reason shows under it', async () => {
@@ -825,7 +827,7 @@ test('clicking a farmer opens the farm sidebar on that agent, with its answer fo
   assert.equal(page.el('main').dataset.view, 'farm');
   assert.equal(page.el('main').dataset.side, 'open');
   assert.deepEqual(f.calls.filter(c => c[0] === 'select').at(-1), ['select', 'w1']);
-  const side = page.el('farm-agent').innerHTML;
+  const side = page.farmSide();
   assert.match(side, /Pick a colour\?/);
   assert.match(side, /id="ask-send"/);
   pick(page, 'Blue');
@@ -864,7 +866,7 @@ test('without the farm script, the toggle stays on the list and says why', async
 
 test('the page loads its mark, the scene and the host of its worlds (deferred), then its token, then its own scripts in order', () => {
   const tags = [...html.matchAll(/<script(?: src="\/([a-z]+)\.js"( defer)?)?>/g)].map(m => (m[1] ? `${m[1]}${m[2] ? ' defer' : ''}` : 'inline'));
-  assert.deepEqual(tags, ['inline', 'brand', 'scene defer', 'worlds defer', 'inline', 'core', 'charts', 'panels', 'markdown', 'viewer', 'explorer', 'conversation', 'app', 'sessions', 'setup']);
+  assert.deepEqual(tags, ['inline', 'brand', 'scene defer', 'worlds defer', 'inline', 'core', 'charts', 'panels', 'markdown', 'viewer', 'explorer', 'conversation', 'sidebar', 'broadcast', 'app', 'sessions', 'setup']);
   assert.match(html, /<script>const TOKEN = '__TRACKER_TOKEN__';<\/script>/);
 });
 
@@ -878,7 +880,7 @@ test('the sidebar toggle shows activity and the explorer beside the farm, and is
   assert.equal(page.el('main').dataset.side, 'open');
   assert.equal(page.stored['tracker-farm-side'], 'open');
   assert.equal(page.el('side-toggle').attrs['aria-pressed'], 'true');
-  const side = page.el('farm-agent').innerHTML;
+  const side = page.farmSide();
   assert.match(side, /busy-one/);
   assert.match(side, /id="msg-text"/);
   await page.clickButton('tab-activity', { farmTab: 'activity' });
@@ -896,12 +898,12 @@ test('the sidebar toggle shows activity and the explorer beside the farm, and is
 
 test('a message can be sent from the farm sidebar', async () => {
   const f = fakeFarm();
-  const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
+  const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' }, replies: { '/api/actions/message': { ok: true, held: true, count: 1 } } });
   page.push(richSnapshot([richAgent({ mod: { version: '0.3.1', live: true } })]));
   page.edit('input', { tagName: 'TEXTAREA', value: 'Water the pumpkins', dataset: { msgAgent: 'r1' } });
   await page.clickButton('msg-send', { agent: 'r1' });
   assert.deepEqual(page.posts, [{ path: '/api/actions/message', body: { agentId: 'r1', text: 'Water the pumpkins' } }]);
-  assert.match(page.el('farm-agent').innerHTML, /id="msg-status"[^>]*>Queued for busy-one/);
+  assert.match(page.el('fs-compose').innerHTML, /id="msg-status"[^>]*>Waiting for busy-one to finish/);
 });
 
 test("entering the farm clears the list's centre and leaving clears the sidebar, so each id exists once", async () => {
@@ -912,9 +914,9 @@ test("entering the farm clears the list's centre and leaving clears the sidebar,
   await page.click('view-farm');
   assert.equal(page.side(), '');
   assert.equal(page.tabs(), '');
-  assert.match(page.el('farm-agent').innerHTML, /id="msg-text"/);
+  assert.match(page.farmSide(), /id="msg-text"/);
   await page.click('view-list');
-  assert.equal(page.el('farm-agent').innerHTML, '');
+  assert.equal(page.farmSide().trim(), '');
   assert.match(page.side(), /id="msg-text"/);
 });
 
@@ -1001,11 +1003,64 @@ test('the newest message is framed as the latest, with your message when it is r
   assert.doesNotMatch(page.side().match(/<div class="latest"[\s\S]*?<\/div><\/div><div class="bub/)[0], /Deploy it|Writing the files/);
 });
 
-test('the farm sidebar has the conversation too', async () => {
+test('the farm sidebar has the conversation as a chat: oldest at the top, the newest at the bottom after a Latest line', async () => {
   const f = fakeFarm();
   const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
   page.push(richSnapshot([chatty()]));
-  assert.match(page.el('farm-agent').innerHTML, />Conversation<[\s\S]*class="bub you"/);
+  const chat = page.el('farm-agent').innerHTML;
+  const at = [chat.indexOf('class="bub you">Fix the build'), chat.indexOf('Plan:'), chat.indexOf('class="fs-latest"'), chat.indexOf('Done. All')];
+  assert.ok(at.every((v, i) => v >= 0 && (i === 0 || v > at[i - 1])), at.join(' '));
+  assert.doesNotMatch(chat, /data-convo=/, 'the button to read it all is not in the chat, which scrolls');
+  assert.match(page.el('fs-chat-bar').innerHTML, /data-convo="r1"[^>]*>⤢ Read the whole conversation/, 'it is in the bar above it, always in view');
+  assert.doesNotMatch(chat, /npm test/, 'the tool steps are on the Activity tab');
+});
+
+test("the farm sidebar's ⤢ Read the whole conversation sits in a bar above the chat, outside what scrolls; Show less beside it; none for a side question or a note", async () => {
+  assert.match(html, /<div id="fs-now"><\/div><div id="fs-chat-bar"><\/div><div id="fs-chat"><div id="farm-agent"><\/div><\/div>/, 'the bar is between Now and the chat, not in it');
+  const f = fakeFarm();
+  const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
+  page.push(richSnapshot([chatty()]));
+  await page.settle();
+  assert.match(page.el('fs-chat-bar').innerHTML, /class="fs-chat-top"[\s\S]*data-convo="r1"/);
+  assert.doesNotMatch(page.el('fs-chat-bar').innerHTML, /Show less/, 'Show less only once Show all has loaded it all');
+  await page.clickButton('mode-btw', { fsMode: 'btw' });
+  assert.equal(page.el('fs-chat-bar').innerHTML, '', 'a side question: no conversation to read');
+  await page.clickButton('mode-msg', { fsMode: 'message' });
+  assert.match(page.el('fs-chat-bar').innerHTML, /data-convo="r1"/);
+  page.push(richSnapshot([richAgent({ kind: 'codex' })]));
+  await page.settle();
+  assert.equal(page.el('fs-chat-bar').innerHTML, '', 'Codex: none');
+});
+
+test("the farm sidebar's own question keeps to a box of its own (at most 40% of the height, scrolling inside), folds to one line, and a new question comes unfolded", async () => {
+  assert.match(html, /<div id="fs-head"><\/div><div id="fs-ask-box"><\/div>/, 'the question has its own box, under the head, kept as snapshots come: its scroll stays where you left it');
+  assert.match(html, /#fs-ask-box \{[^}]*max-height: 40vh;[^}]*overflow-y: auto;/, 'at most 40% of the height; a long one scrolls inside');
+  const f = fakeFarm();
+  const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
+  const waiting = ask => richSnapshot([richAgent({ state: 'waiting', now: undefined, ask, ...live7 })]);
+  page.push(waiting(PERMIT));
+  await page.settle();
+  const box = () => page.el('fs-ask-box').innerHTML;
+  assert.match(box(), /Permission needed[\s\S]*id="ask-allow"/);
+  assert.doesNotMatch(page.el('fs-head').innerHTML, /Permission needed/, 'not in the head, which is drawn again with each snapshot');
+  assert.match(box(), /data-fs-ask-fold aria-expanded="true"/);
+  assert.doesNotMatch(box(), /<button[^>]*class="[^"]*\bact\b[^"]*"[^>]*data-fs-ask-fold/, 'a fold only changes the view: not an action button, so the click guard (after a world raises part of the page) never swallows it');
+  await page.clickButton('fold', { fsAskFold: '' });
+  assert.doesNotMatch(box(), /id="ask-allow"/, 'folded: the card is out of the way');
+  assert.match(box(), /data-fs-ask-fold aria-expanded="false"[^>]*>[\s\S]*Allow Bash: ssh prod \.\/deploy\.sh/, 'one line says what it asks; a click shows it again');
+  page.push(waiting(PERMIT));
+  await page.settle();
+  assert.match(box(), /aria-expanded="false"/, 'it stays folded as snapshots come');
+  page.push(waiting(QUESTION));
+  await page.settle();
+  assert.match(box(), /aria-expanded="true"[\s\S]*Pick a colour\?/, 'a new question comes unfolded: you never miss one');
+  await page.clickButton('fold', { fsAskFold: '' });
+  assert.match(box(), /aria-expanded="false"[^>]*>[\s\S]*Pick a colour\?/);
+  await page.clickButton('fold', { fsAskFold: '' });
+  assert.match(box(), /aria-expanded="true"[\s\S]*Pick a colour\?[\s\S]*id="ask-send"/, 'and unfolds again');
+  page.push(richSnapshot([richAgent({ state: 'working' })]));
+  await page.settle();
+  assert.equal(box(), '', 'nothing asked: an empty box');
 });
 
 const asking = (over = {}) => richAgent({ state: 'yourTurn', stateReason: 'turn finished', now: undefined, lastReply: 'Done.', question: 'Should I push them to main?', mod: { version: '0.3.1', live: true }, ...over });
@@ -1086,7 +1141,7 @@ test('clicking a speech bubble opens the whole conversation over the farm, its f
   await page.settle();
   assert.equal(page.el('convo').open, true);
   assert.match(page.el('convo-body').innerHTML, /THE END/);
-  assert.ok(f.farm && page.el('farm-agent').innerHTML.includes('busy-one'), 'its farmer is the one in the sidebar behind it');
+  assert.ok(f.farm && page.farmSide().includes('busy-one'), 'its farmer is the one in the sidebar behind it');
 });
 
 test('a bubble waiting on you, or asking a question you answer with a button, opens the sidebar where you answer; so does a Codex one', async () => {
@@ -1097,7 +1152,7 @@ test('a bubble waiting on you, or asking a question you answer with a button, op
     f.pickSay('r1');
     await page.settle();
     assert.notEqual(page.el('convo').open, true, JSON.stringify(over));
-    assert.match(page.el('farm-agent').innerHTML, /busy-one/, JSON.stringify(over));
+    assert.match(page.farmSide(), /busy-one/, JSON.stringify(over));
   }
 });
 
@@ -1105,24 +1160,25 @@ test('the farm sidebar shows the question card too', () => {
   const f = fakeFarm();
   const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
   page.push(turnSnapshot([asking()]));
-  assert.match(page.el('farm-agent').innerHTML, /class="qcard"[\s\S]*Should I push them to main\?/);
+  assert.match(page.el('fs-ask-box').innerHTML, /class="qcard"[\s\S]*Should I push them to main\?/, 'above the tabs, so it shows on every tab');
 });
 
-test('in the farm sidebar too: Now, the question, the message box, then the conversation (activity has its own tab)', () => {
+test('in the farm sidebar: its question on top, then Now, the conversation, and the message box at the bottom', () => {
   const f = fakeFarm();
   const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
   page.push(turnSnapshot([asking({ feed: chatty().feed })]));
-  const side = page.el('farm-agent').innerHTML;
-  const at = [side.indexOf('>Now<'), side.indexOf('class="qcard"'), side.indexOf('id="msg-text"'), side.indexOf('>Conversation<')];
+  const side = page.farmSide();
+  const at = [side.indexOf('class="qcard"'), side.indexOf('class="fs-rest"'), side.indexOf('class="bub'), side.indexOf('id="msg-text"')];
   assert.ok(at.every((v, i) => v >= 0 && (i === 0 || v > at[i - 1])), at.join(' '));
 });
 
-test('the farm sidebar has Agent, Files and Diary tabs; the choice is remembered, and picking a farmer shows Agent', async () => {
+test('the farm sidebar has Chat, Activity, Subagents and Files tabs and the diary over them; the tab is remembered, and picking a farmer shows Chat', async () => {
   const f = fakeFarm();
   const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' }, listing: LISTING });
   page.push(richSnapshot([richAgent({ mod: { version: '0.3.1', live: true } })]));
   assert.equal(page.el('main').dataset.sideTab, 'agent');
-  assert.match(page.el('farm-agent').innerHTML, /id="msg-text"/);
+  assert.match(html, /id="tab-agent" role="tab" data-farm-tab="agent">Chat</);
+  assert.match(page.el('fs-compose').innerHTML, /id="msg-text"/);
   assert.equal(page.el('tab-agent').attrs['aria-selected'], 'true');
   await page.clickButton('tab-files', { farmTab: 'files' });
   assert.equal(page.el('main').dataset.sideTab, 'files');
@@ -1130,9 +1186,14 @@ test('the farm sidebar has Agent, Files and Diary tabs; the choice is remembered
   assert.equal(page.el('tab-files').attrs['aria-selected'], 'true');
   await page.settle();
   assert.match(page.tree(), /data-file="README\.md"/);
-  await page.clickButton('tab-diary', { farmTab: 'diary' });
+  assert.equal(page.el('fs-compose').innerHTML, '', 'off the Chat tab there is no message box');
+  await page.click('fs-diary');
   assert.equal(page.el('main').dataset.sideTab, 'diary');
-  assert.equal(f.farm.diaryId(), 'farm-diary', 'the farm writes its diary into the Diary tab');
+  assert.equal(f.farm.diaryId(), 'farm-diary', 'the farm writes its diary into the diary pane');
+  assert.match(page.el('diary-back').innerHTML, /Back to busy-one/);
+  await page.click('diary-back');
+  assert.equal(page.el('main').dataset.sideTab, 'files', 'Back goes to the tab you were on');
+  await page.click('fs-diary');
   f.pick('r1');
   assert.equal(page.el('main').dataset.sideTab, 'agent');
 });
@@ -1170,7 +1231,7 @@ test("Activity is its own tab in the farm sidebar, and the Agent tab no longer r
   const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
   page.push(richSnapshot([chatty()]));
   assert.doesNotMatch(page.el('farm-agent').innerHTML, />Activity/);
-  assert.match(page.el('farm-agent').innerHTML, />Conversation</);
+  assert.match(page.el('farm-agent').innerHTML, /class="bub agent"/);
   await page.clickButton('tab-activity', { farmTab: 'activity' });
   assert.equal(page.el('main').dataset.sideTab, 'activity');
   assert.equal(page.stored['tracker-farm-tab'], 'activity');
@@ -1524,7 +1585,8 @@ test('Send now sends a note as your own message and marks it used; a session not
   await page.settle();
   await page.clickButton('note-send', { noteSend: 'n1', agent: 'r1' });
   await page.settle();
-  assert.deepEqual(page.posts.map(x => [x.path, x.body]), [['/api/actions/message', { agentId: 'r1', text: 'ask about the cache' }], ['/api/actions/note', { agentId: 'r1', op: 'used', ids: ['n1'] }]]);
+  // Send now means now: a note sent to a working session is not held for its turn's end
+  assert.deepEqual(page.posts.map(x => [x.path, x.body]), [['/api/actions/message', { agentId: 'r1', text: 'ask about the cache', now: true }], ['/api/actions/note', { agentId: 'r1', op: 'used', ids: ['n1'] }]]);
   const off = notesPage([note('n1', 'ask about the cache')], { mod: undefined });
   await off.settle();
   const side = off.side();
@@ -1589,7 +1651,7 @@ test('✨ Helper says how it calls Haiku and what names send; switching on needs
   page.el('helper-names').checked = true;
   await page.clickButton('helper-on', { helperOn: '' });
   await page.settle();
-  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/helper', body: { on: true, uses: { names: true }, dailyLimit: 50 } });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/helper', body: { on: true, uses: { names: true, lines: false }, dailyLimit: 50 } });
   assert.equal(page.el('helper-dlg').open, false);
 });
 
@@ -1616,7 +1678,7 @@ test('switched on, ✨ Helper shows today’s count and the last error, and swit
   page.el('helper-limit').value = '200';
   await page.clickButton('helper-off', { helperOff: '' });
   await page.settle();
-  assert.deepEqual(page.posts.at(-1).body, { on: false, uses: { names: true }, dailyLimit: 200 });
+  assert.deepEqual(page.posts.at(-1).body, { on: false, uses: { names: true, lines: false }, dailyLimit: 200 });
 });
 
 test('a name offer under the session’s name: ✓ Rename sends it, ✎ Edit renames what you type, ✕ dismisses', async () => {
@@ -1783,6 +1845,7 @@ const talk = (from, list) => ({ total: from + list.length, from, items: list });
 const convoPage = async () => {
   const t = Date.now() - 3_600_000;
   const page = loadPage({ replies: {
+    '/api/actions/message': { ok: true, held: true, count: 1 }, // its session works: the collector holds what you send
     '/api/agent/r1/conversation': talk(0, [
       { at: t, kind: 'prompt', text: 'First question', body: 'First question', uuid: 'p-1' },
       { at: t + 60_000, kind: 'reply', text: 'The answer', body: 'The **answer**', uuid: 'r-1' },
@@ -1848,7 +1911,7 @@ test('the conversation dialog has the message box too, sharing the draft and fil
   await page.clickButton('convo-msg-send', { agent: 'r1' });
   const sent = page.posts.find(p => p.path === '/api/actions/message').body;
   assert.deepEqual(sent, { agentId: 'r1', text: 'Seen the whole thing', files: [{ name: 'notes.md', data: 'IyBOb3Rlcw==' }] });
-  assert.match(box(), /Queued for busy-one with 1 file/, 'what came of it shows in the dialog too');
+  assert.match(box(), /Waiting for busy-one to finish with 1 file/, 'what came of it shows in the dialog too');
 });
 
 test('Compact… in the session bar asks what to keep, then has the session run /compact', async () => {
@@ -2397,12 +2460,248 @@ test('the commands it runs now: each with its time, CPU and memory; Output follo
   assert.match(page.el('notice').textContent, /Stopped “npm test”/);
 });
 
-test("the farm's sidebar shows the commands running too", async () => {
+test("the farm's sidebar shows the commands running too, folded under Now until you open them (remembered)", async () => {
   const f = fakeFarm();
   const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open' } });
   page.push(richSnapshot([richAgent({ shells: [{ pid: 5003, command: 'npm test', startedAt: Date.now() - 5000, cpu: 0, rssMb: 1, background: false, output: false }] })]));
   await page.settle();
-  assert.match(page.el('farm-agent').innerHTML, /Commands running[\s\S]*data-shell-stop="5003"/);
+  assert.match(page.el('fs-now').innerHTML, /data-fs-shells aria-expanded="false">[\s\S]*1 command running/);
+  assert.doesNotMatch(page.el('fs-now').innerHTML, /data-shell-stop/);
+  await page.clickButton('shells', { fsShells: '' });
+  assert.match(page.el('fs-now').innerHTML, /1 command running[\s\S]*data-shell-stop="5003"/);
+  assert.equal(page.stored['tracker-fs-shells'], 'open');
+});
+
+/* ---------- the farm sidebar: the picker, the agents that need you, the box's modes, Activity's filter, the Session menu ---------- */
+
+const PERMIT = { kind: 'permission', toolUseId: 'toolu_P1', tool: 'Bash', summary: 'ssh prod ./deploy.sh', expiresAt: Date.now() + 60_000 };
+const live7 = { mod: { version: '0.7.0', live: true } };
+/** Five agents: one working (shown first), three that need you (asked at 1000, 2000 and 3000), one idle. */
+const crowd = (over = {}) => richSnapshot([
+  richAgent({ ...live7, ...over }),
+  richAgent({ id: 'p1', name: 'deployer', state: 'waiting', stateReason: 'permission', stateSince: 2000, now: undefined, ask: PERMIT, ...live7 }),
+  richAgent({ id: 'q1', name: 'asker', state: 'waiting', stateReason: 'question pending', stateSince: 1000, now: undefined, ask: QUESTION, ...live7 }),
+  richAgent({ id: 't1', name: 'pusher', state: 'yourTurn', stateReason: 'turn finished', stateSince: 3000, now: undefined, question: 'Should I push them to main?', ...live7 }),
+  richAgent({ id: 'i1', name: 'sleeper', state: 'idle', stateReason: 'idle', now: undefined }),
+]);
+function farmPage({ stored = {}, ...opts } = {}) {
+  const f = fakeFarm();
+  return { f, page: loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm', 'tracker-farm-side': 'open', ...stored }, ...opts }) };
+}
+const shownName = page => page.el('fs-head').innerHTML.match(/class="fs-name">([^<]*)</)?.[1];
+
+test("the sidebar's header names the agent and its place among them; ‹ › step through them in the picker's order", async () => {
+  const { page } = farmPage();
+  page.push(crowd());
+  assert.equal(shownName(page), 'busy-one');
+  assert.match(page.el('fs-head').innerHTML, /class="fs-pos">4 of 5</, 'what needs you comes first: three, then the working one');
+  assert.match(page.el('fs-head').innerHTML, /▶ Working/);
+  await page.clickButton('step', { fsStep: '1' });
+  assert.equal(shownName(page), 'sleeper');
+  await page.clickButton('step', { fsStep: '1' });
+  assert.equal(shownName(page), 'asker', 'it goes round');
+  await page.clickButton('step', { fsStep: '-1' });
+  assert.equal(shownName(page), 'sleeper');
+  await page.click('fs-hide');
+  assert.equal(page.el('main').dataset.side, 'closed');
+});
+
+test('the other agents that need you are cards, longest waiting first, answered without leaving the agent you are on', async () => {
+  const { page } = farmPage();
+  page.push(crowd());
+  const head = page.el('fs-head').innerHTML;
+  assert.match(head, /class="fs-badge">3<\/span><span class="fs-queue-label">asker, deployer and pusher need you</);
+  const cards = head.slice(head.indexOf('class="fs-cards"'));
+  assert.ok(cards.indexOf('asker') < cards.indexOf('deployer') && cards.indexOf('deployer') < cards.indexOf('pusher'), 'longest waiting first');
+  assert.match(cards, /<b>Bash<\/b> ssh prod \.\/deploy\.sh[\s\S]*class="act primary" data-permit="allow" data-agent="p1" data-tool="toolu_P1"/);
+  assert.match(cards, /data-fs-answer="Red" data-agent="q1" data-tool="toolu_Q1" data-tip="warm">Red</);
+  assert.match(cards, /data-quick-reply="Yes\." data-agent="t1">Yes</);
+
+  await page.clickButton('allow', { permit: 'allow', agent: 'p1', tool: 'toolu_P1' });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/permit', body: { agentId: 'p1', toolUseId: 'toolu_P1', decision: 'allow' } });
+  await page.clickButton('red', { fsAnswer: 'Red', agent: 'q1', tool: 'toolu_Q1' });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/answer', body: { agentId: 'q1', toolUseId: 'toolu_Q1', answers: { 'Pick a colour?': 'Red' } } });
+  await page.clickButton('yes', { quickReply: 'Yes.', agent: 't1' });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/message', body: { agentId: 't1', text: 'Yes.' } });
+  assert.equal(shownName(page), 'busy-one', 'still on the agent you were looking at');
+
+  await page.clickButton('no', { quickDraft: 'No, ', agent: 't1' });
+  assert.equal(shownName(page), 'pusher', 'a reply in your own words opens that agent');
+  assert.match(page.el('fs-compose').innerHTML, /<textarea id="msg-text" data-msg-agent="t1"[^>]*>No, <\/textarea>/);
+  assert.match(page.el('fs-head').innerHTML, /asker and deployer also need you/);
+});
+
+test("a stale or many-part question opens its agent; Allow for a request that is gone isn't sent", async () => {
+  const { page } = farmPage();
+  const snap = crowd();
+  snap.agents[2].ask = { ...QUESTION, questions: [{ ...QUESTION.questions[0], multiSelect: true }] };
+  page.push(snap);
+  assert.match(page.el('fs-head').innerHTML, /data-pick-agent="q1">Answer…</);
+  await page.clickButton('allow', { permit: 'allow', agent: 'p1', tool: 'toolu_OLD' });
+  assert.equal(page.posts.length, 0);
+  assert.match(page.el('notice').textContent, /no longer waiting/);
+});
+
+test('the cards fold away (remembered), and Next opens the one waiting longest', async () => {
+  const { page } = farmPage();
+  page.push(crowd());
+  await page.clickButton('fold', { fsQueue: '' });
+  assert.doesNotMatch(page.el('fs-head').innerHTML, /fs-card/);
+  assert.equal(page.stored['tracker-fs-queue'], 'closed');
+  assert.match(page.el('fs-head').innerHTML, /data-pick-agent="q1"[^>]*>Next ›</);
+  await page.clickButton('next', { pickAgent: 'q1' });
+  assert.equal(shownName(page), 'asker');
+  assert.match(page.el('fs-ask-box').innerHTML, /id="ask-send"/, 'its own question, above the tabs');
+});
+
+test('the picker lists every agent, what needs you first, finds one by name and opens it; Esc closes it', async () => {
+  const { page } = farmPage();
+  page.push(crowd());
+  await page.clickButton('fs-switch', { fsPop: 'switcher' });
+  assert.match(page.el('fs-pop').innerHTML, /id="fs-find"/);
+  const list = page.el('fs-find-list').innerHTML;
+  const at = ['>Needs you<', 'data-pick-agent="q1"', 'data-pick-agent="p1"', 'data-pick-agent="t1"', '>Working<', 'data-pick-agent="r1" aria-current="true"', '>Idle<', 'data-pick-agent="i1"'].map(s => list.indexOf(s));
+  assert.ok(at.every((v, i) => v >= 0 && (i === 0 || v > at[i - 1])), at.join(' '));
+  assert.match(list, /Asks: Pick a colour\?/);
+  page.edit('input', { id: 'fs-find', value: 'sleep' });
+  assert.match(page.el('fs-find-list').innerHTML, /sleeper/);
+  assert.doesNotMatch(page.el('fs-find-list').innerHTML, /asker/);
+  await page.clickButton('pick', { pickAgent: 'i1' });
+  assert.equal(shownName(page), 'sleeper');
+  assert.equal(page.el('fs-pop').innerHTML, '');
+  await page.clickButton('fs-switch', { fsPop: 'switcher' });
+  assert.equal(page.key('Escape', { id: 'fs-find' }), true);
+  assert.equal(page.el('fs-pop').innerHTML, '');
+});
+
+test('one box writes a message, a side question or a note, and the chat shows what goes with it', async () => {
+  const { page } = farmPage();
+  page.push(crowd({ asides: [{ question: 'Which file?', answer: 'app.ts' }], notes: { rev: 0, unused: 0 } }));
+  assert.match(page.el('fs-compose').innerHTML, /data-fs-mode="message"[^>]*>Message<|aria-selected="true" data-fs-mode="message"/);
+  assert.match(page.el('fs-compose').innerHTML, /id="msg-text"/);
+  await page.clickButton('mode', { fsMode: 'btw' });
+  assert.match(page.el('fs-compose').innerHTML, /<textarea id="aside-text" data-aside-agent="r1"/);
+  assert.match(page.el('fs-compose').innerHTML, /Side question<span class="grp-n">1</);
+  assert.match(page.el('farm-agent').innerHTML, /answered from busy-one's conversation[\s\S]*Which file\?[\s\S]*app\.ts/);
+  page.edit('input', { dataset: { asideAgent: 'r1' }, value: 'Why the retry?' });
+  page.key('Enter', { id: 'aside-text', dataset: { asideAgent: 'r1' } });
+  await page.settle();
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/aside', body: { agentId: 'r1', question: 'Why the retry?' } });
+  await page.clickButton('mode', { fsMode: 'note' });
+  assert.match(page.el('fs-compose').innerHTML, /<textarea id="note-text" data-note-agent="r1"/);
+  assert.match(page.el('farm-agent').innerHTML, /Only you see notes[\s\S]*No notes yet/);
+  await page.clickButton('mode', { fsMode: 'message' });
+  assert.match(page.el('fs-compose').innerHTML, /id="msg-text"/);
+});
+
+test("Activity's filter keeps to commands, edits, reads or the steps that failed", async () => {
+  const { page } = farmPage({ stored: { 'tracker-farm-tab': 'activity' } });
+  const agent = chatty();
+  agent.feed = [{ at: Date.now() - 500, kind: 'tool', tool: 'Bash', text: 'npm run lint', ok: false, durationMs: 300 }, ...agent.feed];
+  page.push(richSnapshot([agent]));
+  const act = () => page.el('farm-activity').innerHTML;
+  assert.match(act(), /aria-pressed="true">All<span class="grp-n">3</);
+  assert.match(act(), /Failed<span class="grp-n">1</);
+  await page.clickButton('filter', { fsSteps: 'fail' });
+  assert.match(act(), /npm run lint/);
+  assert.doesNotMatch(act(), /npm test|web\/index\.html/);
+  await page.clickButton('filter', { fsSteps: 'edit' });
+  assert.match(act(), /web\/index\.html/);
+  assert.doesNotMatch(act(), /npm/);
+});
+
+test('the chat goes to the newest message whenever one comes, even scrolled up', () => {
+  const { page } = farmPage();
+  const agent = chatty();
+  page.push(richSnapshot([agent]));
+  const box = page.el('fs-chat');
+  Object.assign(box, { scrollHeight: 900, clientHeight: 300, scrollTop: 0 }); // you scrolled to the top to read
+  page.push(richSnapshot([{ ...agent, feed: [{ at: Date.now(), kind: 'reply', text: 'All done.', body: 'All done.' }, ...agent.feed] }]));
+  assert.match(page.el('farm-agent').innerHTML, /All done\./);
+  assert.equal(box.scrollTop, 900, 'at the newest message');
+});
+
+test('📣 Broadcast sends one message to each agent you tick; one not listening, or Codex, cannot be ticked', async () => {
+  const page = loadPage();
+  const snap = crowd();
+  snap.agents.push(richAgent({ id: 'c1', name: 'codexer', kind: 'codex', ...live7 }));
+  snap.agents[4].mod = undefined; // sleeper: not listening
+  page.push(snap);
+  assert.match(html, /<button class="act" id="broadcast-open"[^>]*>📣 Broadcast</);
+  await page.click('broadcast-open');
+  assert.equal(page.el('broadcast').open, true);
+  const list = page.el('bc-list').innerHTML;
+  assert.match(list, /data-bc-agent="i1" disabled>[\s\S]*Not listening yet/);
+  assert.match(list, /data-bc-agent="c1" disabled>[\s\S]*Codex takes no messages/);
+  assert.ok(list.indexOf('data-bc-agent="q1"') < list.indexOf('data-bc-agent="r1"'), 'what needs you first, as in the picker');
+  await page.clickButton('pick-all', { bcPick: 'all' });
+  assert.equal(page.el('bc-send').textContent, 'Send to 4');
+  assert.match(page.el('bc-count').textContent, /^4 of 4 picked$/);
+  await page.clickButton('pick-needs', { bcPick: 'needs' });
+  assert.equal(page.el('bc-send').textContent, 'Send to 3');
+  await page.change({ dataset: { bcAgent: 'p1' }, checked: false });
+  assert.equal(page.el('bc-send').textContent, 'Send to 2');
+  await page.clickButton('bc-send', {});
+  assert.match(page.el('bc-status').textContent, /Write the message first/);
+  assert.equal(page.posts.length, 0);
+  page.el('bc-text').value = 'Please wrap up and commit.';
+  await page.clickButton('bc-send', {});
+  await page.settle();
+  assert.deepEqual(page.posts.map(p => [p.path, p.body.agentId, p.body.text]).sort(), [['/api/actions/message', 'q1', 'Please wrap up and commit.'], ['/api/actions/message', 't1', 'Please wrap up and commit.']]);
+  assert.match(page.el('bc-results').innerHTML, /✓ asker[\s\S]*✓ pusher/);
+  assert.match(page.el('bc-status').textContent, /Sent to 2 agents/);
+  assert.equal(page.el('bc-text').value, '', 'sent: the box is empty again');
+  await page.clickButton('pick-none', { bcPick: 'none' });
+  await page.clickButton('bc-send', {});
+  assert.match(page.el('bc-status').textContent, /Pick at least one agent/);
+});
+
+test('⌘↩ sends a broadcast; ↩ alone is a new line', async () => {
+  const page = loadPage();
+  page.push(crowd());
+  await page.click('broadcast-open');
+  await page.clickButton('pick-all', { bcPick: 'working' });
+  page.el('bc-text').value = 'Status?';
+  assert.equal(page.key('Enter', { id: 'bc-text' }), false);
+  assert.equal(page.posts.length, 0);
+  assert.equal(page.key('Enter', { id: 'bc-text' }, { metaKey: true }), true);
+  await page.settle();
+  assert.deepEqual(page.posts.map(p => p.body.agentId), ['r1']);
+});
+
+test("the farm's Menu opens Broadcast, and its Send is held a moment like any button a world raised", async () => {
+  const f = fakeFarm();
+  const page = loadPage({ farm: f.farm, stored: { 'tracker-view': 'farm' } });
+  page.push(crowd());
+  f.nav('broadcast');
+  assert.equal(page.el('broadcast').open, true);
+  assert.ok(f.calls.some(c => c[0] === 'arm'), 'the click guard is armed');
+  await page.clickButton('pick-all', { bcPick: 'all' });
+  page.el('bc-text').value = 'Hello all';
+  f.setBlocks(true);
+  page.el('bc-send').className = 'act primary';
+  await page.clickButton('bc-send', {});
+  await page.settle();
+  assert.equal(page.posts.length, 0, 'held');
+  f.setBlocks(false);
+  await page.clickButton('bc-send', {});
+  await page.settle();
+  assert.equal(page.posts.length, 4);
+});
+
+test('the Session menu has the model, effort and permissions, its actions, and End session apart; a click outside closes it', async () => {
+  const { page } = farmPage();
+  page.push(crowd({ pid: 4242, mode: 'acceptEdits', effort: 'high', model: 'claude-opus-5-5' }));
+  assert.match(page.el('fs-head').innerHTML, /~?\/w · Opus 5\.5 · high effort · Accept edits/);
+  await page.clickButton('fs-session', { fsPop: 'session' });
+  const menu = page.el('fs-pop').innerHTML;
+  assert.match(menu, /<select id="fs-model" data-switch-model data-agent="r1"><option value="">Opus 5\.5 \(now\)/);
+  assert.match(menu, /<select id="fs-effort" data-switch-effort data-agent="r1"><option value="">high \(now\)/);
+  assert.match(menu, /<select id="fs-mode" data-restart-mode data-agent="r1"><option value="">Accept edits \(now\)/);
+  assert.match(menu, /data-compact="r1"[\s\S]*id="act-copy"[\s\S]*href="\/agent\/r1\/transcript"[\s\S]*id="fs-list"/);
+  assert.match(menu, /class="fs-sep"><\/div><button type="button" class="act fs-item danger" data-end-session="r1"><b>End session…/);
+  await page.clickButton('tab-activity', { farmTab: 'activity' });
+  assert.equal(page.el('fs-pop').innerHTML, '');
 });
 
 /* ---------- files an agent names in its replies ---------- */
@@ -2566,4 +2865,217 @@ test("a guest's snapshot (a visitor from the network) draws the list and an agen
   const scene = window.AgentvilleScene.toScene({ repos: [], ...guestSnapshot(richSnapshot([richAgent(said)])) }, { cpuAlertPct: 90 });
   assert.deepEqual([scene.agents.length, scene.agents[0].name, scene.agents[0].state], [1, 'busy-one', 'working']);
   assert.doesNotMatch(JSON.stringify(scene), words);
+});
+
+test('✨ Helper has an Animal lines box that says what it sends; ticked alone it switches on; it says when no session can run it', async () => {
+  const page = loadPage({ replies: { '/api/actions/helper': { ok: true, helper: { on: true, uses: { names: false, lines: true }, dailyLimit: 200, today: 0 } } } });
+  page.push(helperSnap({ on: false, uses: { names: false, lines: false }, dailyLimit: 200, today: 0 }));
+  await page.clickButton('helper-open');
+  const body = page.el('helper-body').innerHTML;
+  assert.match(body, /<input type="checkbox" id="helper-lines"(?![^>]*checked)/);
+  assert.match(body, /Animal lines\.[\s\S]*agent and repo names[\s\S]*never code, file paths or conversation text[\s\S]*only lines without names/);
+  assert.match(body, /names the dashboard shows, which Claude Code may take from a conversation's title/);
+  assert.match(body, /the built-in world's name \(the farm or the robot factory/);
+  page.el('helper-names').checked = false;
+  page.el('helper-lines').checked = true;
+  page.el('helper-limit').value = '200';
+  await page.clickButton('helper-on', { helperOn: '' });
+  await page.settle();
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/helper', body: { on: true, uses: { names: false, lines: true }, dailyLimit: 200 } });
+  const blocked = loadPage();
+  blocked.push(helperSnap({ on: true, uses: { names: false, lines: true }, dailyLimit: 200, today: 0, linesBlocked: 'no-session' }));
+  await blocked.clickButton('helper-open');
+  assert.match(blocked.el('helper-body').innerHTML, /Animal lines need a session with mod 0\.9\.0 \(0\.9\.1 for the robot dog and the robot vacuum\): run \/reload-plugins in one\./);
+});
+
+// ---- several Claude accounts ----
+const ACCOUNTS = [
+  { key: 'main', name: 'nco', email: 'me@nco.example', signedIn: true, open: 1, costUsd: 3.5, plan: { at: Date.now(), windows: [{ kind: 'five_hour', percentUsed: 40, resetsAt: Date.now() + 3_600_000 }, { kind: 'seven_day', percentUsed: 22, resetsAt: Date.now() + 86_400_000 }] } },
+  { key: 'zeta', name: 'zeta', email: 'me@zeta.example', signedIn: false, open: 0, costUsd: 0, plan: null },
+];
+const onAccount = (account, accounts = ACCOUNTS) => { const s = snapshot('worker'); return { ...s, accounts, plan: accounts[0].plan, agents: [{ ...s.agents[0], account }] }; };
+
+test('top bar: one plan block per account, with the email, signed out and no reading on hover', () => {
+  const page = loadPage();
+  page.push(onAccount('main'));
+  const bar = page.el('hstats').innerHTML;
+  assert.match(bar, /<span class="ml">nco<\/span>/);
+  assert.match(bar, /<span class="ml faint">zeta<\/span>/);
+  assert.match(bar, /me@zeta\.example/);
+  assert.match(bar, /Signed out/);
+  assert.match(bar, /No reading yet/);
+  assert.match(bar, /1 session open, \$3\.50 so far/);
+  assert.doesNotMatch(bar, /<span class="ml">Plan<\/span>/);
+});
+
+test('top bar with one account: the Plan block as before, and no account tags', () => {
+  const page = loadPage();
+  page.push(onAccount('main', [ACCOUNTS[0]]));
+  assert.match(page.el('hstats').innerHTML, /<span class="ml">Plan<\/span>/);
+  assert.doesNotMatch(page.list(), /chip acct/);
+});
+
+test('agents carry their account tag with two accounts, in the list and the side panel', async () => {
+  const page = loadPage();
+  page.push(onAccount('zeta'));
+  assert.match(page.list(), /<span class="chip acct" data-tip="On the zeta account \(me@zeta\.example\)">zeta<\/span>/);
+  await page.openAgent('s1');
+  assert.match(page.side(), /class="chip acct"[^>]*>zeta</);
+});
+
+const PAST = { terminal: 'iTerm', projects: [{ cwd: '/w', name: 'w', at: 1, sessions: 2, account: 'zeta' }], sessions: [
+  { id: '11111111-1111-4111-8111-111111111111', cwd: '/w', title: 'Old', at: 2, account: 'main', canRunOn: ['main', 'zeta'] },
+  { id: '22222222-2222-4222-8222-222222222222', cwd: '/w', title: 'Apart', at: 1, account: 'zeta', canRunOn: ['zeta'] },
+  { id: '33333333-3333-4333-8333-333333333333', cwd: '/w', title: 'Gone', at: 0, account: null, accountGone: 'home', canRunOn: ['main', 'zeta'] },
+] };
+
+test('＋ Session: the account picker, the rows\' tags and the account filter', async () => {
+  const page = loadPage({ replies: { '/api/sessions': PAST } });
+  page.push(onAccount('main'));
+  await page.ctx.openSessions(); // its button's own listener: the stand-in elements have none
+  assert.equal(page.el('sess-account-row').hidden, false);
+  const picker = page.el('sess-account').innerHTML;
+  assert.match(picker, /<option value="">As each last ran<\/option>/);
+  assert.match(picker, /nco · 5h 40% · week 22%/);
+  assert.match(picker, /zeta · signed out/);
+  const body = page.el('sess-body').innerHTML;
+  assert.match(body, /class="chip acct"[^>]*>zeta</, 'the folder and the zeta session');
+  assert.match(body, /class="chip acct faint"[^>]*>home</, 'an account that is gone, greyed');
+  assert.match(page.el('sess-f-account').innerHTML, /zeta \(1\)/);
+  await page.change({ id: 'sess-f-account', value: 'zeta' });
+  assert.doesNotMatch(page.el('sess-body').innerHTML, />Old</);
+});
+
+test('＋ Session: an account that cannot see a session greys its Resume; the account picked is sent', async () => {
+  const page = loadPage({ replies: { '/api/sessions': PAST } });
+  page.push(onAccount('main'));
+  await page.ctx.openSessions(); // its button's own listener: the stand-in elements have none
+  await page.change({ id: 'sess-account', value: 'main' });
+  assert.match(page.el('sess-body').innerHTML, /data-sess-resume="22222222-2222-4222-8222-222222222222" disabled data-tip="Its history isn(&#39;|')t shared with nco/);
+  await page.ctx.startSession({ resume: '11111111-1111-4111-8111-111111111111' }, {});
+  assert.equal(page.posts.at(-1).body.account, 'main');
+  await page.change({ id: 'sess-account', value: '' });
+  await page.ctx.startSession({ cwd: '/w' }, {});
+  assert.equal(page.posts.at(-1).body.account, undefined, 'as each last ran: the collector picks');
+});
+
+test('＋ Session with one account: no picker, no tags, no account sent', async () => {
+  const page = loadPage({ replies: { '/api/sessions': PAST } });
+  page.push(onAccount('main', [ACCOUNTS[0]]));
+  await page.ctx.openSessions(); // its button's own listener: the stand-in elements have none
+  assert.equal(page.el('sess-account-row').hidden, true);
+  assert.doesNotMatch(page.el('sess-body').innerHTML, /chip acct/);
+  await page.ctx.startSession({ cwd: '/w' }, {});
+  assert.equal(page.posts.at(-1).body.account, undefined);
+});
+
+test('Restart in… offers Move to the other accounts, and moving posts the account in the same mode', async () => {
+  const page = loadPage();
+  const s = onAccount('main');
+  s.agents[0] = { ...s.agents[0], pid: 4, mode: 'plan' };
+  page.push(s);
+  await page.openAgent('s1');
+  assert.match(page.side(), /<optgroup label="Move to another account"><option value="account:zeta">zeta · signed out<\/option><\/optgroup>/);
+  page.ctx.confirmBox = async () => true;
+  await page.ctx.restartFlow('s1', 'account:zeta');
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/restart', body: { agentId: 's1', mode: 'plan', account: 'zeta' } });
+});
+
+test('Fork: the account row starts on the session\'s own account and is sent', async () => {
+  const page = loadPage();
+  page.push(onAccount('zeta'));
+  page.ctx.openFork('s1', 'r1', 'reply');
+  assert.equal(page.el('fork-account-row').hidden, false);
+  assert.equal(page.el('fork-account').value, 'zeta');
+  await page.ctx.forkGo(null);
+  assert.equal(page.posts.at(-1).body.account, 'zeta');
+});
+
+// ---- held messages: what you sent a working session, waiting for its turn to end ----
+const HELD = '/api/agent/r1/held';
+const heldItem = (id, text, over = {}) => ({ id, text, files: [], folders: [], at: 1, ...over });
+const heldPage = (items, { together = false, failed, agent = {} } = {}) => {
+  const page = loadPage({ replies: { [HELD]: { items, together, rev: 7 } } });
+  page.push(richSnapshot([richAgent({ mod: { live: true, version: '0.9.0' }, held: items.length ? { count: items.length, together, rev: 7, ...(failed ? { failed } : {}) } : undefined, ...agent })]));
+  return page;
+};
+
+test('Waiting to send: the held messages, read with the token, each with ✕, Edit and ⚡ Send now; the toggle says what happens', async () => {
+  const page = heldPage([heldItem('h1', 'also <b>the docs</b>'), heldItem('h2', 'and the tests', { files: ['shot.png'] })]);
+  await page.settle();
+  assert.deepEqual(page.gets.filter(g => g.path === HELD).map(g => Boolean(g.token)), [true]);
+  const side = page.side();
+  assert.match(side, /Waiting to send \(2\)/);
+  assert.match(side, /also &lt;b&gt;the docs&lt;\/b&gt;[\s\S]*and the tests/, 'in order, as text');
+  assert.match(side, /shot\.png/);
+  assert.match(side, /data-held-remove="h1"/);
+  assert.match(side, /data-held-edit="h1"/);
+  assert.match(side, /data-held-now="h2"/);
+  assert.match(side, /<input type="checkbox" data-held-together data-agent="r1">/, 'unticked');
+  assert.match(side, /Goes out when busy-one finishes its turn, one per turn/);
+  page.push(richSnapshot([richAgent({ mod: { live: true, version: '0.9.0' }, held: { count: 2, together: false, rev: 7 } })]));
+  await page.settle();
+  assert.equal(page.gets.filter(g => g.path === HELD).length, 1, 'read again only when they change');
+});
+
+test('Waiting to send: ✕, ⚡ and the toggle post their changes; Edit opens it in place and Save posts the text', async () => {
+  const page = heldPage([heldItem('h1', 'first'), heldItem('h2', 'second')]);
+  await page.settle();
+  await page.clickButton('held-x', { heldRemove: 'h1', agent: 'r1' });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/held', body: { agentId: 'r1', op: 'remove', id: 'h1' } });
+  await page.clickButton('held-n', { heldNow: 'h2', agent: 'r1' });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/held', body: { agentId: 'r1', op: 'send-now', id: 'h2' } });
+  await page.change({ dataset: { heldTogether: '', agent: 'r1' }, checked: true });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/held', body: { agentId: 'r1', op: 'together', on: true } });
+  await page.clickButton('held-e', { heldEdit: 'h2', agent: 'r1' });
+  assert.match(page.side(), /<textarea class="held-edit" data-held-edit-text="h2" data-agent="r1"[^>]*>second<\/textarea>/);
+  page.edit('input', { value: 'second, better', dataset: { heldEditText: 'h2', agent: 'r1' } });
+  await page.clickButton('held-s', { heldSave: 'h2', agent: 'r1' });
+  assert.deepEqual(page.posts.at(-1), { path: '/api/actions/held', body: { agentId: 'r1', op: 'edit', id: 'h2', text: 'second, better' } });
+});
+
+test('a message to a working session that is held says so; one that went says Sent; a release not taken shows in red', async () => {
+  const page = heldPage([heldItem('h1', 'first')], { failed: { at: Date.now(), error: "The session didn't take it: it is still waiting here." } });
+  await page.settle();
+  assert.match(page.side(), /class="msg-bad held-failed"[^>]*>The session didn&#39;t take it/);
+  page.ctx.fetch = (orig => async (path, init) => (path === '/api/actions/message' ? (page.posts.push({ path, body: JSON.parse(init.body) }), { ok: true, json: async () => ({ ok: true, held: true, count: 2 }) }) : orig(path, init)))(page.ctx.fetch);
+  page.edit('input', { value: 'later please', dataset: { msgAgent: 'r1' } });
+  await page.clickButton('msg-send', { agent: 'r1' });
+  await page.settle();
+  assert.match(page.side(), /Waiting for busy-one to finish: it goes out when this turn ends \(remove or edit it below\)/);
+});
+
+test('no Waiting to send when nothing is held; the hint says a message waits for the turn to end', async () => {
+  const page = heldPage([]);
+  await page.settle();
+  assert.doesNotMatch(page.side(), /Waiting to send/);
+  assert.match(page.side(), /is busy: your message waits here until its turn ends/);
+  assert.equal(page.gets.filter(g => g.path === HELD).length, 0, 'nothing to read');
+});
+
+test('an edit the turn beat (the message went out meanwhile) is not lost: it lands in the message box, and the page says so', async () => {
+  const page = heldPage([heldItem('h1', 'feed the hens')]);
+  await page.settle();
+  await page.clickButton('held-e', { heldEdit: 'h1', agent: 'r1' });
+  page.edit('input', { value: 'feed the hens and the ducks', dataset: { heldEditText: 'h1', agent: 'r1' } });
+  page.ctx.fetch = (orig => async (path, init) => (path === '/api/actions/held' ? (page.posts.push({ path, body: JSON.parse(init.body) }), { ok: true, json: async () => ({ ok: false, error: 'That message is no longer waiting.' }) }) : orig(path, init)))(page.ctx.fetch);
+  await page.clickButton('held-s', { heldSave: 'h1', agent: 'r1' });
+  await page.settle();
+  assert.match(page.side(), /<textarea id="msg-text"[^>]*>feed the hens and the ducks<\/textarea>/, 'your change, in the box');
+  assert.match(page.el('notice').textContent, /had already gone out: your change is in the message box/);
+  assert.doesNotMatch(page.side(), /class="held-edit"/, 'the edit box is gone');
+});
+
+test("📣 Broadcast says which agents' copies wait for their turn to end (the collector held them), not 'queued'", async () => {
+  const page = loadPage({ replies: { '/api/actions/message': { ok: true, held: true, count: 1 } } });
+  page.push(crowd());
+  await page.click('broadcast-open');
+  await page.clickButton('pick-all', { bcPick: 'all' });
+  page.el('bc-text').value = 'Wrap up.';
+  await page.clickButton('bc-send', {});
+  await page.settle();
+  const results = page.el('bc-results').innerHTML;
+  assert.match(results, /waits for its turn to end: remove or edit it under its message box/);
+  assert.doesNotMatch(results, /queued: it reads it/);
+  assert.match(page.el('bc-status').textContent, /Sent to 4 agents \(4 wait for their turn to end\)/);
 });

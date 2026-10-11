@@ -1,13 +1,22 @@
 // Worlds, the page's side. The farm (and, later, any world) runs in a sandboxed frame with no token:
 // this file builds the scene from each snapshot (web/scene.js), carries messages both ways, checks every
 // one that comes back and drops the rest, keeps each world's settings, and answers the frame's two file
-// requests. To app.js it is window.TrackerFarm, as the farm always was. Classic script, no dependencies.
+// requests. To app.js it is window.TrackerFarm, as the farm always was. The world test page
+// (web/worlds/test/) mounts it too: one world, made-up answers, settings in memory. Classic script, no dependencies.
 (() => {
   'use strict';
 
-  const NAV = new Set(['list', 'session', 'setup', 'side', 'theme', 'worlds']);
+  const NAV = new Set(['list', 'session', 'setup', 'side', 'theme', 'worlds', 'broadcast']);
   const STATES = new Set(['waiting', 'working', 'turn', 'idle', 'stale']);
   const PREF_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+  // The creature library's kinds (sdk/creatures.js) and the situations the helper writes for (collector/sources/lines.mjs):
+  // a world's cast names only these. Copies: worlds.test.mjs fails when they drift.
+  const CREATURE_KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'robodog', 'vacuum'];
+  const SITUATIONS = ['idle', 'deployFailed', 'deployOk', 'harvest', 'merged', 'arrive'];
+  // The built-in worlds the helper's lines are written for by name (the mod has its own words for each): a cast names
+  // its world only if it is one of these, and not private. Copy: worlds.test.mjs fails when it drifts.
+  const LINE_WORLDS = ['farm', 'factory'];
+  const CONTROL = /[\x00-\x1f\x7f-\x9f]/g;
   const PREF_MAX = 16_384, DIARY_MAX = 20, IN_FLIGHT_MAX = 4, ID_MAX = 200, PATH_MAX = 4096;
   // A world keeps at most 64 settings, 64 KB in all (names and values, what is saved already included):
   // it can't fill the page's storage, after which the page's own settings would stop saving.
@@ -27,6 +36,12 @@
     remove: key => { try { localStorage.removeItem(key); } catch { /* this page only */ } },
     keys: () => { try { return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)); } catch { return []; } },
   };
+  /** Settings kept in memory only (the test page): the dashboard's own, in this browser, are never read or written. */
+  const memoryStore = (initial = {}) => {
+    const m = new Map(Object.entries(initial).map(([k, v]) => [k, String(v)]));
+    return { get: k => m.get(k) ?? null, set: (k, v) => { m.set(k, String(v)); }, remove: k => { m.delete(k); }, keys: () => [...m.keys()] };
+  };
+  let store = browserStore; // the dashboard's browser storage; the test page's own in memory
   const tick = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()); // a steady clock: a wall-clock jump can't block actions
   const FETCH_MS = 30_000, STRIP_QUIET_MS = 5000; // a world's file request is cut off then; a closed strip stays closed this long
   const START_MS = 5000; // a world that has not said `ready` by then is replaced by a panel
@@ -105,8 +120,43 @@
         if (m.kind === 'repoTouched' && repos.some(r => r.key === m.repo)) return { kind: 'request', id: m.id, what: 'repoTouched', repo: m.repo };
         return refuse('That is not on the dashboard.');
       }
+      case 'cast': { // the world's animals, for the helper's lines (kinds from the library, names only)
+        if (!Array.isArray(m.animals) || m.animals.length > 12) return null;
+        const out = new Map();
+        for (const c of m.animals) if (c && CREATURE_KINDS.includes(c.kind) && typeof c.name === 'string' && c.name.length <= 30 && !out.has(c.kind)) out.set(c.kind, { kind: c.kind, name: noBidi(c.name).replace(CONTROL, '').trim() || c.kind });
+        return { kind: 'cast', animals: [...out.values()] };
+      }
       default: return null;
     }
+  }
+
+  /** The names a private world may not see in a line: agents', repos' and branches', and their parts of 4 or more. */
+  function namesIn(snap) {
+    const long = new Set(), short = new Set();
+    const add = v => {
+      const s = String(v ?? '').toLowerCase().trim();
+      if (!s) return;
+      (s.length >= 4 ? long : short).add(s);
+      for (const part of s.split(/[-_/. ]+/)) if (part.length >= 4) long.add(part);
+    };
+    for (const a of snap?.agents ?? []) add(a.name);
+    for (const r of snap?.repos ?? []) { add(r.name); add(r.branch); }
+    return { long: [...long], short: [...short] };
+  }
+  /** The lines with no name in them (a private world's): a long name anywhere, a short one as a whole word, any case. */
+  function namelessLines(lines, snap) {
+    const { long, short } = namesIn(snap);
+    const word = new RegExp(short.length ? `(^|[^\\p{L}\\p{N}])(${short.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?=$|[^\\p{L}\\p{N}])` : '(?!)', 'u');
+    return lines.filter(l => { const t = l.text.toLowerCase(); return !long.some(n => t.includes(n)) && !word.test(t); });
+  }
+  /** What a world gets of the helper's latest batch: its kinds' lines, checked again; nameless ones for a private world. */
+  function chatterFor(snap, cast, priv) {
+    const kinds = new Set((cast ?? []).map(c => c.kind));
+    const lines = (Array.isArray(snap?.chatter?.lines) ? snap.chatter.lines : []).slice(0, 40)
+      .filter(l => l && kinds.has(l.kind) && SITUATIONS.includes(l.when) && typeof l.text === 'string' && l.text.length >= 1 && l.text.length <= 40)
+      .filter(l => !priv || !l.named) // the collector marks a line holding any name it sent (one gone since, too)
+      .map(l => ({ kind: l.kind, when: l.when, text: l.text }));
+    return priv ? namelessLines(lines, snap) : lines;
   }
 
   /** The diary in the page's sidebar: newest first, as text (a world never writes the page's HTML). */
@@ -130,12 +180,14 @@
 
   // A world from your folder sees no words or paths until you allow it, per browser (a setting no world can reach: its names can't hold ':').
   const CAN_SEE = key => `tracker-world-cansee:${key}`;
-  const isPrivate = key => key.startsWith('u/') && browserStore.get(CAN_SEE(key)) !== 'on';
+  // The test page says, per stop, whether the world is private (opts.private), whatever the switch says.
+  const isPrivate = key => opts.private ?? (key.startsWith('u/') && store.get(CAN_SEE(key)) !== 'on');
   const SESSION_PREFS = new Set(['view']);
   const sessionPrefs = new Map(); // world → { name: value }: kept for this page's life only, never in the browser
   let host = null, frame = null, opts = {}, world = 'farm', scene = null, selectedId = null, loaded = false;
   let diary = [], timer = 0, lastSettings = '', inFlight = 0, generation = 0;
   let sent = null; // the scene the world was last given (private, or not)
+  let cast = null, castTimer = 0, lastSnap = null, chatterAt = null, castKey = '', castAt = -Infinity, castNext = null, castLater = 0; // the world's animals (its cast message), the snapshot last seen, the batch last sent
   let port = null; // the MessageChannel port to this frame: made on `loaded`, one end handed to the bridge in `start`
   let heardLoaded = false; // the frame's `loaded`, heard: once per frame (every load builds a new one)
   let ready = false, loadsLeft = 0, startTimer = 0, lastError = null, strip = null, failed = false;
@@ -150,7 +202,7 @@
   let hidden = false; // the world is out of sight (the list view is showing): it can't make the page do anything
   const settingsNow = () => {
     const nav = opts.navState?.() ?? {};
-    return { still: Boolean(opts.still), theme: nav.theme ?? 'auto', nav, bell: browserStore.get('tracker-bell') === 'on' };
+    return { still: Boolean(opts.still), theme: nav.theme ?? 'auto', nav, bell: store.get('tracker-bell') === 'on' };
   };
   // Every message after `start` goes over the port (scene, settings, select, reply). `start` itself is
   // posted to the frame with the port transferred alongside it (see handle('loaded')); nothing else uses
@@ -170,9 +222,9 @@
     const prefix = prefKey(world, '');
     saved.clear();
     savedTotal = 0;
-    for (const k of browserStore.keys()) {
+    for (const k of store.keys()) {
       if (!k?.startsWith(prefix) || k === prefKey(world, 'migrated')) continue;
-      const name = k.slice(prefix.length), length = String(browserStore.get(k) ?? '').length;
+      const name = k.slice(prefix.length), length = String(store.get(k) ?? '').length;
       saved.set(name, length);
       savedTotal += name.length + length;
     }
@@ -233,21 +285,25 @@
         port = channel.port1;
         port.onmessage = ev => receive(ev.data); // a listener on the port: it, not the window, carries the frame's messages from here
         // `start` is the one message sent over the window, to hand the frame the other end of the port.
-        frame?.contentWindow?.postMessage({ type: 'start', world, prefs: { ...loadPrefs(world), ...sessionPrefs.get(world) }, settings: settingsNow() }, '*', [channel.port2]);
+        frame?.contentWindow?.postMessage({ type: 'start', world, prefs: { ...loadPrefs(world, store), ...sessionPrefs.get(world) }, settings: settingsNow() }, '*', [channel.port2]);
         measureSaved();
         sendScene();
         post({ type: 'select', id: selectedId });
+        sendChatter(true);
         // The page decides who gets the way back, not the frame: every world of yours (its HUD, if any, is
         // its own doing), and a built-in one only when it draws itself (the farm's buttons are already there).
         if (world.startsWith('u/') || act.raw) showCorner();
         break;
       }
       case 'leaving': fail('left'); break; // its document is going away: stopped before any page it goes to can speak
-      case 'ready':
+      case 'ready': {
+        const first = !ready; // a world that says `ready` again: the test page hears it once
         ready = true;
         clearTimeout(startTimer);
         if (lastError) showStrip(lastError); // an error it threw while starting
+        if (first) opts.onReady?.();
         break;
+      }
       case 'error': {
         if (ready) showStrip(act); else lastError ??= act; // before it started: the first error is the cause (the bridge's own "did not register" follows it)
         const key = `${act.message}@${act.where}`;
@@ -262,7 +318,7 @@
       case 'startSession': opts.onStartSession?.(); break;
       case 'showRepos': opts.onShowRepos?.(); break;
       case 'nav': opts.onNav?.(act.what); pushSettings(); break;
-      case 'bell': browserStore.set('tracker-bell', act.on ? 'on' : 'off'); opts.onBell?.(act.on); pushSettings(); break;
+      case 'bell': store.set('tracker-bell', act.on ? 'on' : 'off'); opts.onBell?.(act.on); pushSettings(); break;
       case 'motion': opts.still = act.still; opts.onMotion?.(act.still); pushSettings(); break;
       case 'store': {
         if (SESSION_PREFS.has(act.key)) { sessionPrefs.set(world, { ...sessionPrefs.get(world), [act.key]: act.value }); break; } // memory only, outside the caps
@@ -271,17 +327,19 @@
           if (!storeRefused) { storeRefused = true; console.warn(`The ${world} world keeps more settings than the page allows (${STORE_KEYS_MAX}, ${STORE_TOTAL_MAX / 1024} KB in all); the rest are not saved.`); }
           break;
         }
-        browserStore.set(prefKey(world, act.key), act.value);
+        store.set(prefKey(world, act.key), act.value);
         saved.set(act.key, act.value.length);
         savedTotal = total;
         break;
       }
       case 'diary': showDiary(act.entries); break;
+      case 'cast': takeCast(act.animals); break;
       case 'refuse': post({ type: 'reply', id: act.id, ok: false, status: 403, error: act.error }); break;
       case 'request': {
         const mine = generation;
         inFlight++; // counts every fetch still running, whichever frame asked
-        void fetchFor(opts.token, act).then(r => {
+        // the test page answers with made-up data (opts.answer); the dashboard fetches it with the token
+        void (opts.answer ? Promise.resolve(opts.answer(act)) : fetchFor(opts.token, act)).then(r => {
           inFlight--;
           if (mine !== generation) return; // the world was replaced, or its frame loaded again, meanwhile
           if (r.ok && act.what === 'agentFiles') {
@@ -302,18 +360,19 @@
   let token = null, worldsInfo = [FARM], folder = null, info = FARM, resolvedOnce = false, worldShown = null;
   /** The worlds there are (the collector's list), and the one to show. */
   async function resolveWorld() {
+    if (opts.world) return { builtIn: !opts.world.key.startsWith('u/'), icon: '🧩', description: '', nouns: {}, preview: null, error: null, name: opts.world.key, ...opts.world }; // the test page: this world, no list, no saved choice
     let listed = false;
     try {
       const r = await fetch('/api/worlds', { headers: { 'x-tracker-token': token } });
       const body = r.ok ? await r.json() : null;
       if (Array.isArray(body?.worlds) && body.worlds.length) { worldsInfo = body.worlds; folder = body.folder ?? null; listed = true; }
     } catch { /* the collector is away: the farm */ }
-    const saved = browserStore.get(CHOICE);
+    const saved = store.get(CHOICE);
     const pick = worldsInfo.find(w => w.key === saved && !w.error) ?? worldsInfo.find(w => w.key === 'farm') ?? FARM;
     // Forget the saved choice only at the first resolve (startup: the world was gone or broken while the
     // dashboard was closed), and only when the list really loaded. A later `worlds` event or opening of
     // the list resolves again, but a world that is briefly invalid mid-save must not lose the choice.
-    if (!resolvedOnce && listed && saved && pick.key !== saved) browserStore.remove(CHOICE);
+    if (!resolvedOnce && listed && saved && pick.key !== saved) store.remove(CHOICE);
     resolvedOnce = true;
     return pick;
   }
@@ -328,7 +387,7 @@
   function choose(key) {
     const w = worldsInfo.find(x => x.key === key && !x.error);
     if (!w) return;
-    browserStore.set(CHOICE, key);
+    store.set(CHOICE, key);
     info = w;
     (opts.onWorld ?? worldShown)?.(w);
     if (key === world && frame) return; // the one already showing: its frame, and all it remembers, stay
@@ -338,6 +397,7 @@
     world = key;
     loaded = false;
     heardLoaded = false;
+    cast = null; clearInterval(castTimer); chatterAt = null; castKey = ''; castAt = -Infinity; castNext = null; clearTimeout(castLater); castLater = 0; // a new frame says its animals again
     generation++;
     closePort();
     sent = null; // nothing is given to the new frame until it says `loaded`
@@ -456,12 +516,15 @@
       opts = { ...options, still };
       pushSettings();
       renderDiary(opts.diary, diary);
+      void postCast(); // shown again: its animals are on screen once more
       return Promise.resolve();
     }
     unmount();
     host = el;
     opts = { ...options, still };
     token = options.token ?? token;
+    // The test page keeps the world's settings in memory, starting from the stop's; the dashboard, in the browser.
+    store = options.memory ? memoryStore(Object.fromEntries(Object.entries(options.memory.prefs ?? {}).map(([n, v]) => [prefKey(options.world?.key ?? 'farm', n), v]))) : browserStore;
     addEventListener('message', onMessage);
     // the page's own settings (theme, sidebar, live) reach the frame's buttons; the diary's times stay fresh
     timer = setInterval(() => { pushSettings(); if (!document.hidden) renderDiary(opts.diary, diary); }, 1000);
@@ -542,8 +605,38 @@
     }
   }
   function update(snap) {
+    const linesWas = Boolean(lastSnap?.helper?.on && lastSnap?.helper?.uses?.lines);
+    lastSnap = snap;
     scene = window.AgentvilleScene.toScene(snap);
-    if (loaded) sendScene();
+    if (loaded) { sendScene(); sendChatter(); }
+    if (!linesWas && snap?.helper?.on && snap?.helper?.uses?.lines) void postCast(); // ticked just now: say the animals at once
+  }
+  /** A world's cast, taken once a second at most: the same again is dropped; a new one within the second waits for its end (the newest wins). The page keeps it alive itself. */
+  function takeCast(animals) {
+    const key = JSON.stringify(animals);
+    if (key === castKey) { castNext = null; return; }
+    const wait = 1000 - (tick() - castAt);
+    if (wait > 0) {
+      castNext = animals;
+      if (!castLater) castLater = setTimeout(() => { castLater = 0; const next = castNext; castNext = null; if (next) takeCast(next); }, wait);
+      return;
+    }
+    castKey = key; castAt = tick(); cast = animals;
+    clearInterval(castTimer); castTimer = setInterval(postCast, 300_000); void postCast(); sendChatter(true);
+  }
+  /** The world's animals to the collector, for Animal lines: when the world says them, then every 5 minutes, while it's ticked. */
+  async function postCast() {
+    if (hidden || !cast?.length || !lastSnap?.helper?.on || !lastSnap?.helper?.uses?.lines || document.hidden) return; // only while the world is on screen
+    const named = !isPrivate(world) && LINE_WORLDS.includes(world) ? { world } : {}; // a built-in world's key, so the lines are in its words
+    try { await fetch('/api/actions/animals', { method: 'POST', headers: { 'x-tracker-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ cast, ...named }) }); } catch { /* the next one, in 5 minutes */ }
+  }
+  /** The helper's latest batch to the world when it changes; an empty one once it's gone (never before a batch was sent). */
+  function sendChatter(force = false) {
+    const at = lastSnap?.chatter?.at ?? null;
+    if (at === null) { if (chatterAt !== null) post({ type: 'chatter', lines: [] }); chatterAt = null; return; }
+    if (!force && at === chatterAt) return;
+    chatterAt = at;
+    post({ type: 'chatter', lines: chatterFor(lastSnap, cast, isPrivate(world)) });
   }
   /** The newest scene to the world: the whole of it, or (one of your worlds, not allowed) without words and paths. */
   function sendScene() {
@@ -553,7 +646,7 @@
   }
   /** Whether one of your worlds may see what agents say; the world starts again with the scene it may now see. */
   function setCanSee(key, on) {
-    if (on) browserStore.set(CAN_SEE(key), 'on'); else browserStore.remove(CAN_SEE(key));
+    if (on) store.set(CAN_SEE(key), 'on'); else store.remove(CAN_SEE(key));
     if (host && frame && key === world) createFrame(world); // a world showing its failure panel restarts on Try again, or on a save
     if ($('worlds-dlg')?.open) {
       renderList();
@@ -577,6 +670,7 @@
     closePort();
     loaded = false;
     heardLoaded = false;
+    cast = null; clearInterval(castTimer); chatterAt = null; castKey = ''; castAt = -Infinity; castNext = null; clearTimeout(castLater); castLater = 0;
     clearTimeout(startTimer);
     resetStrip();
     failed = false;
@@ -620,5 +714,5 @@
   function clickGuardBlocks(detail) { return clickGuarded || (detail > 0 && guardPointerAt < guardChangedAt); }
 
   window.TrackerFarm = { mount, update, select, unmount, hide, current, openList, worldsChanged, armClickGuard, clickGuardPointerDown, clickGuardKeyDown, clickGuardBlocks, colorOf: id => window.AgentvilleScene.colorOf(id), toScene: snap => window.AgentvilleScene.toScene(snap) };
-  window.AgentvilleWorlds = { checkMessage, loadPrefs, renderDiary, prefKey, choose, setCanSee };
+  window.AgentvilleWorlds = { checkMessage, loadPrefs, renderDiary, prefKey, choose, setCanSee, namelessLines, chatterFor };
 })();

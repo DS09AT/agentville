@@ -8,7 +8,7 @@ import vm from 'node:vm';
 
 const web = f => readFileSync(fileURLToPath(new URL(`../../web/${f}`, import.meta.url)), 'utf8');
 // The scripts a world's frame runs (the bridge aside), and the styles it loads (it can't see the page's own).
-const FRAME_SCRIPTS = ['worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js', 'worlds/farm/world.js'];
+const FRAME_SCRIPTS = ['worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js', 'worlds/farm/world.js'];
 const FRAME_CODE = FRAME_SCRIPTS.map(web).join('\n');
 const FRAME_CSS = ['base.css', 'worlds/sdk/engine.css'].map(web).join('\n');
 // The page's scene and host, and the farm's frame, loaded together.
@@ -18,7 +18,7 @@ function load() {
   vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set });
   const farm = window.AgentvilleFarm, scene = window.AgentvilleScene, host = window.TrackerFarm;
   return {
-    ...scene, ...farm, mount: host.mount, update: host.update, unmount: host.unmount, select: host.select, colorOf: host.colorOf,
+    ...scene, ...farm, spriteRows: window.Agentville.people.rows, mount: host.mount, update: host.update, unmount: host.unmount, select: host.select, colorOf: host.colorOf,
     // toScene, as the farm sees it: the page's plain-facts scene, turned into the farm's own
     toScene: (snap, o) => farm.farmScene(scene.toScene(snap, o)),
   };
@@ -145,7 +145,7 @@ test('every farmer gets its own look from its id: hat, colours, skin, extras; th
   const { toScene } = load();
   const ids = ['agent-alpha', 'agent-bravo', 'agent-charlie', 'agent-delta', 'agent-echo', 'agent-foxtrot', 'agent-golf', 'agent-hotel'];
   const looks = plain(toScene(snapOf(ids.map(id => agent(id)), []), { cpuAlertPct: 90 }).farmers.map(f => f.look));
-  for (const l of looks) for (const k of ['hat', 'hatColor', 'hair', 'skin', 'overalls', 'extra']) assert.ok(l[k], k);
+  for (const l of looks) for (const k of ['hat', 'hatColor', 'hair', 'skin', 'bottomColor', 'extra']) assert.ok(l[k], k);
   assert.ok(new Set(looks.map(l => JSON.stringify(l))).size === ids.length, 'eight agents, eight looks');
   assert.ok(new Set(looks.map(l => l.hat)).size >= 3, 'several hat styles');
   const again = plain(toScene(snapOf([agent(ids[3])], []), { cpuAlertPct: 90 }).farmers[0].look);
@@ -262,7 +262,7 @@ test('every colour the farm paints comes from one palette of ramps', () => {
 
 test('a farmer has four views: front, back, and a side each way (one the mirror of the other)', () => {
   const { spriteRows } = load();
-  const look = { hat: 'cap', hatColor: '#4a74c9', band: '#2c4a85', hair: '#5a3a22', skin: '#e0a878', overalls: '#3c5a99', extra: 'beard' };
+  const look = { hat: 'cap', hatColor: '#4a74c9', band: '#2c4a85', hair: '#5a3a22', skin: '#e0a878', top: 'shirt', bottom: 'overalls', bottomColor: '#3c5a99', extra: 'beard' };
   const views = Object.fromEntries(['down', 'up', 'right', 'left'].map(v => [v, plain(spriteRows(look, v, 's'))]));
   for (const rows of Object.values(views)) { assert.equal(rows.length, 16); assert.ok(rows.every(r => r.length === 14)); }
   assert.equal(new Set(Object.values(views).map(r => r.join('|'))).size, 4);
@@ -301,6 +301,70 @@ test('the season follows the 5-hour limit: spring when it is fresh, winter when 
   assert.equal(seasonOf(planWith(null, 50)), 'summer', 'no 5-hour window: summer');
 });
 
+test("the farm's buttons are in one Menu, top right: the dashboard's (with Broadcast), the farm's switches, the bell, help and zoom; nothing along the bottom", () => {
+  const window = { Agentville: { raw: () => {} } };
+  vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm();
+  th.setScene({ plan: planWith(42), chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  const shut = th.hud({ still: true, seasons: true, animals: true }), open = th.hud({ still: true, seasons: true, animals: true, menuOpen: true });
+  const nav = shut.slice(shut.indexOf('<div class="px-nav">'));
+  assert.match(nav, /^<div class="px-nav">\s*<button type="button" data-farm-menu aria-expanded="false"/);
+  assert.match(nav, /class="px-menu" role="group" aria-label="Menu" hidden>/);
+  const menu = nav.slice(nav.indexOf('class="px-menu"'));
+  for (const attr of ['list', 'worlds', 'session', 'setup', 'side', 'broadcast', 'theme'].map(n => `data-farm-nav="${n}"`)
+    .concat(['data-farm-follow', 'data-farm-resting', 'data-farm-bubbles', 'data-farm-animals', 'data-farm-sky', 'data-farm-season', 'data-farm-motion', 'data-farm-bell', 'data-farm-help', 'data-farm-zoom="-1"', 'data-farm-zoom="0"', 'data-farm-zoom="1"'])) {
+    assert.ok(menu.includes(attr), `${attr} is in the menu`);
+  }
+  assert.doesNotMatch(shut, /px-tools/, 'no row along the bottom');
+  assert.match(open, /data-farm-menu aria-expanded="true"/);
+  assert.doesNotMatch(open, /class="px-menu"[^>]*hidden/);
+});
+
+test('a held season shows in the panel with a 📌 and your real 5-hour use, its tooltip saying it is held; live, as before', () => {
+  const window = { Agentville: { raw: () => {} } };
+  vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm();
+  th.setScene({ plan: planWith(42), chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } }); // 42%: summer, live
+  const line = mode => {
+    const html = th.hud({ still: true, seasonMode: mode, seasons: true });
+    const [, title, inner] = /class="px-season" title="([^"]*)">([\s\S]*?)<\/div>/.exec(html);
+    return { title: title.replace(/&#39;/g, "'"), text: inner.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(), button: /data-farm-season[^>]*>[\s\S]*?Season: (\w+)/.exec(html)?.[1] };
+  };
+  const held = line('winter');
+  assert.match(held.text, /^winter 📌 · 5-hour 42%$/);
+  assert.match(held.title, /held/i);
+  assert.match(held.title, /not live/);
+  assert.match(held.title, /summer/, 'and what the live one would be');
+  assert.equal(held.button, 'winter');
+  const live = line('live');
+  assert.equal(live.text, 'summer');
+  assert.doesNotMatch(live.title, /held/i);
+  assert.match(live.title, /follows your plan's 5-hour limit: 42% used/);
+  assert.equal(live.button, 'live');
+});
+
+test('the farm draws the season shown (PXG.season), not the live one: frost, ice and snow for a held winter', () => {
+  const window = { Agentville: { raw: () => {} } };
+  const fills = [];
+  const ctx = { fillRect: (x, y, w, h) => fills.push({ x, y, w, h, c: ctx._c }), set fillStyle(c) { ctx._c = c; }, _c: null, globalAlpha: 1 };
+  vm.runInNewContext(`${code}\n;window.__PXG = PXG;`, { window, console, Math: Object.assign(Object.create(Math), { random: () => 0 }), Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm(), PXG = window.__PXG, { ink } = window.AgentvilleFarm;
+  const trough = () => fills.find(f => f.x === 87 && f.y === 155 && f.w === 10 && f.h === 1)?.c; // the water in the animals' trough, at (92, 158)
+  th.relayout(window.AgentvilleFarm.layoutFor([]));
+  th.setScene({ plan: planWith(10), chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } }); // 10%: spring, live
+  Object.assign(PXG, { ctx, T: 0, animals: true, taken: new Set() });
+  const look = shown => {
+    PXG.season = shown;
+    fills.length = 0;
+    th.ground();
+    const parts = [];
+    th.ambient(1, p => parts.push(p));
+    return { ice: trough() === ink('#d8eef8'), water: trough() === ink('#5ab4ff'), snow: parts.some(p => p.color === '#ffffff'), petals: parts.some(p => p.color === '#f4b6c2') };
+  };
+  assert.deepEqual(look('winter'), { ice: true, water: false, snow: true, petals: false }, 'held winter: an icy trough, and snow');
+  assert.deepEqual(look(null), { ice: false, water: true, snow: false, petals: true }, 'nothing from the engine yet: the live season (spring)');
+});
+
 test("the farm's scene keeps a plan window's reset flag, so a window that has just reset still says so", () => {
   const { toScene } = load();
   const w = toScene({ ...snapOf([], []), plan: planWith('reset', 50) }).plan.windows;
@@ -316,6 +380,39 @@ test("the silo's grain is the week's usage, with a lamp that warns near the limi
   assert.equal(siloOf(planWith(10, 75)).lamp, 'amber');
   assert.equal(siloOf(planWith(10, 93)).lamp, 'red');
   assert.equal(siloOf(planWith(10, 140)).fill, 1);
+});
+
+test('the farm is a modern farmstead: a black barn with a glass door, a timber house with glass walls and a deck, a black tower silo; the door, the gauge, the porch spots and the lights stay where they work', () => {
+  const window = { Agentville: { raw: () => {} } };
+  vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm();
+  th.setScene({ plan: planWith(42), chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  const rects = [];
+  th.bg((x, y, w, h, c) => rects.push([x, y, w, h, c]), 'summer', { x0: 0, x1: 400, y0: 0, y1: 300 });
+  const drew = (x, y, w, h, c) => rects.some(r => r.join() === [x, y, w, h, c].join());
+  // the barn: a six-pane glass door, where new farmers still walk out
+  const panes = [48, 59, 70].flatMap(x => [47, 64].map(y => [x, y, 9, 16]));
+  for (const p of panes) assert.ok(drew(...p, '#a9cde6'), `a glass pane in the barn door at ${p}`);
+  const [doorX, doorY] = th.spawn();
+  assert.ok(doorX > 191 && doorX < 209 && doorY === 68, `new farmers come out of the farmhouse’s glass door, at its sill (${doorX}, ${doorY})`);
+  // the silo: a black tower, its gauge window where the week's grain is drawn each frame
+  assert.ok(drew(92, 16, 20, 64, '#26262b'), 'black steel');
+  assert.ok(drew(98, 26, 8, 48, '#3a3f45'), "the gauge window, where the week's grain shows");
+  // the house: glass walls either side of a glass door, string lights, planters clear of the six porch spots
+  assert.ok(drew(142, 36, 42, 20, '#a9cde6') && drew(216, 36, 42, 20, '#a9cde6') && drew(191, 36, 18, 32, '#a9cde6'), 'glass walls over a timber skirt, and a glass door');
+  assert.ok(rects.filter(r => r[4] === '#ffe08a').length >= 15, 'string lights along the eave');
+  const planters = rects.filter(r => r[4] === '#3f3f45' && r[1] >= 60), spots = [142, 163, 184, 216, 237, 258];
+  assert.equal(planters.length, 2, 'a planter at each end of the deck');
+  for (const r of planters) assert.ok(spots.every(x => r[0] + r[2] <= x - 4 || r[0] >= x + 5), `the planter at ${r} keeps clear of the porch spots`);
+  // at night: every light is on a building; panes light up one by one (their frames stay dark), and only above the heads of
+  // the farmers on the porch and at the barn door (the engine paints lit panes over whatever stands in front)
+  const lights = th.lights(), boxes = [[36, 12, 92, 82], [88, 0, 118, 82], [122, 0, 278, 92]];
+  for (const [, , , core] of lights) if (core) assert.ok(boxes.some(([x0, y0, x1, y1]) => core[0] >= x0 && core[1] >= y0 && core[0] + core[2] <= x1 && core[1] + core[3] <= y1), `a light on a building (${core})`);
+  const lit = p => lights.some(([, , , c]) => c && [0, 1, 2, 3].every(i => c[i] === p[i]));
+  for (const p of panes.filter(([, y]) => y === 47)) assert.ok(lit(p), `the barn door's upper pane ${p} lights at night`);
+  for (const p of [[142, 36, 10, 20], [153, 36, 10, 20], [164, 36, 10, 20], [175, 36, 9, 20], [216, 36, 10, 20], [227, 36, 10, 20], [238, 36, 10, 20], [249, 36, 9, 20], [191, 36, 9, 18], [201, 36, 8, 18]]) assert.ok(lit(p), `the house's glass ${p} lights at night`);
+  for (const [, , , c] of lights) if (c) assert.ok(c[1] + c[3] <= (c[0] >= 122 ? 58 : 63), `the light at ${c} stays above the heads of farmers on the porch (from y 62) and at the barn door (from y 71)`);
+  assert.ok(!lights.some(([x, y]) => x === 213 && y === 66), "today's porch lamp is gone with the porch");
 });
 
 test('the henhouse: eggs for subagents that finished lately, a sign for running ones no farmer can lead', () => {
@@ -494,7 +591,7 @@ test('a tag made to fit a place: all one size (the full one only where it holds 
   assert.deepEqual([44, 58, 76, 100].map(fit), [{ small: true, chars: 6 }, { small: true, chars: 9 }, { small: false, chars: 8 }, { small: false, chars: 10 }]);
   assert.deepEqual(fit(10), { small: true, chars: 3 }, 'three characters at least');
   const th = window.AgentvilleFarm.makeFarm(), f = over => ({ id: 'a', name: 'shiftaro-1a', state: 'turn', ...over });
-  assert.deepEqual([th.tagSlot(f()), th.tagSlot(f({ state: 'waiting' })), th.tagSlot(f({ state: 'working' })), th.tagSlot(f({ nap: true }))], [22, 22, null, null], 'a place on the porch is 22 wide');
+  assert.deepEqual([th.tagSlot(f()), th.tagSlot(f({ state: 'waiting' })), th.tagSlot(f({ state: 'working' })), th.tagSlot(f({ nap: true }))], [21, 21, null, null], 'a place on the porch is 21 wide');
   assert.deepEqual([th.tagBadge(f()), th.tagBadge(f({ question: 'Push it?' })), th.tagBadge(f({ state: 'waiting' })), th.tagBadge(f({ nap: true }))], ['ok', 'ask', null, null], 'a tick or a question for a turn that ended; one waiting keeps its "!"');
   assert.equal(th.tag(f(), 8), 'shift-1a');
 });
@@ -555,22 +652,42 @@ test('the farm’s animals: nine kinds, seventeen animals, and a unicorn that on
   assert.deepEqual(ducks.actions.map(a => a.label), ['Feed bread', 'Quack back']);
 });
 
-test('where the farm’s animals may walk: the yard, never the lane by the porch, the fields, the pond, the hammocks or the henhouse', () => {
+test('where the farm’s animals may walk: the whole farm, but never a crop bed, a building, the carts’ row, the pond, the hammocks or the henhouse', () => {
   const window = { Agentville: { raw: () => {} } };
   vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set });
   const th = window.AgentvilleFarm.makeFarm();
-  th.relayout(window.AgentvilleFarm.layoutFor([]));
-  const { GRID } = th.layout();
+  th.relayout(window.AgentvilleFarm.layoutFor([{ key: '/a', name: 'a' }, { key: '/b', name: 'b' }, { key: '/c', name: 'c' }, { key: '/d', name: 'd' }]));
   const roam = plain(th.roam()), avoid = plain(th.avoid());
-  for (const r of roam) {
-    assert.ok(r.x + r.w <= GRID.x0 || r.y + r.h <= GRID.y0, `roam ${JSON.stringify(r)} stays out of the fields (fence ${JSON.stringify(GRID)})`);
-    assert.ok(r.y >= 96, 'and off the lane along the porch, where farmers waiting on you stand');
-  }
+  const inRoam = (x, y) => roam.some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+  for (const [x, y, where] of [[20, 160, 'the yard'], [60, 86, 'the lane'], [200, 80, 'the porch'], [300, 300, 'the meadow below the fields'], [394, 60, 'by the scarecrows'], [120, 200, 'the path beside the fields']]) assert.ok(inRoam(x, y), where);
   const covers = (x, y) => avoid.some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
   assert.ok(covers(42, 210), 'the pond');
   assert.ok(covers(97, 204) && covers(97, 224), 'the hammocks');
   assert.ok(covers(20, 115), 'the henhouse');
   assert.ok(covers(70, 120), 'and its run, where the hens are subagents');
+  assert.ok(covers(388, 87) && covers(313, 87), 'the row where the tool carts park');
+  assert.ok(th.fieldAt(174, 120) && th.buildingAt(60, 40), 'beds and buildings are the engine’s to keep them off (fieldAt, buildingAt)');
+});
+
+test('the farm’s animals wander the whole farm, out of the yard, and never onto a bed, a building or a place kept off', () => {
+  const window = { Agentville: { raw: () => {} } };
+  vm.runInNewContext(`${code}\n;window.__kit = { makeAnimals, seededRandom };`, { window, console, Math, Date, JSON, Map, Set });
+  const farm = window.AgentvilleFarm, th = farm.makeFarm();
+  th.relayout(farm.layoutFor([{ key: '/a', name: 'a' }, { key: '/b', name: 'b' }, { key: '/c', name: 'c' }, { key: '/d', name: 'd' }]));
+  th.setScene({ plan: null, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  const avoid = plain(th.avoid()), inAvoid = (x, y) => avoid.some(r => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h);
+  const a = window.__kit.makeAnimals(th.animals(), { random: window.__kit.seededRandom(3) });
+  a.place({ roam: th.roam(), avoid: th.avoid(), perches: th.perches(), spots: th.spots(), blocked: (x, y) => Boolean(th.fieldAt(x, y) || th.buildingAt?.(x, y)) });
+  let out = 0;
+  for (let i = 0; i < 12000; i++) {
+    a.tick(0.1);
+    for (const o of a.list()) {
+      if (o.kind === 'duck') continue;
+      if (o.x > 112 || o.y < 94) out++; // out of the old yard
+      assert.ok(!th.fieldAt(o.x, o.y) && !th.buildingAt(o.x, o.y) && !inAvoid(o.x, o.y), `${o.id} at (${o.x},${o.y})`);
+    }
+  }
+  assert.ok(out > 1000, `they leave the yard (${out} animal-ticks out of it)`);
 });
 
 test('with animals on, the scenery duck is gone (the ducks are the animals’ now); off, it is back as it was', () => {
@@ -729,8 +846,8 @@ const onPorch = (now, ages = {}) => [
 test('the porch has two ends, the door between them: waiting on the left, turn ended on the right, three each, in their own seats', () => {
   const farm = loadFarm(), SPOTS = plain(farm.porch.SPOTS), th = farm.makeFarm();
   assert.ok(Math.max(...SPOTS.desk) + 7 <= 191 && Math.min(...SPOTS.turn) - 7 >= 209, 'the door (191 to 209) stays clear');
-  assert.ok(Math.min(...SPOTS.turn) - Math.max(...SPOTS.desk) - 14 >= 24, 'well apart (they were 6 px apart)');
-  for (const row of Object.values(SPOTS)) assert.deepEqual([row[1] - row[0], row[2] - row[1]], [22, 22], 'a bubble clears its neighbour');
+  assert.ok(Math.min(...SPOTS.turn) - Math.max(...SPOTS.desk) - 14 >= 18, 'well apart, the glass door between them (they were 6 px apart)');
+  for (const row of Object.values(SPOTS)) assert.deepEqual([row[1] - row[0], row[2] - row[1]], [21, 21], 'a bubble clears its neighbour');
   const farmers = [...onPorch(Date.now()), { id: 'w4', state: 'waiting', since: Date.now() }, { id: 't4', state: 'turn', since: Date.now() }];
   th.setScene({ plan: null, chrome: {}, fields: [], farmers, carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
   const count = {}, at = {};
@@ -826,18 +943,18 @@ test('the album: everything the porch can show has a name; a thing drawn goes in
   for (const f of scene.farmers) { const b = { x: 200, y: 78, walk: false, zone: f.state === 'turn' ? 'turn' : 'desk', kids: [] }; th.drawChar(f, b); th.drawFx(f, b); }
   th.top();
   const rare = new Set([...SURPRISES.map(s => s[0]), 'cheers']);
-  const news = plain(th.setScene(scene)).filter(n => n.by === 'The porch');
+  const news = plain(th.setScene(scene)).filter(n => n.who === 'The porch');
   const got = kept.get('album').split(',');
   assert.ok(got.includes('rocker') && !got.includes('nonsense'), 'what was kept before stays; what the album doesn’t know is dropped');
   for (const k of ['pace', 'tap', 'drink', 'blanket']) assert.ok(got.includes(k), `${k} was drawn (${got})`);
   assert.equal(news.length, got.filter(k => rare.has(k)).length, 'the diary hears of surprises only: the everyday things would fill it');
   assert.ok(news.every(n => /seen for the first time \(\d+ of 30 in the album\)/.test(n.log) && n.text === 'New!'));
-  assert.deepEqual(plain(th.setScene(scene)).filter(n => n.by === 'The porch'), [], 'told once');
+  assert.deepEqual(plain(th.setScene(scene)).filter(n => n.who === 'The porch'), [], 'told once');
   // a merged pull request: a toast from everyone seated, and that is a surprise
   th.setScene({ ...scene, fields: [{ key: '/r', name: 'r', prs: { open: [], merged: [] } }] });
   th.setScene({ ...scene, fields: [{ key: '/r', name: 'r', prs: { open: [], merged: [{ number: 7, at: Date.now(), title: 'x' }] } }] });
   for (const f of scene.farmers) { const b = { x: 200, y: 78, walk: false, zone: f.state === 'turn' ? 'turn' : 'desk', kids: [] }; th.drawChar(f, b); th.drawFx(f, b); }
-  const toast = plain(th.setScene(scene)).filter(n => n.by === 'The porch');
+  const toast = plain(th.setScene(scene)).filter(n => n.who === 'The porch');
   assert.ok(kept.get('album').split(',').includes('cheers') && toast.some(n => /a toast to a merge: seen for the first time/.test(n.log)), 'a merge is toasted, and the diary says so');
   assert.match(th.dialog('house').html, new RegExp(`Porch album:</b> ${kept.get('album').split(',').length} of 30 seen`));
   assert.match(th.dialog('house').html, /still to find/);
@@ -857,16 +974,21 @@ test('the silos: one for each plan there is a reading of; Claude\u2019s by the b
     th.ground();
     th.labels((x, y, html, cls, title) => labels.push({ x, title }), {});
     const grain = x => fills.filter(f => f.c === '#e9c46a' && f.x === x + 7 && f.w === 6).map(f => f.h);
-    return { grain: [grain(92), grain(10)], silos: labels.filter(l => /silo/.test(l.title ?? '')).map(l => [l.x, l.title.split(':')[0]]), slate: fills.some(f => f.c === farm.ink('#5d7184')), clicks: [th.buildingAt(100, 40), th.buildingAt(20, 40)] };
+    return { grain: [grain(92), grain(8)], silos: labels.filter(l => /silo/.test(l.title ?? '')).map(l => [l.x, l.title.split(':')[0]]), slate: fills.some(f => f.c === farm.ink('#6f8fb3')), clicks: [th.buildingAt(100, 40), th.buildingAt(20, 40)] };
   };
   assert.deepEqual(plain(show(null, null)), { grain: [[], []], silos: [], slate: false, clicks: ['silo', null] }, 'no reading: the silo by the barn stands empty');
-  assert.deepEqual(plain(show(week(50), null)), { grain: [[23], []], silos: [[102, 'Claude\u2019s silo'.replace('\u2019', "'")]], slate: false, clicks: ['silo', null] });
-  assert.deepEqual(plain(show(null, week(100))), { grain: [[46], []], silos: [[102, "Codex's silo"]], slate: true, clicks: ['silo', null] }, 'Codex alone: the silo by the barn, under a slate dome');
-  assert.deepEqual(plain(show(week(50), week(100))), { grain: [[23], [46]], silos: [[102, "Claude's silo"], [20, "Codex's silo"]], slate: true, clicks: ['silo', 'silo'] }, 'both: a second silo left of the barn');
+  assert.deepEqual(plain(show(week(50), null)), { grain: [[23], []], silos: [[102, 'The silo']], slate: false, clicks: ['silo', null] });
+  assert.deepEqual(plain(show(null, week(100))), { grain: [[46], []], silos: [[102, 'The silo of Codex']], slate: true, clicks: ['silo', null] }, 'Codex alone: the silo by the barn, under a slate blue dome');
+  assert.deepEqual(plain(show(week(50), week(100))), { grain: [[23], [46]], silos: [[102, 'The silo of Claude'], [18, 'The silo of Codex']], slate: true, clicks: ['silo', 'silo'] }, 'both: a second silo left of the barn');
   const html = th.dialog('silo').html;
-  assert.match(html, /<b>Claude<\/b>[\s\S]*50% used[\s\S]*<b>Codex<\/b>[\s\S]*100% used/);
+  assert.match(html, /<h4>Claude<\/h4>[\s\S]*50% used[\s\S]*<h4>Codex<\/h4>[\s\S]*100% used/);
   th.setScene({ plan: null, codexPlan: { ...week(100), planType: 'pro', credits: 53870.2 }, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
-  assert.match(th.dialog('silo').html, /<b>Codex<\/b> <span class="muted">pro plan · 53\D?870 credits left<\/span>[\s\S]*No reading of Claude's plan yet/);
+  const alone = th.dialog('silo');
+  assert.equal(alone.title, "The silo: Codex's plan");
+  assert.match(alone.html, /<p class="muted">pro plan · 53\D?870 credits left<\/p>[\s\S]*100% used/);
+  const accounts = [{ key: 'a', name: 'Work', plan: week(10) }, { key: 'b', name: 'Home', plan: week(20) }];
+  th.setScene({ plan: week(10), accounts, codexPlan: week(100), chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  assert.deepEqual(plain(farm.silosOf({ plan: week(10), accounts, codexPlan: week(100) })).map(s => [s.x, s.name, s.who]), [[92, 'Work', 'claude'], [8, 'Home', 'claude']], 'two Claude accounts have the two silos: Codex’s has no room');
 });
 
 test('the porch signs count those there is no place for; lit windows are drawn with the land, only when it is dark', () => {
@@ -918,23 +1040,23 @@ function porchStage(clock) {
 }
 
 test('a new farmer comes out of the farmhouse: the door stands open while it does; the porch cat runs off its mat, round the house and up onto the roof, and is not back soon', () => {
-  const s = porchStage(catClock('mat', 'nap')), LANE = 87, leaf = s.farm.ink('#8b5a2b'), dark = s.farm.ink('#1b1420');
-  assert.deepEqual(plain(s.th.spawn()), [200, 65, [[200, LANE]]], 'from the front door’s sill, across the porch, down the steps onto the lane');
+  const s = porchStage(catClock('mat', 'nap')), LANE = 87, leaf = s.farm.ink('#a9cde6'), dark = s.farm.ink('#1b1420');
+  assert.deepEqual(plain(s.th.spawn()), [200, 68, [[200, LANE]]], 'from the glass door’s sill, across the deck, down the steps onto the lane');
   assert.equal(s.th.arriveText, 'comes out of the farmhouse');
-  const doorOpen = d => d.some(r => r[0] === 193 && r[1] === 47 && r[2] === 2 && r[3] === 18 && r[4] === leaf) && !d.some(r => r[4] === dark && r[0] >= 193 && r[0] < 207 && r[1] >= 47 && r[1] < 65);
+  const doorOpen = d => d.some(r => r[0] === 191 && r[1] === 36 && r[2] === 3 && r[3] === 32 && r[4] === leaf) && !d.some(r => r[4] === dark && r[2] > 2 && r[0] >= 191 && r[0] < 209 && r[1] >= 36 && r[1] < 68); // its glass leaves slid apart, a hall behind: no dark hole
   assert.deepEqual([doorOpen(s.frame(1)), s.catHome(s.frame(1.1))], [false, true], 'nobody about: the door shut, the cat curled up on its mat');
-  s.frame(2, { x: 200, y: 65 }); // it steps onto the sill
-  s.frame(2.05, { x: 200, y: 70 });
+  s.frame(2, { x: 200, y: 68 }); // it steps onto the sill
+  s.frame(2.05, { x: 200, y: 71 });
   const out = s.frame(2.1, { x: 200, y: 74 });
   assert.deepEqual([doorOpen(out), s.catHome(out)], [true, false], 'the door is open, and the cat is off the mat');
   const seen = [];
   for (let T = 2.15; T < 14; T += 0.05) { const at = s.catAt(s.frame(T)); if (at) seen.push(at); }
   assert.equal(doorOpen(s.frame(14)), false, 'the door shut behind the farmer');
-  const wall = seen.filter(([x, y]) => y > 44 && y < 74 && x > 136 && x < 264);
+  const wall = seen.filter(([x, y]) => y > 36 && y < 74 && x > 136 && x < 264);
   assert.deepEqual(wall, [], 'it never passes through the house: down the steps, along the lane, up beside the stall');
   assert.ok(seen.some(([x, y]) => x > 272 && y > 50 && y < 86), 'it goes up beside the market stall, outside the house');
   const up = seen.at(-1);
-  assert.ok(up[1] < 38 && up[0] > 185 && up[0] < 215, `and sits on the roof above the door (${up})`);
+  assert.ok(up[1] < 28 && up[0] > 226 && up[0] < 246, `and sits up on the roof, between the sign and the flue (${up})`);
   let home = null;
   for (let T = 14; T < 30 && home === null; T += 0.1) if (s.catHome(s.frame(T))) home = T;
   assert.equal(home, null, 'it is not back on its mat within the half minute: it stays away a good while');
@@ -947,7 +1069,7 @@ test('the porch cat on the lane makes way for a farmer walking by: to the roof, 
   fromLeft.frame(1.1, { x: 238, y: 87, face: 'right' });
   let last = null;
   for (let T = 1.2; T < 9; T += 0.05) last = fromLeft.catAt(fromLeft.frame(T)) ?? last;
-  assert.ok(last[1] < 40, `up on the roof (${last})`);
+  assert.ok(last[1] < 30, `up on the roof (${last})`);
   const fromRight = porchStage(catClock('laneR'));
   fromRight.frame(1);
   fromRight.frame(1.1, { x: 262, y: 87, face: 'left' });
@@ -981,9 +1103,9 @@ test('the porch cat’s ways keep to the mat, the steps and the lane, and go up 
   assert.deepEqual(legs(ground('laneR'), 'laneL'), [{ to: [168, LANE] }], 'past the porch on the lane, before the sitters');
   assert.deepEqual(legs(ground('laneL'), 'mat'), [{ to: [200, LANE] }, { to: S.mat }], 'and up the steps');
   assert.deepEqual(legs(ground('mat'), 'in'), [{ to: S.in, in: true }]);
-  const up = [{ to: [200, LANE] }, { to: [U.foot[0], LANE] }, { jump: U.stall, where: 'stall' }, { jump: U.edge, where: 'roof' }, { to: [U.edge[0] - 6, U.ridge] }, { to: [S.roof[0] + 26, U.ridge] }, { to: S.roof }];
-  assert.deepEqual(legs(ground('mat'), 'roof'), up, 'to the roof: round to the stall, onto its awning, over to the roof’s edge, along the shingles');
-  assert.deepEqual(legs({ x: S.roof[0], y: S.roof[1], where: 'roof' }, 'step'), [{ to: [S.roof[0], U.ridge] }, { to: [U.edge[0] - 6, U.ridge] }, { to: U.edge }, { jump: U.stall, where: 'stall' }, { jump: U.foot, where: 'ground' }, { to: [196, LANE] }, { to: S.step }], 'and down the same way');
+  const up = [{ to: [200, LANE] }, { to: [U.foot[0], LANE] }, { jump: U.stall, where: 'stall' }, { jump: U.edge, where: 'roof' }, { to: S.roof }];
+  assert.deepEqual(legs(ground('mat'), 'roof'), up, 'to the roof: round to the stall, onto its awning, over to the roof’s low end, up its slope');
+  assert.deepEqual(legs({ x: S.roof[0], y: S.roof[1], where: 'roof' }, 'step'), [{ to: U.edge }, { jump: U.stall, where: 'stall' }, { jump: U.foot, where: 'ground' }, { to: [196, LANE] }, { to: S.step }], 'and down the same way');
   assert.deepEqual(legs({ x: 200, y: 69, where: 'in' }, 'laneL'), [{ out: true }, { to: S.mat }, { to: [200, LANE] }, { to: [168, LANE] }]);
   assert.deepEqual(legs({ x: S.roof[0], y: S.roof[1], where: 'roof' }, 'roof'), []);
   for (const from of ['mat', 'step', 'laneL', 'laneR', 'farL', 'farR']) for (const goal of ['mat', 'step', 'laneL', 'laneR', 'farL', 'farR', 'roof', 'in']) {
@@ -995,7 +1117,7 @@ test('the porch cat’s ways keep to the mat, the steps and the lane, and go up 
   assert.equal(path(U.foot, U.stall)[2].pose, 'crouch');
   assert.deepEqual([...new Set(path(U.foot, U.stall).map(q => q.pose))], ['crouch', 'leap', 'jump'], 'it gathers itself, goes up stretched, levels out, and lands low');
   for (const q of path(U.foot, U.stall)) assert.ok(q.x < 283 || q.y <= 50, `up beside the stall, not through it (${q.x}, ${q.y})`);
-  for (const q of path(U.stall, U.edge)) assert.ok(q.y <= 48.5 && (q.x > 268 || q.y <= 41), `over the gap above the wall’s top (${q.x}, ${q.y})`);
+  for (const q of path(U.stall, U.edge)) assert.ok(q.y <= 48.5 && (q.x > 268 || q.y <= 30), `over the gap, above the roof’s low end (${q.x}, ${q.y})`);
   for (const q of path(U.stall, U.foot)) assert.ok(q.x < 284.5 || q.y <= 50.5, `down beside the stall (${q.x}, ${q.y})`);
   assert.ok(path(U.stall, U.foot).some(q => q.pose === 'dive'));
 });
@@ -1266,4 +1388,324 @@ test('a farmer at a step of the bed’s walks at it: along the rows for an edit,
   w.give([step('test', 'Bash')], [repoA]); go(3);
   assert.deepEqual([...new Set(seen.map(p => `${p[0]},${p[1]}`))], [`${s.cx},${s.lane}`], 'a test run is done standing, at the bed’s front');
   assert.equal(w.th.speed(w.scene().farmers[0]), 40);
+});
+
+// The farm's panel and buttons (its hud), pinned byte for byte as they were before they moved into the
+// engine's shared panelHud. A stand-in canvas turns each pixel image (a text, an icon) into a token of its
+// size, its colours in order and a hash of its pixels, so the colours and the icons are pinned too; the
+// brand mark is a stand-in that says what it was asked for.
+function farmHud({ scene, params }) {
+  const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
+  const document = {
+    createElement: () => {
+      const calls = [], colors = [];
+      const g = { set fillStyle(c) { if (!colors.includes(c)) colors.push(c); calls.push(c); }, fillRect: (x, y, w, h) => { calls.push(`${x},${y},${w},${h}`); } };
+      return { width: 0, height: 0, getContext: () => g, toDataURL() { return `px:${this.width}x${this.height}:${colors.join('/')}:${fnv(calls.join(';'))}`; } };
+    },
+  };
+  const window = { Agentville: { raw: () => {}, svg: o => `<svg data-brand="${o.size} ${o.cls}"></svg>` } };
+  vm.runInNewContext(FRAME_CODE, { window, document, console, Math, Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm();
+  th.setScene(scene());
+  return th.hud(params);
+}
+const hudScene = (plan, chrome, farmers) => ({ plan, chrome, fields: [], farmers, carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+const SEASON_WORDS = { switch: 'Season', spring: 'spring', summer: 'summer', autumn: 'autumn', winter: 'winter' }; // what the engine hands the farm: its own words
+const HUD_CASES = {
+  // live, a busy day: every count, gauge and button, two waiting on you, an error to escape
+  live: {
+    scene: () => hudScene(planWith(30, 55), {
+      counts: { waiting: 2, working: 3, yourTurn: 1, idle: 2, stale: 1, collisions: 1 }, oldestWaiting: Date.now() - 5 * 60_000, subagentsRunning: 2, agents: 9, asking: 1,
+      ram: { usedMb: 2300, totalMb: 16384 }, cpu: { used: 140, cores: 8 }, collector: { cpu: 1.5, rssMb: 80 }, errors: ['GitHub: rate limited <b>'],
+    }, [{ id: 'a', state: 'waiting', cost: 1.25, compactions: 2 }, { id: 'b', state: 'working', cost: 3.5, compactions: 1 }, { id: 'c', state: 'turn', question: 'Which one?' }]),
+    params: { still: false, zoom: 1, saysOn: true, skyMode: 'live', seasonMode: 'live', seasons: true, seasonNames: SEASON_WORDS, follow: false, canFollow: true, restingHidden: null, bell: false, nav: { live: true, side: false, theme: 'dark' }, panelOpen: true, animals: null },
+  },
+  // the Season switch holding winter at 42% (live: summer); following, resting hidden, motion off, offline, the sidebar open
+  heldWinter: {
+    scene: () => hudScene(planWith(42), { counts: { waiting: 0, working: 1, yourTurn: 0, idle: 0, stale: 0, collisions: 0 }, agents: 1, ram: { usedMb: 512 } }, [{ id: 'a', state: 'working' }]),
+    params: { still: true, zoom: 2, saysOn: false, skyMode: 'night', seasonMode: 'winter', seasons: true, seasonNames: SEASON_WORDS, follow: true, canFollow: true, restingHidden: 3, bell: true, nav: { live: false, side: true, theme: 'light' }, panelOpen: true, animals: false },
+  },
+  // the panel folded, the animals on; spring held with no 5-hour reading, nobody picked; the rest left to their defaults
+  foldedAnimals: {
+    scene: () => hudScene(null, {}, []),
+    params: { still: false, zoom: 0.75, skyMode: 'day', seasonMode: 'spring', seasons: true, canFollow: false, nav: { theme: 'auto' }, panelOpen: false, animals: true },
+  },
+};
+// What hud() gave for each case, recorded on the farm's own hud() before the move; recorded again on main's
+// own farm hud() (2c3d7f7) when its Menu replaced the two button rows. Never re-record these to make a change pass.
+// A line of only spaces is written as ${pad(n)}, so no editor trims it.
+const pad = n => ' '.repeat(n);
+const FROZEN_HUD = {
+  live: `<div class="px-stats">
+            <button type="button" class="px-brand" data-farm-panel title="Fold this panel away" aria-expanded="true"><svg data-brand="18 px-logo"></svg><i class="pxt" aria-hidden="true" style="width:116.0px;height:20.0px;background-image:url(px:58x10:#2a1d14/#ffe8a3:71586e5b)"></i><span class="px-sr">AGENTVILLE</span><i class="px-live" title="Live"></i><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#c9b48a:9cd4bbc7)"></i><span class="px-sr">-</span></button>
+            <div class="px-line"><span title="What the sessions on the farm have cost so far (each one's purse; from the mod)"><b class="coin"></b><i class="pxt" aria-hidden="true" style="width:52.0px;height:20.0px;background-image:url(px:26x10:#2a1d14/#fff3d6:145977db)"></i><span class="px-sr">$4.75</span></span><span title="Harvests: each time a session's conversation was compacted"><b class="basket"></b><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#2a1d14/#fff3d6:69754028)"></i><span class="px-sr">3 harvested</span></span><span class="px-season" title="The season follows your plan&#39;s 5-hour limit: 30% used. Spring while it is fresh, then summer and autumn; winter when it is nearly used up"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:70.0px;height:20.0px;background-image:url(px:35x10:#2a1d14/#fff3d6:b0686e96)"></i><span class="px-sr">summer</span></span></div>
+            <div class="px-kpis">
+              <button type="button" class="px-kpi hot" data-farm-state="waiting" title="Agents waiting on you (a question or a permission): click for the first"><span class="px-kpi-ico k-wait"><i class="pxt" aria-hidden="true" style="width:4.0px;height:20.0px;background-image:url(px:2x10:#ffffff:9e741914)"></i><span class="px-sr">!</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:f8702c9c)"></i><span class="px-sr">2</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:142.0px;height:20.0px;background-image:url(px:71x10:#a9c79a:d548d197)"></i><span class="px-sr">waiting on you</span><br><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:d5c8634d)"></i><span class="px-sr">oldest 5m</span></span></button>
+              <button type="button" class="px-kpi" data-farm-state="working" title="Agents at work: click for the first"><span class="px-kpi-ico k-work"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:e3235385)"></i><span class="px-sr">&gt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:7d4c66e4)"></i><span class="px-sr">3</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#a9c79a:4ab18612)"></i><span class="px-sr">working</span><br><i class="pxt" aria-hidden="true" style="width:172.0px;height:20.0px;background-image:url(px:86x10:#c9b48a:6e0531e2)"></i><span class="px-sr">2 with subagents</span></span></button>
+              <button type="button" class="px-kpi hot" data-farm-state="turn" title="Agents whose turn ended: it&#39;s yours. Click for the first"><span class="px-kpi-ico k-turn"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:323269c0)"></i><span class="px-sr">&lt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#a9c79a:e49dcf43)"></i><span class="px-sr">your turn</span><br><i class="pxt" aria-hidden="true" style="width:256.0px;height:20.0px;background-image:url(px:128x10:#c9b48a:12c6592b)"></i><span class="px-sr">1 ask you · 2 idle · 1 stale</span></span></button>
+              <button type="button" class="px-kpi hot" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:156.0px;height:20.0px;background-image:url(px:78x10:#c9b48a:46831424)"></i><span class="px-sr">two in one repo</span></span></button>
+            </div>
+            <div class="px-gauges">
+              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
+              <span class="px-gauge" title="CPU used by the agents: 140% of one core, 8 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:18%"></i></span><i class="pxt" aria-hidden="true" style="width:32.0px;height:20.0px;background-image:url(px:16x10:#2a1d14/#fff3d6:acf1cb9c)"></i><span class="px-sr">18%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
+              <span class="px-gauge" title="Your plan's 5-hour limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#a9c79a:77a45452)"></i><span class="px-sr">5H</span><span class="px-bar"><i class="ok" style="width:30%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:7df674fb)"></i><span class="px-sr">30%</span><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#c9b48a:3961ca8e)"></i><span class="px-sr">5-hour limit</span></span>
+              <span class="px-gauge" title="Your plan's weekly limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:7d693448)"></i><span class="px-sr">WEEK</span><span class="px-bar"><i class="warn" style="width:55%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:71287b6d)"></i><span class="px-sr">55%</span><i class="pxt" aria-hidden="true" style="width:92.0px;height:20.0px;background-image:url(px:46x10:#c9b48a:170a2ba1)"></i><span class="px-sr">this week</span></span>
+              <span class="px-gauge" title="The tracker itself"><i class="pxt" aria-hidden="true" style="width:238.0px;height:20.0px;background-image:url(px:119x10:#c9b48a:b6098418)"></i><span class="px-sr">tracker 1.5% CPU · 80 MB</span></span>
+            </div>
+            <div class="px-err">⚠ GitHub: rate limited &lt;b&gt;</div>
+            <button type="button" class="px-need" data-farm-need title="Open the first agent that needs you"><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#5a1f19/#ffffff:0a524b9c)"></i><span class="px-sr">2 need you</span></button>
+          </div>
+          <div class="px-nav">
+            <button type="button" data-farm-menu aria-expanded="false" title="The dashboard's buttons, the farm's switches, the bell, help and zoom"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:b982a223)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:b8e00e2f)"></i><span class="px-sr">Menu</span></button>
+            <div class="px-menu" role="group" aria-label="Menu" hidden>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#8b5a2b:715e2c47)"></i><span class="px-sr">DASHBOARD</span></div>
+              <div class="px-menu-grid">
+                <button type="button" data-farm-nav="list" title="Back to the list view"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:5f5651a6)"></i><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:65708540)"></i><span class="px-sr">LIST</span></button>
+                <button type="button" data-farm-nav="worlds" title="Choose a world"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#a9dcf7/#3f9b3a:081855c5)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:a2881fd5)"></i><span class="px-sr">WORLD</span></button>
+                <button type="button" data-farm-nav="session" title="Start a new Claude Code session in a folder, or resume a past one"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:2d04caf6)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:a4edc5ff)"></i><span class="px-sr">SESSION</span></button>
+                <button type="button" data-farm-nav="setup" title="Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:af1418b8)"></i><i class="pxt" aria-hidden="true" style="width:128.0px;height:20.0px;background-image:url(px:64x10:#4e3626:bb190415)"></i><span class="px-sr">CLAUDE CODE</span></button>
+                <button type="button" data-farm-nav="side" title="Show the selected farmer&#39;s answer box, activity and files beside the farm" aria-pressed="false"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:4ee7c8c5)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:51a95a73)"></i><span class="px-sr">SIDEBAR</span></button>
+                <button type="button" data-farm-nav="broadcast" title="Message several agents at once: all of them, or the ones you pick"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:cbfe0223)"></i><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#4e3626:e91e76da)"></i><span class="px-sr">BROADCAST</span></button>
+                <button type="button" data-farm-nav="theme" title="Theme: dark, light, or auto (as macOS is): click to change"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#f4ecd8:dd5e712e)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:5dd07217)"></i><span class="px-sr">DARK</span></button>
+              </div>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#8b5a2b:d8532a2d)"></i><span class="px-sr">ON THE FARM</span></div>
+              <button type="button" data-farm-follow title="Keep the farmer you picked in the middle of the view (zooms in); dragging the view turns it off"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#e04a3a:cc792b8f)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:6be19e76)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Follow: off</span></button>
+              <button type="button" data-farm-resting title="Idle farmers (under the tree) and stale ones (scarecrows): show them, or hide them to keep the farm to the agents at work"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:6a01f51d)"></i><i class="pxt" aria-hidden="true" style="width:74.0px;height:20.0px;background-image:url(px:37x10:#4e3626:902464b2)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#8b5a2b:12db36ba)"></i></span><span class="px-sr">Resting: shown</span></button>
+              <button type="button" data-farm-bubbles title="Speech bubbles with what each farmer last said. × hides one; its 💬 shows it again"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#ffffff:d27c2259)"></i><i class="pxt" aria-hidden="true" style="width:78.0px;height:20.0px;background-image:url(px:39x10:#4e3626:acf04316)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Bubbles: on</span></button>
+${pad(14)}
+              <button type="button" data-farm-sky title="The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#4e3626:380cd1fd)"></i><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#4e3626:04764f1d)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#8b5a2b:02ff8622)"></i></span><span class="px-sr">Sky: live</span></button>
+              <button type="button" data-farm-season title="The season: live follows your plan&#39;s 5-hour limit (spring while it is fresh, winter when it is nearly used up); or hold one: spring, summer, autumn or winter. The panel&#39;s 📌 shows your real 5-hour use meanwhile"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#4e3626:dccd7184)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#8b5a2b:02ff8622)"></i></span><span class="px-sr">Season: live</span></button>
+              <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
+              <div class="px-menu-sep"></div>
+              <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
+              <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:7305c299)"></i><span class="px-sr">100%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
+            </div>
+          </div>`,
+  heldWinter: `<div class="px-stats">
+            <button type="button" class="px-brand" data-farm-panel title="Fold this panel away" aria-expanded="true"><svg data-brand="18 px-logo"></svg><i class="pxt" aria-hidden="true" style="width:116.0px;height:20.0px;background-image:url(px:58x10:#2a1d14/#ffe8a3:71586e5b)"></i><span class="px-sr">AGENTVILLE</span><i class="px-live off" title="Disconnected from the collector: retrying"></i><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#c9b48a:9cd4bbc7)"></i><span class="px-sr">-</span></button>
+            <div class="px-line"><span title="What the sessions on the farm have cost so far (each one's purse; from the mod)"><b class="coin"></b><i class="pxt" aria-hidden="true" style="width:52.0px;height:20.0px;background-image:url(px:26x10:#2a1d14/#fff3d6:71740e0b)"></i><span class="px-sr">$0.00</span></span><span title="Harvests: each time a session's conversation was compacted"><b class="basket"></b><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#2a1d14/#fff3d6:afd0b32e)"></i><span class="px-sr">0 harvested</span></span><span class="px-season" title="Held at winter by the Season switch, not live. The live season would be summer (your plan&#39;s 5-hour limit: 42% used). The switch goes back to live after winter"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#a9dcf7:4c780485)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:b54f1892)"></i><span class="px-sr">winter</span> 📌 <i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#c9b48a:ff3bb612)"></i><span class="px-sr">· 5-hour 42%</span></span></div>
+            <div class="px-kpis">
+              <button type="button" class="px-kpi" disabled title="Agents waiting on you (a question or a permission): click for the first"><span class="px-kpi-ico k-wait"><i class="pxt" aria-hidden="true" style="width:4.0px;height:20.0px;background-image:url(px:2x10:#ffffff:9e741914)"></i><span class="px-sr">!</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:142.0px;height:20.0px;background-image:url(px:71x10:#a9c79a:d548d197)"></i><span class="px-sr">waiting on you</span><br><i class="pxt" aria-hidden="true" style="width:82.0px;height:20.0px;background-image:url(px:41x10:#c9b48a:a479816f)"></i><span class="px-sr">all clear</span></span></button>
+              <button type="button" class="px-kpi" data-farm-state="working" title="Agents at work: click for the first"><span class="px-kpi-ico k-work"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:e3235385)"></i><span class="px-sr">&gt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#a9c79a:4ab18612)"></i><span class="px-sr">working</span><br><i class="pxt" aria-hidden="true" style="width:170.0px;height:20.0px;background-image:url(px:85x10:#c9b48a:92b3d876)"></i><span class="px-sr">1 agents tracked</span></span></button>
+              <button type="button" class="px-kpi" disabled title="Agents whose turn ended: it&#39;s yours. Click for the first"><span class="px-kpi-ico k-turn"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:323269c0)"></i><span class="px-sr">&lt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#a9c79a:e49dcf43)"></i><span class="px-sr">your turn</span><br><i class="pxt" aria-hidden="true" style="width:146.0px;height:20.0px;background-image:url(px:73x10:#c9b48a:215bb570)"></i><span class="px-sr">0 idle · 0 stale</span></span></button>
+              <button type="button" class="px-kpi" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#c9b48a:eb6a233d)"></i><span class="px-sr">none</span></span></button>
+            </div>
+            <div class="px-gauges">
+              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:64.0px;height:20.0px;background-image:url(px:32x10:#2a1d14/#fff3d6:70dee863)"></i><span class="px-sr">512 MB</span></span>
+              <span class="px-gauge" title="CPU used by the agents: 0% of one core, 1 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#2a1d14/#fff3d6:65853a4f)"></i><span class="px-sr">0%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
+              <span class="px-gauge" title="Your plan's 5-hour limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#a9c79a:77a45452)"></i><span class="px-sr">5H</span><span class="px-bar"><i class="ok" style="width:42%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:6b284487)"></i><span class="px-sr">42%</span><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#c9b48a:3961ca8e)"></i><span class="px-sr">5-hour limit</span></span>
+${pad(14)}
+${pad(14)}
+            </div>
+${pad(12)}
+${pad(12)}
+          </div>
+          <div class="px-nav">
+            <button type="button" data-farm-menu aria-expanded="false" title="The dashboard's buttons, the farm's switches, the bell, help and zoom"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:b982a223)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:b8e00e2f)"></i><span class="px-sr">Menu</span></button>
+            <div class="px-menu" role="group" aria-label="Menu" hidden>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#8b5a2b:715e2c47)"></i><span class="px-sr">DASHBOARD</span></div>
+              <div class="px-menu-grid">
+                <button type="button" data-farm-nav="list" title="Back to the list view"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:5f5651a6)"></i><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:65708540)"></i><span class="px-sr">LIST</span></button>
+                <button type="button" data-farm-nav="worlds" title="Choose a world"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#a9dcf7/#3f9b3a:081855c5)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:a2881fd5)"></i><span class="px-sr">WORLD</span></button>
+                <button type="button" data-farm-nav="session" title="Start a new Claude Code session in a folder, or resume a past one"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:2d04caf6)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:a4edc5ff)"></i><span class="px-sr">SESSION</span></button>
+                <button type="button" data-farm-nav="setup" title="Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:af1418b8)"></i><i class="pxt" aria-hidden="true" style="width:128.0px;height:20.0px;background-image:url(px:64x10:#4e3626:bb190415)"></i><span class="px-sr">CLAUDE CODE</span></button>
+                <button type="button" data-farm-nav="side" title="Show the selected farmer&#39;s answer box, activity and files beside the farm" aria-pressed="true"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:4ee7c8c5)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:51a95a73)"></i><span class="px-sr">SIDEBAR</span></button>
+                <button type="button" data-farm-nav="broadcast" title="Message several agents at once: all of them, or the ones you pick"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:cbfe0223)"></i><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#4e3626:e91e76da)"></i><span class="px-sr">BROADCAST</span></button>
+                <button type="button" data-farm-nav="theme" title="Theme: dark, light, or auto (as macOS is): click to change"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:56.0px;height:20.0px;background-image:url(px:28x10:#4e3626:0180d636)"></i><span class="px-sr">LIGHT</span></button>
+              </div>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#8b5a2b:d8532a2d)"></i><span class="px-sr">ON THE FARM</span></div>
+              <button type="button" data-farm-follow title="Keep the farmer you picked in the middle of the view (zooms in); dragging the view turns it off"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#e04a3a:cc792b8f)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:6be19e76)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Follow: on</span></button>
+              <button type="button" data-farm-resting title="Idle farmers (under the tree) and stale ones (scarecrows): show them, or hide them to keep the farm to the agents at work"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:6a01f51d)"></i><i class="pxt" aria-hidden="true" style="width:74.0px;height:20.0px;background-image:url(px:37x10:#4e3626:902464b2)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#8b5a2b:c27ef1a6)"></i></span><span class="px-sr">Resting: hidden (3)</span></button>
+              <button type="button" data-farm-bubbles title="Speech bubbles with what each farmer last said. × hides one; its 💬 shows it again"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#ffffff:d27c2259)"></i><i class="pxt" aria-hidden="true" style="width:78.0px;height:20.0px;background-image:url(px:39x10:#4e3626:acf04316)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bubbles: off</span></button>
+              <button type="button" data-farm-animals title="Animals on the farm, just for fun: click one to pet or feed it (or the pond, for the ducks). They never stand for anything"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:c4c82909)"></i><i class="pxt" aria-hidden="true" style="width:70.0px;height:20.0px;background-image:url(px:35x10:#4e3626:a1ae18e2)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Animals: off</span></button>
+              <button type="button" data-farm-sky title="The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#f4ecd8:dd5e712e)"></i><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#4e3626:04764f1d)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:50.0px;height:20.0px;background-image:url(px:25x10:#8b5a2b:7f122d2a)"></i></span><span class="px-sr">Sky: night</span></button>
+              <button type="button" data-farm-season title="The season: live follows your plan&#39;s 5-hour limit (spring while it is fresh, winter when it is nearly used up); or hold one: spring, summer, autumn or winter. The panel&#39;s 📌 shows your real 5-hour use meanwhile"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#a9dcf7:4c780485)"></i><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#4e3626:dccd7184)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#8b5a2b:f3e700bc)"></i></span><span class="px-sr">Season: winter</span></button>
+              <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:d6b1f9fa)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Motion: off</span></button>
+              <div class="px-menu-sep"></div>
+              <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Bell: on</span></button>
+              <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
+              <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:dc8025dd)"></i><span class="px-sr">200%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
+            </div>
+          </div>`,
+  foldedAnimals: `<div class="px-stats folded">
+            <button type="button" class="px-brand" data-farm-panel title="Show the counts and meters" aria-expanded="false"><svg data-brand="18 px-logo"></svg><i class="pxt" aria-hidden="true" style="width:116.0px;height:20.0px;background-image:url(px:58x10:#2a1d14/#ffe8a3:71586e5b)"></i><span class="px-sr">AGENTVILLE</span><i class="px-live" title="Live"></i><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#c9b48a:43ad99cb)"></i><span class="px-sr">+</span></button>
+            <div class="px-line"><span title="What the sessions on the farm have cost so far (each one's purse; from the mod)"><b class="coin"></b><i class="pxt" aria-hidden="true" style="width:52.0px;height:20.0px;background-image:url(px:26x10:#2a1d14/#fff3d6:71740e0b)"></i><span class="px-sr">$0.00</span></span><span title="Harvests: each time a session's conversation was compacted"><b class="basket"></b><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#2a1d14/#fff3d6:afd0b32e)"></i><span class="px-sr">0 harvested</span></span><span class="px-season" title="Held at spring by the Season switch, not live. The live season would be summer (your plan&#39;s 5-hour limit: no reading yet). The switch goes back to live after winter"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#3f9b3a/#4e3626:1dececba)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#2a1d14/#fff3d6:21eb05f5)"></i><span class="px-sr">spring</span> 📌 <i class="pxt" aria-hidden="true" style="width:194.0px;height:20.0px;background-image:url(px:97x10:#c9b48a:7a330ce3)"></i><span class="px-sr">· no 5-hour reading</span></span></div>
+            <div class="px-kpis">
+              <button type="button" class="px-kpi" disabled title="Agents waiting on you (a question or a permission): click for the first"><span class="px-kpi-ico k-wait"><i class="pxt" aria-hidden="true" style="width:4.0px;height:20.0px;background-image:url(px:2x10:#ffffff:9e741914)"></i><span class="px-sr">!</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:142.0px;height:20.0px;background-image:url(px:71x10:#a9c79a:d548d197)"></i><span class="px-sr">waiting on you</span><br><i class="pxt" aria-hidden="true" style="width:82.0px;height:20.0px;background-image:url(px:41x10:#c9b48a:a479816f)"></i><span class="px-sr">all clear</span></span></button>
+              <button type="button" class="px-kpi" disabled title="Agents at work: click for the first"><span class="px-kpi-ico k-work"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:e3235385)"></i><span class="px-sr">&gt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#a9c79a:4ab18612)"></i><span class="px-sr">working</span><br><i class="pxt" aria-hidden="true" style="width:174.0px;height:20.0px;background-image:url(px:87x10:#c9b48a:4e2aa57a)"></i><span class="px-sr">0 agents tracked</span></span></button>
+              <button type="button" class="px-kpi" disabled title="Agents whose turn ended: it&#39;s yours. Click for the first"><span class="px-kpi-ico k-turn"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:323269c0)"></i><span class="px-sr">&lt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#a9c79a:e49dcf43)"></i><span class="px-sr">your turn</span><br><i class="pxt" aria-hidden="true" style="width:146.0px;height:20.0px;background-image:url(px:73x10:#c9b48a:215bb570)"></i><span class="px-sr">0 idle · 0 stale</span></span></button>
+              <button type="button" class="px-kpi" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#c9b48a:eb6a233d)"></i><span class="px-sr">none</span></span></button>
+            </div>
+            <div class="px-gauges">
+              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#2a1d14/#fff3d6:aa7ff1cd)"></i><span class="px-sr">0 MB</span></span>
+              <span class="px-gauge" title="CPU used by the agents: 0% of one core, 1 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#2a1d14/#fff3d6:65853a4f)"></i><span class="px-sr">0%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
+${pad(14)}
+${pad(14)}
+${pad(14)}
+            </div>
+${pad(12)}
+${pad(12)}
+          </div>
+          <div class="px-nav">
+            <button type="button" data-farm-menu aria-expanded="false" title="The dashboard's buttons, the farm's switches, the bell, help and zoom"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:b982a223)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:b8e00e2f)"></i><span class="px-sr">Menu</span></button>
+            <div class="px-menu" role="group" aria-label="Menu" hidden>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#8b5a2b:715e2c47)"></i><span class="px-sr">DASHBOARD</span></div>
+              <div class="px-menu-grid">
+                <button type="button" data-farm-nav="list" title="Back to the list view"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:5f5651a6)"></i><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:65708540)"></i><span class="px-sr">LIST</span></button>
+                <button type="button" data-farm-nav="worlds" title="Choose a world"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#a9dcf7/#3f9b3a:081855c5)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:a2881fd5)"></i><span class="px-sr">WORLD</span></button>
+                <button type="button" data-farm-nav="session" title="Start a new Claude Code session in a folder, or resume a past one"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:2d04caf6)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:a4edc5ff)"></i><span class="px-sr">SESSION</span></button>
+                <button type="button" data-farm-nav="setup" title="Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:af1418b8)"></i><i class="pxt" aria-hidden="true" style="width:128.0px;height:20.0px;background-image:url(px:64x10:#4e3626:bb190415)"></i><span class="px-sr">CLAUDE CODE</span></button>
+                <button type="button" data-farm-nav="side" title="Show the selected farmer&#39;s answer box, activity and files beside the farm" aria-pressed="false"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:4ee7c8c5)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:51a95a73)"></i><span class="px-sr">SIDEBAR</span></button>
+                <button type="button" data-farm-nav="broadcast" title="Message several agents at once: all of them, or the ones you pick"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:cbfe0223)"></i><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#4e3626:e91e76da)"></i><span class="px-sr">BROADCAST</span></button>
+                <button type="button" data-farm-nav="theme" title="Theme: dark, light, or auto (as macOS is): click to change"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#4e3626:380cd1fd)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:8d09ad78)"></i><span class="px-sr">AUTO</span></button>
+              </div>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#8b5a2b:d8532a2d)"></i><span class="px-sr">ON THE FARM</span></div>
+              <button type="button" data-farm-follow disabled title="Pick a farmer first, then Follow keeps it in view"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#e04a3a:cc792b8f)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:6be19e76)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Follow: off</span></button>
+              <button type="button" data-farm-resting title="Idle farmers (under the tree) and stale ones (scarecrows): show them, or hide them to keep the farm to the agents at work"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:6a01f51d)"></i><i class="pxt" aria-hidden="true" style="width:74.0px;height:20.0px;background-image:url(px:37x10:#4e3626:902464b2)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#8b5a2b:12db36ba)"></i></span><span class="px-sr">Resting: shown</span></button>
+              <button type="button" data-farm-bubbles title="Speech bubbles with what each farmer last said. × hides one; its 💬 shows it again"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#ffffff:d27c2259)"></i><i class="pxt" aria-hidden="true" style="width:78.0px;height:20.0px;background-image:url(px:39x10:#4e3626:acf04316)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Bubbles: on</span></button>
+              <button type="button" data-farm-animals title="Animals on the farm, just for fun: click one to pet or feed it (or the pond, for the ducks). They never stand for anything"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:c4c82909)"></i><i class="pxt" aria-hidden="true" style="width:70.0px;height:20.0px;background-image:url(px:35x10:#4e3626:a1ae18e2)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Animals: on</span></button>
+              <button type="button" data-farm-sky title="The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#4e3626:04764f1d)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#8b5a2b:ac999c55)"></i></span><span class="px-sr">Sky: day</span></button>
+              <button type="button" data-farm-season title="The season: live follows your plan&#39;s 5-hour limit (spring while it is fresh, winter when it is nearly used up); or hold one: spring, summer, autumn or winter. The panel&#39;s 📌 shows your real 5-hour use meanwhile"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#3f9b3a/#4e3626:1dececba)"></i><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#4e3626:dccd7184)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#8b5a2b:5f9378ee)"></i></span><span class="px-sr">Season: spring</span></button>
+              <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
+              <div class="px-menu-sep"></div>
+              <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
+              <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:daea42d0)"></i><span class="px-sr">75%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
+            </div>
+          </div>`,
+};
+
+test("the farm's panel and buttons are byte for byte as they were: live; winter held at 42%; folded, with the animals on", () => {
+  for (const [name, c] of Object.entries(HUD_CASES)) assert.equal(farmHud(c), FROZEN_HUD[name], name);
+});
+
+// With two Claude accounts the panel shows a gauge for each (its name, its week, its 5 hours beside it) in
+// place of the plan's 5H and WEEK. Recorded on main's own farm hud (a6c2617), before the merge moved its
+// accounts into the engine's panelHud; recorded again on main's (2c3d7f7) when its Menu replaced the two
+// button rows. Never re-record this to make a change pass.
+const TWO_ACCOUNTS = {
+  scene: () => ({ ...HUD_CASES.live.scene(), accounts: [{ key: 'main', name: 'work', plan: planWith(30, 55) }, { key: 'home', name: 'home', plan: planWith(95, 92) }] }),
+  params: HUD_CASES.live.params,
+};
+const FROZEN_TWO_ACCOUNTS = `<div class="px-stats">
+            <button type="button" class="px-brand" data-farm-panel title="Fold this panel away" aria-expanded="true"><svg data-brand="18 px-logo"></svg><i class="pxt" aria-hidden="true" style="width:116.0px;height:20.0px;background-image:url(px:58x10:#2a1d14/#ffe8a3:71586e5b)"></i><span class="px-sr">AGENTVILLE</span><i class="px-live" title="Live"></i><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#c9b48a:9cd4bbc7)"></i><span class="px-sr">-</span></button>
+            <div class="px-line"><span title="What the sessions on the farm have cost so far (each one's purse; from the mod)"><b class="coin"></b><i class="pxt" aria-hidden="true" style="width:52.0px;height:20.0px;background-image:url(px:26x10:#2a1d14/#fff3d6:145977db)"></i><span class="px-sr">$4.75</span></span><span title="Harvests: each time a session's conversation was compacted"><b class="basket"></b><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#2a1d14/#fff3d6:69754028)"></i><span class="px-sr">3 harvested</span></span><span class="px-season" title="The season follows your plan&#39;s 5-hour limit: 30% used. Spring while it is fresh, then summer and autumn; winter when it is nearly used up"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:70.0px;height:20.0px;background-image:url(px:35x10:#2a1d14/#fff3d6:b0686e96)"></i><span class="px-sr">summer</span></span></div>
+            <div class="px-kpis">
+              <button type="button" class="px-kpi hot" data-farm-state="waiting" title="Agents waiting on you (a question or a permission): click for the first"><span class="px-kpi-ico k-wait"><i class="pxt" aria-hidden="true" style="width:4.0px;height:20.0px;background-image:url(px:2x10:#ffffff:9e741914)"></i><span class="px-sr">!</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:f8702c9c)"></i><span class="px-sr">2</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:142.0px;height:20.0px;background-image:url(px:71x10:#a9c79a:d548d197)"></i><span class="px-sr">waiting on you</span><br><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:d5c8634d)"></i><span class="px-sr">oldest 5m</span></span></button>
+              <button type="button" class="px-kpi" data-farm-state="working" title="Agents at work: click for the first"><span class="px-kpi-ico k-work"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:e3235385)"></i><span class="px-sr">&gt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:7d4c66e4)"></i><span class="px-sr">3</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#a9c79a:4ab18612)"></i><span class="px-sr">working</span><br><i class="pxt" aria-hidden="true" style="width:172.0px;height:20.0px;background-image:url(px:86x10:#c9b48a:6e0531e2)"></i><span class="px-sr">2 with subagents</span></span></button>
+              <button type="button" class="px-kpi hot" data-farm-state="turn" title="Agents whose turn ended: it&#39;s yours. Click for the first"><span class="px-kpi-ico k-turn"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:323269c0)"></i><span class="px-sr">&lt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#a9c79a:e49dcf43)"></i><span class="px-sr">your turn</span><br><i class="pxt" aria-hidden="true" style="width:256.0px;height:20.0px;background-image:url(px:128x10:#c9b48a:12c6592b)"></i><span class="px-sr">1 ask you · 2 idle · 1 stale</span></span></button>
+              <button type="button" class="px-kpi hot" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:156.0px;height:20.0px;background-image:url(px:78x10:#c9b48a:46831424)"></i><span class="px-sr">two in one repo</span></span></button>
+            </div>
+            <div class="px-gauges">
+              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
+              <span class="px-gauge" title="CPU used by the agents: 140% of one core, 8 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:18%"></i></span><i class="pxt" aria-hidden="true" style="width:32.0px;height:20.0px;background-image:url(px:16x10:#2a1d14/#fff3d6:acf1cb9c)"></i><span class="px-sr">18%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
+              <span class="px-gauge" title="Your work account: 55% of its week, 30% of its 5 hours (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:e652820e)"></i><span class="px-sr">WORK</span><span class="px-bar"><i class="warn" style="width:55%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:71287b6d)"></i><span class="px-sr">55%</span><i class="pxt" aria-hidden="true" style="width:134.0px;height:20.0px;background-image:url(px:67x10:#c9b48a:ed2a9603)"></i><span class="px-sr">week · 5h 30%</span></span><span class="px-gauge" title="Your home account: 92% of its week, 95% of its 5 hours (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:e310d20e)"></i><span class="px-sr">HOME</span><span class="px-bar"><i class="bad" style="width:92%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:1d47f549)"></i><span class="px-sr">92%</span><i class="pxt" aria-hidden="true" style="width:134.0px;height:20.0px;background-image:url(px:67x10:#c9b48a:2ffb0ba6)"></i><span class="px-sr">week · 5h 95%</span></span>
+              <span class="px-gauge" title="The tracker itself"><i class="pxt" aria-hidden="true" style="width:238.0px;height:20.0px;background-image:url(px:119x10:#c9b48a:b6098418)"></i><span class="px-sr">tracker 1.5% CPU · 80 MB</span></span>
+            </div>
+            <div class="px-err">⚠ GitHub: rate limited &lt;b&gt;</div>
+            <button type="button" class="px-need" data-farm-need title="Open the first agent that needs you"><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#5a1f19/#ffffff:0a524b9c)"></i><span class="px-sr">2 need you</span></button>
+          </div>
+          <div class="px-nav">
+            <button type="button" data-farm-menu aria-expanded="false" title="The dashboard's buttons, the farm's switches, the bell, help and zoom"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:b982a223)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:b8e00e2f)"></i><span class="px-sr">Menu</span></button>
+            <div class="px-menu" role="group" aria-label="Menu" hidden>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#8b5a2b:715e2c47)"></i><span class="px-sr">DASHBOARD</span></div>
+              <div class="px-menu-grid">
+                <button type="button" data-farm-nav="list" title="Back to the list view"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:5f5651a6)"></i><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:65708540)"></i><span class="px-sr">LIST</span></button>
+                <button type="button" data-farm-nav="worlds" title="Choose a world"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#a9dcf7/#3f9b3a:081855c5)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:a2881fd5)"></i><span class="px-sr">WORLD</span></button>
+                <button type="button" data-farm-nav="session" title="Start a new Claude Code session in a folder, or resume a past one"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:2d04caf6)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:a4edc5ff)"></i><span class="px-sr">SESSION</span></button>
+                <button type="button" data-farm-nav="setup" title="Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:af1418b8)"></i><i class="pxt" aria-hidden="true" style="width:128.0px;height:20.0px;background-image:url(px:64x10:#4e3626:bb190415)"></i><span class="px-sr">CLAUDE CODE</span></button>
+                <button type="button" data-farm-nav="side" title="Show the selected farmer&#39;s answer box, activity and files beside the farm" aria-pressed="false"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:4ee7c8c5)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:51a95a73)"></i><span class="px-sr">SIDEBAR</span></button>
+                <button type="button" data-farm-nav="broadcast" title="Message several agents at once: all of them, or the ones you pick"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:cbfe0223)"></i><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#4e3626:e91e76da)"></i><span class="px-sr">BROADCAST</span></button>
+                <button type="button" data-farm-nav="theme" title="Theme: dark, light, or auto (as macOS is): click to change"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#f4ecd8:dd5e712e)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:5dd07217)"></i><span class="px-sr">DARK</span></button>
+              </div>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#8b5a2b:d8532a2d)"></i><span class="px-sr">ON THE FARM</span></div>
+              <button type="button" data-farm-follow title="Keep the farmer you picked in the middle of the view (zooms in); dragging the view turns it off"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#e04a3a:cc792b8f)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:6be19e76)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Follow: off</span></button>
+              <button type="button" data-farm-resting title="Idle farmers (under the tree) and stale ones (scarecrows): show them, or hide them to keep the farm to the agents at work"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:6a01f51d)"></i><i class="pxt" aria-hidden="true" style="width:74.0px;height:20.0px;background-image:url(px:37x10:#4e3626:902464b2)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#8b5a2b:12db36ba)"></i></span><span class="px-sr">Resting: shown</span></button>
+              <button type="button" data-farm-bubbles title="Speech bubbles with what each farmer last said. × hides one; its 💬 shows it again"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#ffffff:d27c2259)"></i><i class="pxt" aria-hidden="true" style="width:78.0px;height:20.0px;background-image:url(px:39x10:#4e3626:acf04316)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Bubbles: on</span></button>
+${pad(14)}
+              <button type="button" data-farm-sky title="The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#4e3626:380cd1fd)"></i><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#4e3626:04764f1d)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#8b5a2b:02ff8622)"></i></span><span class="px-sr">Sky: live</span></button>
+              <button type="button" data-farm-season title="The season: live follows your plan&#39;s 5-hour limit (spring while it is fresh, winter when it is nearly used up); or hold one: spring, summer, autumn or winter. The panel&#39;s 📌 shows your real 5-hour use meanwhile"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#4e3626:dccd7184)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#8b5a2b:02ff8622)"></i></span><span class="px-sr">Season: live</span></button>
+              <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
+              <div class="px-menu-sep"></div>
+              <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
+              <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:7305c299)"></i><span class="px-sr">100%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
+            </div>
+          </div>`;
+
+test("with two Claude accounts, the farm's panel has a gauge for each, byte for byte as main's farm drew it", () => {
+  assert.equal(farmHud(TWO_ACCOUNTS), FROZEN_TWO_ACCOUNTS);
+});
+
+// The Menu open (the engine's menuOpen): its button pressed, the menu shown. Recorded on main's own farm hud
+// (2c3d7f7), where the Menu was made. Never re-record this to make a change pass.
+const MENU_OPEN = { scene: HUD_CASES.live.scene, params: { ...HUD_CASES.live.params, menuOpen: true } };
+const FROZEN_MENU_OPEN = `<div class="px-stats">
+            <button type="button" class="px-brand" data-farm-panel title="Fold this panel away" aria-expanded="true"><svg data-brand="18 px-logo"></svg><i class="pxt" aria-hidden="true" style="width:116.0px;height:20.0px;background-image:url(px:58x10:#2a1d14/#ffe8a3:71586e5b)"></i><span class="px-sr">AGENTVILLE</span><i class="px-live" title="Live"></i><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#c9b48a:9cd4bbc7)"></i><span class="px-sr">-</span></button>
+            <div class="px-line"><span title="What the sessions on the farm have cost so far (each one's purse; from the mod)"><b class="coin"></b><i class="pxt" aria-hidden="true" style="width:52.0px;height:20.0px;background-image:url(px:26x10:#2a1d14/#fff3d6:145977db)"></i><span class="px-sr">$4.75</span></span><span title="Harvests: each time a session's conversation was compacted"><b class="basket"></b><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#2a1d14/#fff3d6:69754028)"></i><span class="px-sr">3 harvested</span></span><span class="px-season" title="The season follows your plan&#39;s 5-hour limit: 30% used. Spring while it is fresh, then summer and autumn; winter when it is nearly used up"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:70.0px;height:20.0px;background-image:url(px:35x10:#2a1d14/#fff3d6:b0686e96)"></i><span class="px-sr">summer</span></span></div>
+            <div class="px-kpis">
+              <button type="button" class="px-kpi hot" data-farm-state="waiting" title="Agents waiting on you (a question or a permission): click for the first"><span class="px-kpi-ico k-wait"><i class="pxt" aria-hidden="true" style="width:4.0px;height:20.0px;background-image:url(px:2x10:#ffffff:9e741914)"></i><span class="px-sr">!</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:f8702c9c)"></i><span class="px-sr">2</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:142.0px;height:20.0px;background-image:url(px:71x10:#a9c79a:d548d197)"></i><span class="px-sr">waiting on you</span><br><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:d5c8634d)"></i><span class="px-sr">oldest 5m</span></span></button>
+              <button type="button" class="px-kpi" data-farm-state="working" title="Agents at work: click for the first"><span class="px-kpi-ico k-work"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:e3235385)"></i><span class="px-sr">&gt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:7d4c66e4)"></i><span class="px-sr">3</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#a9c79a:4ab18612)"></i><span class="px-sr">working</span><br><i class="pxt" aria-hidden="true" style="width:172.0px;height:20.0px;background-image:url(px:86x10:#c9b48a:6e0531e2)"></i><span class="px-sr">2 with subagents</span></span></button>
+              <button type="button" class="px-kpi hot" data-farm-state="turn" title="Agents whose turn ended: it&#39;s yours. Click for the first"><span class="px-kpi-ico k-turn"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#ffffff:323269c0)"></i><span class="px-sr">&lt;</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#a9c79a:e49dcf43)"></i><span class="px-sr">your turn</span><br><i class="pxt" aria-hidden="true" style="width:256.0px;height:20.0px;background-image:url(px:128x10:#c9b48a:12c6592b)"></i><span class="px-sr">1 ask you · 2 idle · 1 stale</span></span></button>
+              <button type="button" class="px-kpi hot" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:156.0px;height:20.0px;background-image:url(px:78x10:#c9b48a:46831424)"></i><span class="px-sr">two in one repo</span></span></button>
+            </div>
+            <div class="px-gauges">
+              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
+              <span class="px-gauge" title="CPU used by the agents: 140% of one core, 8 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:18%"></i></span><i class="pxt" aria-hidden="true" style="width:32.0px;height:20.0px;background-image:url(px:16x10:#2a1d14/#fff3d6:acf1cb9c)"></i><span class="px-sr">18%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
+              <span class="px-gauge" title="Your plan's 5-hour limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#a9c79a:77a45452)"></i><span class="px-sr">5H</span><span class="px-bar"><i class="ok" style="width:30%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:7df674fb)"></i><span class="px-sr">30%</span><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#c9b48a:3961ca8e)"></i><span class="px-sr">5-hour limit</span></span>
+              <span class="px-gauge" title="Your plan's weekly limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:7d693448)"></i><span class="px-sr">WEEK</span><span class="px-bar"><i class="warn" style="width:55%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:71287b6d)"></i><span class="px-sr">55%</span><i class="pxt" aria-hidden="true" style="width:92.0px;height:20.0px;background-image:url(px:46x10:#c9b48a:170a2ba1)"></i><span class="px-sr">this week</span></span>
+              <span class="px-gauge" title="The tracker itself"><i class="pxt" aria-hidden="true" style="width:238.0px;height:20.0px;background-image:url(px:119x10:#c9b48a:b6098418)"></i><span class="px-sr">tracker 1.5% CPU · 80 MB</span></span>
+            </div>
+            <div class="px-err">⚠ GitHub: rate limited &lt;b&gt;</div>
+            <button type="button" class="px-need" data-farm-need title="Open the first agent that needs you"><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#5a1f19/#ffffff:0a524b9c)"></i><span class="px-sr">2 need you</span></button>
+          </div>
+          <div class="px-nav">
+            <button type="button" data-farm-menu aria-expanded="true" title="The dashboard's buttons, the farm's switches, the bell, help and zoom"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:b982a223)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:b8e00e2f)"></i><span class="px-sr">Menu</span></button>
+            <div class="px-menu" role="group" aria-label="Menu">
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#8b5a2b:715e2c47)"></i><span class="px-sr">DASHBOARD</span></div>
+              <div class="px-menu-grid">
+                <button type="button" data-farm-nav="list" title="Back to the list view"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:5f5651a6)"></i><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:65708540)"></i><span class="px-sr">LIST</span></button>
+                <button type="button" data-farm-nav="worlds" title="Choose a world"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#a9dcf7/#3f9b3a:081855c5)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:a2881fd5)"></i><span class="px-sr">WORLD</span></button>
+                <button type="button" data-farm-nav="session" title="Start a new Claude Code session in a folder, or resume a past one"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:2d04caf6)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:a4edc5ff)"></i><span class="px-sr">SESSION</span></button>
+                <button type="button" data-farm-nav="setup" title="Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:af1418b8)"></i><i class="pxt" aria-hidden="true" style="width:128.0px;height:20.0px;background-image:url(px:64x10:#4e3626:bb190415)"></i><span class="px-sr">CLAUDE CODE</span></button>
+                <button type="button" data-farm-nav="side" title="Show the selected farmer&#39;s answer box, activity and files beside the farm" aria-pressed="false"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:4ee7c8c5)"></i><i class="pxt" aria-hidden="true" style="width:80.0px;height:20.0px;background-image:url(px:40x10:#4e3626:51a95a73)"></i><span class="px-sr">SIDEBAR</span></button>
+                <button type="button" data-farm-nav="broadcast" title="Message several agents at once: all of them, or the ones you pick"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:cbfe0223)"></i><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#4e3626:e91e76da)"></i><span class="px-sr">BROADCAST</span></button>
+                <button type="button" data-farm-nav="theme" title="Theme: dark, light, or auto (as macOS is): click to change"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#f4ecd8:dd5e712e)"></i><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:5dd07217)"></i><span class="px-sr">DARK</span></button>
+              </div>
+              <div class="px-menu-h"><i class="pxt" aria-hidden="true" style="width:124.0px;height:20.0px;background-image:url(px:62x10:#8b5a2b:d8532a2d)"></i><span class="px-sr">ON THE FARM</span></div>
+              <button type="button" data-farm-follow title="Keep the farmer you picked in the middle of the view (zooms in); dragging the view turns it off"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#e04a3a:cc792b8f)"></i><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#4e3626:6be19e76)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Follow: off</span></button>
+              <button type="button" data-farm-resting title="Idle farmers (under the tree) and stale ones (scarecrows): show them, or hide them to keep the farm to the agents at work"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:6a01f51d)"></i><i class="pxt" aria-hidden="true" style="width:74.0px;height:20.0px;background-image:url(px:37x10:#4e3626:902464b2)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#8b5a2b:12db36ba)"></i></span><span class="px-sr">Resting: shown</span></button>
+              <button type="button" data-farm-bubbles title="Speech bubbles with what each farmer last said. × hides one; its 💬 shows it again"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#ffffff:d27c2259)"></i><i class="pxt" aria-hidden="true" style="width:78.0px;height:20.0px;background-image:url(px:39x10:#4e3626:acf04316)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Bubbles: on</span></button>
+${pad(14)}
+              <button type="button" data-farm-sky title="The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429/#4e3626:380cd1fd)"></i><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#4e3626:04764f1d)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#8b5a2b:02ff8622)"></i></span><span class="px-sr">Sky: live</span></button>
+              <button type="button" data-farm-season title="The season: live follows your plan&#39;s 5-hour limit (spring while it is fresh, winter when it is nearly used up); or hold one: spring, summer, autumn or winter. The panel&#39;s 📌 shows your real 5-hour use meanwhile"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:72.0px;height:20.0px;background-image:url(px:36x10:#4e3626:dccd7184)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:34.0px;height:20.0px;background-image:url(px:17x10:#8b5a2b:02ff8622)"></i></span><span class="px-sr">Season: live</span></button>
+              <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
+              <div class="px-menu-sep"></div>
+              <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
+              <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:7305c299)"></i><span class="px-sr">100%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
+            </div>
+          </div>`;
+
+test("with its Menu open, the farm's panel and buttons are byte for byte as main's farm drew them", () => {
+  assert.equal(farmHud(MENU_OPEN), FROZEN_MENU_OPEN);
+});
+
+test('silos: one per account, two at most, the first where it always stood', () => {
+  const { silosOf } = load();
+  const acc = (key, week) => ({ key, name: key, plan: planWith(10, week) });
+  const row = s => [s.x, s.name, s.silo?.label ?? null, s.silo?.lamp ?? null];
+  assert.deepEqual(plain(silosOf({ plan: planWith(10, 40), accounts: [] }).map(row)), [[92, null, '40%', null]]);
+  assert.deepEqual(plain(silosOf({ plan: planWith(10, 40), accounts: [acc('main', 40)] }).map(row)), [[92, null, '40%', null]], 'one account: no name on it');
+  assert.deepEqual(plain(silosOf({ plan: planWith(10, 40), accounts: [acc('nco', 40), acc('zeta', 93), acc('third', 5)] }).map(row)), [[92, 'nco', '40%', null], [8, 'zeta', '93%', 'red']]);
+  assert.deepEqual(plain(silosOf({ plan: null, accounts: [acc('nco', 40), { key: 'zeta', name: 'zeta', plan: null }] }).map(row)), [[92, 'nco', '40%', null], [8, 'zeta', null, null]]);
+  assert.deepEqual(plain(silosOf({ plan: null }).map(row)), [[92, null, null, null]], 'an older scene without accounts');
+});
+
+test("the farm's scene keeps the accounts and each farmer's", () => {
+  const { toScene } = load();
+  const s = plain(toScene({ generatedAt: NOW, collisions: [], repos: [], agents: [agent('a', { account: 'zeta' })], accounts: [{ key: 'main', name: 'nco', plan: planWith(10, 40) }, { key: 'zeta', name: 'zeta', plan: null }] }));
+  assert.deepEqual(s.accounts.map(a => [a.key, a.name, a.plan?.windows.length ?? null]), [['main', 'nco', 2], ['zeta', 'zeta', null]]);
+  assert.equal(s.farmers[0].account, 'zeta');
 });

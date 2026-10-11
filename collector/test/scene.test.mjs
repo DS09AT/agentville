@@ -184,3 +184,20 @@ test('each agent carries its record: its steps by kind, its last half hour (the 
   assert.deepEqual(JSON.parse(JSON.stringify([s.agents[0].work, s.agents[0].timeline, s.agents[0].startedAt])), [work, [{ at: 5, step: 'edit', ok: true }, { at: 8, step: 'test', ok: false }], 2], 'a tool call no step is known for is left out');
   assert.deepEqual(JSON.parse(JSON.stringify([s.agents[1].work, s.agents[1].timeline, s.agents[1].startedAt])), [null, [], null]);
 });
+
+test('accounts in the scene: names and plans, never emails; a private scene has numbers', () => {
+  const { toScene, privateScene } = load();
+  const snap = snapOf([agent('a', { account: 'zeta' }), agent('b', { kind: 'codex', account: undefined })], [], { accounts: [
+    { key: 'main', name: 'nco', email: 'me@nco.example', org: 'NCO Org', plan: { windows: [{ kind: 'seven_day', percentUsed: 22, resetsAt: 5 }] } },
+    { key: 'zeta', name: 'zeta', email: 'z@x.example', plan: null },
+  ] });
+  const s = plain(toScene(snap));
+  assert.deepEqual(s.accounts.map(a => [a.key, a.name, a.plan?.weekly?.pct ?? null]), [['main', 'nco', 22], ['zeta', 'zeta', null]]);
+  assert.deepEqual(s.agents.map(a => a.account), ['zeta', null]);
+  assert.doesNotMatch(JSON.stringify(s), /me@nco|NCO Org|z@x/);
+  const p = plain(privateScene(toScene(snap)));
+  assert.deepEqual(p.accounts.map(a => [a.key, a.name, a.plan?.weekly?.pct ?? null]), [['a1', 'account 1', 22], ['a2', 'account 2', null]]);
+  assert.deepEqual(p.agents.map(a => a.account), ['a2', null]);
+  assert.doesNotMatch(JSON.stringify(p), /nco|zeta/);
+  assert.deepEqual(plain(toScene(snapOf([], []))).accounts, [], 'no accounts in the snapshot: none in the scene');
+});

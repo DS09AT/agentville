@@ -141,10 +141,19 @@
       }
       return null;
     }
-    function say(o, key) {
-      const list = o.def.lines?.[key];
-      if (!list?.length || says.length >= LINES_AT_ONCE || says.some(s => s.id === o.id)) return false;
-      says.push({ id: o.id, text: String(list[Math.floor(random() * list.length)]).slice(0, LINE_MAX), until: T + LINE_S });
+    const FRESH = new Set(['idle', 'deployFailed', 'deployOk', 'harvest', 'merged', 'arrive']); // what the helper may write (actions keep their own)
+    let fresh = new Map(); // `${kind}|${when}` → [text]: the helper's lines (✨ Helper, Animal lines), each said once
+    function say(o, key, { fixed = false } = {}) { // fixed: a gag's or play's own line, never the helper's
+      if (says.length >= LINES_AT_ONCE || says.some(s => s.id === o.id)) return false;
+      const q = FRESH.has(key) && !fixed ? fresh.get(`${o.kind}|${key}`) : null;
+      let text;
+      if (q?.length) text = q.shift(); // the helper's, fresh, first
+      else {
+        const list = o.def.lines?.[key];
+        if (!list?.length) return false;
+        text = list[Math.floor(random() * list.length)];
+      }
+      says.push({ id: o.id, text: String(text).slice(0, LINE_MAX), until: T + LINE_S });
       return true;
     }
     /** One step toward (x, y); true once there. */
@@ -179,6 +188,14 @@
         if (okAt(o, o.x + dx * d, o.y + dy * d) && okAt(o, o.x + dx * (d + 1), o.y + dy * (d + 1))) { o.x += dx * (d + 1); o.y += dy * (d + 1); return true; }
       }
       return false;
+    }
+    /** The nearest place it may be within 30 px, for one further in than a step aside reaches (a wide one, come out of a gag's spot): it walks there; null when there is none. */
+    function wayOut(o) {
+      for (let d = 5; d <= 30; d += 2) for (let k = 0; k < 16; k++) {
+        const x = o.x + Math.cos((k / 16) * 2 * Math.PI) * d, y = o.y + Math.sin((k / 16) * 2 * Math.PI) * d;
+        if (okAt(o, x, y)) return [x, y];
+      }
+      return null;
     }
     const between = ([lo, hi]) => lo + random() * (hi - lo);
     /**
@@ -405,7 +422,7 @@
             }
           } else if (key === 'say') {
             const by = o ?? byId(Object.entries(g.roles).find(([k]) => k !== 'farmer' && k !== 'chicken')?.[1]);
-            if (by && (role === 'farmer' || !say(by, step.line)) && g.def.lines?.[step.line]) { const save = by.def.lines; by.def = { ...by.def, lines: { ...save, [step.line]: g.def.lines[step.line] } }; say(by, step.line); by.def = { ...by.def, lines: save }; }
+            if (by && (role === 'farmer' || !say(by, step.line, { fixed: true })) && g.def.lines?.[step.line]) { const save = by.def.lines; by.def = { ...by.def, lines: { ...save, [step.line]: g.def.lines[step.line] } }; say(by, step.line, { fixed: true }); by.def = { ...by.def, lines: save }; }
             next(g); return;
           } else if (key === 'pose') doing(o, { pose: step.is, s: ms / 1000 });
           else if (key === 'stay') { doing(o, { pose: step.is ?? 'sleep', s: ms / 1000 }); }
@@ -467,7 +484,15 @@
         if (still) { for (const o of ones) o.pose = 'sleep'; return; }
         for (const o of ones) if (o.def.visits) visiting(o, dt);
         for (const o of shown()) {
-          if (!o.gagSpot && !okAt(o, o.x, o.y) && !aside(o)) { rehome(o); continue; } // somewhere it may not be (the yard changed under it): moved back in
+          if (!o.gagSpot && !okAt(o, o.x, o.y) && !aside(o)) { // somewhere it may not be (the yard changed under it, or a gag left it there)
+            const out = (o.out ??= wayOut(o));
+            if (!out) { rehome(o); continue; } // nowhere near: moved back in
+            const dx = out[0] - o.x, dy = out[1] - o.y, d = Math.hypot(dx, dy), sp = (lib[o.kind].speed ?? 10) * dt; // it walks out, the short way
+            o.to = null; endAct(o); o.pose = 'walk'; if (Math.abs(dx) > 0.3) o.face = dx > 0 ? 1 : -1;
+            if (d <= sp) { [o.x, o.y] = out; o.out = null; } else { o.x += (dx / d) * sp; o.y += (dy / d) * sp; }
+            continue;
+          }
+          o.out = null;
           if (o.act && T >= o.act.until) { // done; one let into a den walks back out the way it came; a visitor that bolted is gone
             const out = o.act.out, bolted = o.act.bolt;
             endAct(o);
@@ -521,7 +546,7 @@
         }
         if ((quiet -= dt) <= 0) {
           quiet = 20 + random() * 20;
-          const awake = shown().filter(o => o.pose !== 'sleep' && o.def.lines?.idle?.length);
+          const awake = shown().filter(o => o.pose !== 'sleep' && (o.def.lines?.idle?.length || fresh.get(`${o.kind}|idle`)?.length)); // a fresh line needs no fixed one
           if (awake.length) say(awake[Math.floor(random() * awake.length)], 'idle');
         }
       },
@@ -628,6 +653,23 @@
       gagNow() { const g = running.find(r => !r.play); return g ? { id: g.def.id } : null; },
       /** What the animals have taken just now ('bucket'): the world doesn't draw it where it was. */
       taken() { return new Set(taken); },
+      /** The helper's lines (docs/worlds.md, "Messages"): kept per kind and situation, for kinds this world has; a new batch replaces the last. */
+      chatter(lines) {
+        const kinds = new Set(ones.map(o => o.kind));
+        fresh = new Map();
+        for (const l of Array.isArray(lines) ? lines.slice(0, 40) : []) {
+          if (!l || !kinds.has(l.kind) || !FRESH.has(l.when) || typeof l.text !== 'string') continue;
+          const t = l.text.trim();
+          if (!t || t.length > LINE_MAX) continue;
+          const key = `${l.kind}|${l.when}`;
+          if (!fresh.has(key)) fresh.set(key, []);
+          fresh.get(key).push(t);
+        }
+      },
+      /** The fresh lines not said yet (tests and the browser check). */
+      freshLines() { return [...fresh.values()].flat(); },
+      /** The kinds this world has, each once with its name: what the page tells the collector. */
+      cast() { return [...new Map(ones.map(o => [o.kind, { kind: o.kind, name: String(o.def.name ?? o.kind) }])).values()]; },
       list() { return ones.map(o => ({ id: o.id, kind: o.kind, x: Math.round(o.x), y: Math.round(o.y), pose: o.pose, lift: o.lift || 0, wear: { ...o.wear }, ...(o.act?.den != null ? { den: o.act.den, asleep: !o.act.route.length } : {}), ...(o.away ? { away: true } : {}) })); },
     };
   }
@@ -687,5 +729,5 @@
     };
   }
 
-  Object.assign(globalThis, { seededRandom, makeAnimals, chooseDoer, makeErrands });
+  Object.assign(globalThis, { seededRandom, makeAnimals, chooseDoer, makeErrands, gagProblem }); // gagProblem: check-world asks it too
 })();
