@@ -19,6 +19,14 @@ const bodyOf = text => {
 const isModelNamed = (id, name) => id.replace(/\[.*$/, '').replace(/-\d{8}$/, '') === `claude-${name.replace(/\s*\(.*$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
 /** Everything the tracker knows about one session, built incrementally from its transcript. */
+const EARLY_KEPT = 200;
+/** Sets map[key], keeping only the latest EARLY_KEPT keys. */
+function keepLatest(map, key, value) {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > EARLY_KEPT) map.delete(map.keys().next().value);
+}
+
 export class SessionModel {
   #follows = new WeakMap(); // your message → the row it follows, where a restore goes back to
   constructor({ feedCap = 200, saidCap = 200, callCap = 500, fileCap = 300 } = {}) {
@@ -35,6 +43,11 @@ export class SessionModel {
     this.openItems = new Map();
     this.calls = [];
     this.children = new Map();
+    // What came for a child before the child was known: a background one's finish notice written ahead of the call
+    // that launched it (a quick one, among many launched at once), or, after a restart, the result or notice of a
+    // call from before the part that was read. Kept until the child turns up (the latest 200 of each).
+    this.earlyNotices = new Map(); // tool use id → { status, result, when }
+    this.earlyResults = new Map(); // tool use id → { ok, async, text, when }
     this.lastPrompt = null;
     this.lastPromptAt = 0;
     this.lastReply = null;
@@ -54,6 +67,9 @@ export class SessionModel {
     this.turnStartedAt = 0; // when the current turn began, and the tokens its replies have come back with so far
     this.turnOut = new Map(); // reply id → output tokens (each of a reply's entries repeats its count)
     this.toolCount = 0; // tool calls so far (a subagent's steps)
+    // What the session has done so far: its tool calls by kind of step (edit, read, test…: derive/step.mjs), how many failed,
+    // how many failed in a row just now (none once one goes through), and how its last test run went.
+    this.work = { steps: {}, failed: 0, streak: 0, lastTest: null };
   }
 
   /** Output tokens the current turn has received, as the terminal's working line counts them (↓ 28.5k tokens). */
@@ -119,6 +135,8 @@ export class SessionModel {
         this.#noteTasks(ev.name, ev.input, when);
         if (ev.name === 'ScheduleWakeup' && Number.isFinite(ev.input?.delaySeconds) && ev.input.delaySeconds > 0) this.wakeAt = when + ev.input.delaySeconds * 1000;
         const item = { at: when, kind: 'tool', tool: ev.name, step: stepOf(ev.name, ev.input), text: summarizeTool(ev.name, ev.input) };
+        call.step = item.step;
+        this.work.steps[item.step] = (this.work.steps[item.step] ?? 0) + 1;
         this.openItems.set(ev.id, item);
         this.#push(item);
         if (ev.name === 'SendMessage' && typeof ev.input?.to === 'string') { // this session wrote to another session, or to one of its helpers
@@ -142,7 +160,11 @@ export class SessionModel {
         this.pending.delete(ev.toolUseId);
         // How a call ended (a deploy command's outcome is the deploy's). A background command only
         // started here: its notice says how it ended (task_done).
-        if (call && !(call.background && ev.ok)) { call.ok = ev.ok; call.endedAt = when; }
+        if (call && !(call.background && ev.ok)) {
+          call.ok = ev.ok; call.endedAt = when;
+          if (ev.ok) this.work.streak = 0; else { this.work.failed += 1; this.work.streak += 1; }
+          if (call.step === 'test') this.work.lastTest = { ok: ev.ok, at: when };
+        }
         if (call?.background && ev.text) { // where Claude Code writes a background command's output, for the dashboard to follow
           const out = /Output is being written to: (\S+\.output)\b/.exec(ev.text)?.[1];
           if (out) call.outputPath = out;
@@ -155,36 +177,26 @@ export class SessionModel {
           this.openItems.delete(ev.toolUseId);
         }
         const child = this.children.get(ev.toolUseId);
-        if (child?.kind === 'subagent' && ev.async && ev.ok) { // launched in the background: its notice says when it ends
-          child.isBackground = true;
-          child.state = 'running';
-        } else if (child) {
-          child.state = !ev.ok ? 'failed' : child.kind === 'subagent' && !child.isBackground ? 'done' : 'unknown';
-          if (child.state === 'done' || child.state === 'failed') { // a background one's result only says it started
-            child.endedAt = when;
-            if (ev.text) child.result = ev.text;
-          }
-        }
+        if (child) this.#childResult(child, ev, when);
+        else if (!call) keepLatest(this.earlyResults, ev.toolUseId, { ok: ev.ok, async: ev.async, text: ev.text, when });
         break;
       }
       case 'task_done': {
         const call = this.calls.findLast(c => c.id === ev.toolUseId);
-        if (call?.background && call.endedAt === undefined && ev.status !== 'running') { call.ok = ev.status === 'completed'; call.endedAt = when; } // the first notice says it
-        const job = this.children.get(ev.toolUseId);
-        if (job?.kind === 'bgjob') job.state = ev.status === 'completed' ? 'done' : ev.status === 'running' ? 'running' : 'failed';
-        if (job?.kind === 'subagent') { // a background subagent stopped (resumed, it may notify again: the latest says)
-          const state = ev.status === 'completed' ? 'done' : ev.status === 'running' ? 'running' : 'failed';
-          const again = state === job.state && (ev.result ?? job.result) === job.result; // the same notice: queued, then handed over
-          if (!again) {
-            job.state = state;
-            job.endedAt = state === 'running' ? undefined : when;
-            if (ev.result) job.result = ev.result;
-          }
+        if (call?.background && call.endedAt === undefined && ev.status !== 'running') { // the first notice says it
+          call.ok = ev.status === 'completed'; call.endedAt = when;
+          if (call.step === 'test') this.work.lastTest = { ok: call.ok, at: when };
         }
+        const job = this.children.get(ev.toolUseId);
+        if (job) this.#childNotice(job, ev, when);
+        else keepLatest(this.earlyNotices, ev.toolUseId, { status: ev.status, result: ev.result, when });
         break;
       }
       case 'turn_end':
         this.#abandonPending();
+        for (const c of this.children.values()) { // a subagent the turn was waiting for went with it (Esc, ■ Stop): one in the background runs on
+          if (c.kind === 'subagent' && c.state === 'running' && !c.isBackground) { c.state = 'failed'; c.endedAt = when; }
+        }
         this.lastTurnEndAt = when;
         this.turnOpen = false;
         break;
@@ -268,6 +280,57 @@ export class SessionModel {
       }
     }
     return [...list.values()];
+  }
+
+  /** A child's call came back: a foreground subagent is done; one launched in the background runs on until its notice (which may be here already). */
+  #childResult(child, ev, when) {
+    if (child.kind === 'subagent' && ev.async && ev.ok) { // launched in the background: its notice says when it ends
+      child.isBackground = true;
+      child.state = 'running';
+    } else {
+      child.state = !ev.ok ? 'failed' : child.kind === 'subagent' && !child.isBackground ? 'done' : 'unknown';
+      if (child.state === 'done' || child.state === 'failed') { // a background one's result only says it started
+        child.endedAt = when;
+        if (ev.text) child.result = ev.text;
+      }
+    }
+    const early = this.earlyNotices.get(child.id);
+    if (early) { this.earlyNotices.delete(child.id); this.#childNotice(child, early, early.when); }
+  }
+
+  /** A background child's notice: how it ended (resumed, a subagent may notify again: the latest says). */
+  #childNotice(job, ev, when) {
+    const state = ev.status === 'completed' ? 'done' : ev.status === 'running' ? 'running' : 'failed';
+    if (job.kind === 'bgjob') job.state = state;
+    if (job.kind !== 'subagent') return;
+    const again = state === job.state && (ev.result ?? job.result) === job.result; // the same notice: queued, then handed over
+    if (again) return;
+    job.state = state;
+    job.endedAt = state === 'running' ? undefined : when;
+    if (ev.result) job.result = ev.result;
+  }
+
+  /**
+   * Subagents and workflows launched in the part of the transcript read later (after a restart): they come first, and
+   * what the part read first already said of them (a result, a finish notice) is theirs.
+   */
+  addEarlierChildren(children = []) {
+    const earlier = new Map();
+    for (const c of children) {
+      if (this.children.has(c.id)) continue;
+      const child = { ...c };
+      earlier.set(child.id, child);
+      const result = this.earlyResults.get(child.id), notice = this.earlyNotices.get(child.id);
+      this.earlyResults.delete(child.id);
+      if (result) this.#childResult(child, result, result.when); // takes its notice with it
+      else if (notice) { this.earlyNotices.delete(child.id); this.#childNotice(child, notice, notice.when); }
+    }
+    this.children = new Map([...earlier, ...this.children]);
+  }
+
+  /** The steps of the part of the transcript read later (after a restart), by kind: counted with those since. */
+  addEarlierWork(steps = {}) {
+    for (const [k, n] of Object.entries(steps)) this.work.steps[k] = (this.work.steps[k] ?? 0) + n;
   }
 
   /** Task list changes and compactions from before the part of the transcript that was read: they come first. */

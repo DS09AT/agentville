@@ -362,3 +362,36 @@ test('a restore to a message it never saw changes nothing', () => {
   const m = modelOf(prompt(0, 'Plan it', { uuid: 'p-1' }), rewound('zzz'));
   assert.deepEqual(m.said.map(s => s.text), ['Plan it']);
 });
+
+test('a quick background subagent’s notice may be written before the call that launched it: it is done, not running for ever', () => {
+  const launched = id => JSON.stringify({ type: 'user', timestamp: new Date(at(3)).toISOString(), toolUseResult: { isAsync: true, status: 'async_launched' }, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'Async agent launched successfully.' }] } });
+  const notice = (sec, id) => JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: new Date(at(sec)).toISOString(), content: `<task-notification>\n<tool-use-id>${id}</tool-use-id>\n<status>completed</status>\n<result>Clean.</result>\n</task-notification>` });
+  const m = modelOf(prompt(0, 'go'), notice(40, 'tA'), toolUse(2, 'tA', 'Agent', { description: 'Quick look', run_in_background: true }), toolUse(2, 'tB', 'Agent', { description: 'Long look', run_in_background: true }), launched('tA'), launched('tB'));
+  assert.deepEqual([...m.children.values()].map(c => [c.id, c.state, c.endedAt, c.result]), [['tA', 'done', at(40), 'Clean.'], ['tB', 'running', undefined, undefined]]);
+  assert.equal(m.earlyNotices.size, 0, 'the notice is used up');
+});
+
+test('after a restart, subagents launched before the part that was read are known again, with what that part said of them', () => {
+  const result = (sec, id) => toolResult(sec, id);
+  const notice = (sec, id, status) => JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: new Date(at(sec)).toISOString(), content: `<task-notification>\n<tool-use-id>${id}</tool-use-id>\n<status>${status}</status>\n</task-notification>` });
+  // the part read first (the transcript's end): a foreground subagent's result, a background one's notice, and a new launch
+  const m = modelOf(result(50, 'fg'), notice(55, 'bg', 'completed'), toolUse(60, 'new', 'Agent', { description: 'New one' }));
+  assert.deepEqual([...m.children.keys()], ['new'], 'the tail alone knows only the new one');
+  m.addEarlierChildren([
+    { id: 'fg', kind: 'subagent', label: 'Foreground', state: 'running', startedAt: at(10), isBackground: false },
+    { id: 'bg', kind: 'subagent', label: 'Background', state: 'running', startedAt: at(11), isBackground: true },
+    { id: 'still', kind: 'subagent', label: 'Still at it', state: 'running', startedAt: at(12), isBackground: true },
+    { id: 'new', kind: 'subagent', label: 'stale copy', state: 'done', startedAt: at(1) },
+  ]);
+  assert.deepEqual([...m.children.values()].map(c => [c.id, c.label, c.state, c.endedAt]), [
+    ['fg', 'Foreground', 'done', at(50)], ['bg', 'Background', 'done', at(55)], ['still', 'Still at it', 'running', undefined], ['new', 'New one', 'running', undefined],
+  ], 'earlier ones first; what the tail holds itself stands');
+  m.applyLine(notice(70, 'still', 'completed'));
+  assert.equal(m.children.get('still').state, 'done', 'and a later notice finds it');
+});
+
+test('a subagent the turn was waiting for goes with the turn when it is interrupted; one in the background runs on', () => {
+  const launched = JSON.stringify({ type: 'user', timestamp: new Date(at(3)).toISOString(), toolUseResult: { isAsync: true, status: 'async_launched' }, message: { content: [{ type: 'tool_result', tool_use_id: 'bg', content: 'Async agent launched successfully.' }] } });
+  const m = modelOf(prompt(0, 'go'), toolUse(2, 'bg', 'Agent', { description: 'In the background', run_in_background: true }), launched, toolUse(4, 'fg', 'Agent', { description: 'Waited for' }), turnEnd(9));
+  assert.deepEqual([...m.children.values()].map(c => [c.id, c.state, c.endedAt]), [['bg', 'running', undefined], ['fg', 'failed', at(9)]]);
+});

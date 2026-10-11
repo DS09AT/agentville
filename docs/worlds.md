@@ -18,7 +18,7 @@ those files from inside the folder only, and only these kinds: `.js`, `.json`, `
 `.gif`, `.webp`, `.svg`, `.woff2`, `.mp3`, `.ogg` and `.wav`. The frame's page
 (`web/worlds/sdk/frame.html`) loads, in order: `/base.css` (the dashboard's colours), the world
 engine's styles (`/world/sdk/engine.css`), the bridge (`/world/sdk/bridge.js`), the brand mark
-(`/brand.js`), the pixel kit (`/world/sdk/pixel.js`), the engine (`/world/sdk/engine.js`), then the
+(`/brand.js`), the pixel kit (`/world/sdk/pixel.js`), the repo grid (`/world/sdk/grid.js`), the engine (`/world/sdk/engine.js`), then the
 world's `world.js`. A world doesn't choose these: the frame always loads all of them. The world draws
 into `<div id="farm">`, which fills the frame.
 
@@ -132,11 +132,11 @@ own pictures (the farm into hats, crops and weather).
 { version: 1, generatedAt, private: false,
   plan: { windows: [{ kind, pct, resetsAt, reset }], fiveHour: window|null, weekly: window|null } | null,
   chrome: { counts, asking, agents, oldestWaiting, subagentsRunning, ram, cpu, collector, errors },
-  subagents: [{ id, label, type, state, parent, startedAt }],
+  subagents: [{ id, label, type, state, parent, by, startedAt, endedAt, background, codex, result }],
   subagentCounts: { done, overflow },
   mail: [{ from, to, at, text }],
   mcp: [{ server, busy }],
-  repos: [{ key, name, branch, onMain, dirty, ahead, behind, deploy, collision, worktree, main, project, projectName, prs }],
+  repos: [{ key, name, branch, onMain, dirty, ahead, behind, deploy, collision, worktree, main, project, projectName, prs, bed }],
   agents: [{ id, name, kind, cwd, state, repo, tool, summary, step, contextPct, hot, ask, askKind, question, reply, said,
              colorIndex, color, cost, mode, kids, tasks, compactions, thinking, turn, effort, model, family, fast, planAsk,
              service, jobs, wakeAt, nap }] }
@@ -150,6 +150,8 @@ Times are milliseconds since 1970, as `Date.now()` gives them.
 - `generatedAt`: when the collector took the snapshot.
 - `private`: `false` for the farm and any world you have allowed to see what agents say; `true` for one of
   your worlds that may not (see "Privacy mode": most words and all paths are removed).
+- `codexPlan`: Codex's own limits, in the shape of `plan`, with `planType` and `credits`; `null`
+  without a reading (Codex not used here).
 - `plan`: the plan's usage limits, from the mod; `null` without a reading. `windows` lists every
   window: `kind` (`five_hour`, `seven_day`, …), `pct` (0–100 used; 0 once it has reset), `resetsAt`
   (when it resets, or `null`) and `reset` (it has reset since it was read). `fiveHour` and `weekly`
@@ -162,8 +164,11 @@ Times are milliseconds since 1970, as `Date.now()` gives them.
   and the Mac's). `cpu`: `{ used, cores }` (the agents' CPU, in percent of one core, and the Mac's
   cores). `collector`: the tracker's own `{ pid, cpu, rssMb, claudeVersion }`. `errors`: sources that
   are failing, as short lines.
-- `subagents`: every subagent: its `id`, `label` (its task), `type` (`Explore`…), `state` (`running`,
-  `done`, `failed`…), `parent` (its agent's name) and `startedAt`.
+- `subagents`: every subagent, Claude Code's and Codex's: its `id`, `label` (its task), `type` (`Explore`…;
+  a Codex one's role), `state` (`running`, `done`, `failed`…), `parent` (its agent's name), `by` (its
+  agent's id), `startedAt` and `endedAt` (ms, or `null` while it runs), `background` (it runs beside its
+  agent, which does not wait for it: always so for a Codex one), `codex` (its agent is a Codex thread)
+  and `result` (the first line of its answer once done, else `''`).
 - `subagentCounts`: `done` is how many subagents finished lately (up to 6); `overflow` is how many run
   beyond the four an agent leads.
 - `mail`: messages one agent sent another in the last 3 minutes, oldest first: `from` and `to` (agent
@@ -181,6 +186,11 @@ Times are milliseconds since 1970, as `Date.now()` gives them.
   `{ state: 'running' | 'ok' | 'failed' | 'other', label: null, detail: null, url, source: 'actions', run: true }`.
 - `collision`: two agents writing in it at once: `'high'` (one of them used git), `'normal'`, or `null`.
 - `worktree`: it is a git worktree; `main`: the folder of the repo it belongs to, or `null`.
+- `bed`: which bed of the repo grid its field has (0, 1, 2… along the rows of 3), or `null` from a
+  collector that doesn't say. The collector gives it (`collector/derive/beds.mjs`, with the very
+  `makeGrid` the frame loads, kept in `state/beds.json`), so every browser shows the same fields in
+  the same beds. An engine world gets it for free: when any field has a `bed` the engine lays the
+  fields out by it and neither packs them nor remembers beds itself.
 - `project`: an id for grouping repos that sit side by side in one folder (that folder's path; in a private scene a stand-in, `p1`, `p2`…), or
   `null`; `projectName`: its label.
 - `prs`: its pull requests, from `gh`, or `null`: `{ open: [{ number, title, url, draft, branch, checks }], merged: [{ number, title, url, at }] }`,
@@ -190,7 +200,8 @@ Times are milliseconds since 1970, as `Date.now()` gives them.
 
 - `id`, `name` (private: `agent 1`…); `kind`: `interactive`, `background`, `codex`…; `cwd`: its folder, or `null`.
 - `state`: `waiting` (on you: a question or a permission), `working`, `turn` (its turn ended),
-  `idle` or `stale`.
+  `idle` or `stale`; `since`: when it came into that state (ms), or `null`. A browser's clock may be
+  behind it: take a time in the future as now.
 - `repo`: the repo it works in (its newest write, else its newest touch, else the repo holding its
   folder): a repo's `key`, or `null`.
 - `tool`: the tool it is calling now, or its last one; `summary`: what that call does, in a few words;
@@ -207,6 +218,11 @@ Times are milliseconds since 1970, as `Date.now()` gives them.
 - `cost`: what the session has cost so far in US dollars, or `null`. `mode`: its permission mode
   (`default`, `plan`, `acceptEdits`, `bypassPermissions`…), or `null`.
 - `kids`: its running subagents, up to four: `{ id, dog }`, `dog: true` for an Explore one.
+- `work`: what it has done so far, or `null`: `{ steps, failed, streak, lastTest }`. `steps` counts its tool calls by kind
+  of step (`{ edit: 12, read: 30, test: 3 }`: the kinds are `step`'s), `failed` those that failed, `streak` how many
+  failed in a row just now (0 once one goes through), `lastTest` how its last test run went (`{ ok, at }`, or `null`).
+  A Codex thread's are counted from when the dashboard first read it.
+- `timeline`: its steps of the last half hour, oldest first: `{ at, step, ok }`. `startedAt`: since when it runs (ms), or `null`.
 - `tasks`: its task list, `{ done, total, current?, items }`, or `null`. `compactions`: how many times
   its context was compacted.
 - `thinking`: it is thinking now (from the mod's working line; without the mod, a guess: working with
@@ -284,7 +300,7 @@ gaps").
 | `ready` | The world has started: the page stops waiting for it (see "When a world breaks") |
 | `leaving` | Sent by the bridge itself (`beforeunload` / `pagehide`, captured at load through the page it first saw): the document is going away. The page stops the world at once, with a panel |
 | `error { message, where }` | Shows it (300 and 120 characters at most): before `ready`, in the panel that replaces a world that doesn't start; after it, in a strip over the world. Also written to the page's console, each once (50 at most) |
-| `pick { agentId, from? }` | Opens that agent in the sidebar. The id must be one of the scene's (any other is dropped). `from: 'say'` when it was picked by its speech bubble: then the page opens its whole conversation over the world instead, unless it waits on you or asks something answered with a button (that is done in the sidebar) |
+| `pick { agentId, from?, tab? }` | Opens that agent in the sidebar (with `tab: 'subagents'`, on its Subagents tab; any other tab is ignored). The id must be one of the scene's (any other is dropped). `from: 'say'` when it was picked by its speech bubble: then the page opens its whole conversation over the world instead, unless it waits on you or asks something answered with a button (that is done in the sidebar) |
 | `openDoc { agentId, path }` | Opens the file in a reader over the world. Only a path in that agent's folder, in a repo of the scene, or one a reply to `agentFiles` named for that same agent; never one with `..`; 4096 characters at most |
 | `openLink { url }` | Opens it in a new tab. Only `https://github.com/` links, 2048 characters at most |
 | `startSession` | Opens Start or resume a session |
@@ -393,7 +409,7 @@ can't keep you from choosing another world there.
 | `still` | Stand still: reduced motion, or the Motion switch |
 | `navState()` | The top bar's state: `{ theme, side, live }` |
 | `request(kind, args)` | `request`; returns a promise of the reply, `{ ok, status, data?, error? }`. Four at most go to the page at once; the rest wait their turn, in order |
-| `onPickAgent(agentId, { from: 'say' }?)` | `pick` |
+| `onPickAgent(agentId, { from: 'say' }? or { tab: 'subagents' }?)` | `pick` |
 | `onOpenDoc(agentId, path)` | `openDoc` |
 | `onShowRepos()` | `showRepos` |
 | `onStartSession()` | `startSession` |
@@ -450,7 +466,9 @@ A world without one of them stops with an error that names it.
   `cap` agents of the same `group`; `at(i)` is the i-th spot; more than that are not drawn, and
   the count over is given to `labels` as `overflow[group]`), or, for agents standing in a field,
   `{ group: 'st:<key>', at(usedOffsets) → [x, y], zone }` (push the offset you took into
-  `usedOffsets`; no cap).
+  `usedOffsets`; no cap). With `direct: true` the agent walks there in a straight line, not by the
+  corridors (a few steps at its work). Return `null` and the agent is taken off the map (the farm:
+  one that has gone into the farmhouse).
 - `drawChar(agent, body)`: draws the agent. `body` has `x`, `y`, `walk` (walking now), `face`, `lift`
   and `zone`.
 - `bg(fill, season, ext)`: draws the ground. `fill(x, y, w, h, colour)` paints a rectangle; `ext` is
@@ -465,26 +483,32 @@ A hook you give always wins over its default.
 |---|---|---|
 | `corridors` | | `[W / 2]`: the x positions of the paths running down, which agents walk along. A non-empty array of numbers, else the world stops |
 | `grid` | | a `makeGrid` result, or the config for one (below); by default 3 beds of 88 × 62 centred on W |
-| `fromScene` | `(sceneV1)` | `engineScene` |
+| `fromScene` | `(sceneV1)` | `engineScene`. The scene the engine acts out: a world may keep in it, for a while, a field or an agent the page no longer has, in a `state` of its own (the farm: a farmer `leaving` for the farmhouse, a field being packed up); its name tag gets the class `st-<state>` |
 | `help` | `()` | the info dialog's HTML: a short key naming your `nouns` |
 | `nouns` | | `{ agent, agents, repo, repos }`: `agent`, `agents`, `repo`, `repos` |
 | `SH` | | `16`: a character's height |
 | `layout`, `relayout` | `()`, `(ground)` | the grid's current ground; `relayout` keeps the new one and returns it |
-| `setScene` | `(scene)` | returns `[]`. May return events `{ id?, at?: [x, y], text, cls?, log? }`: a pop-up with `text` over the agent `id` (or at `at`), and a line in the log if `log` is set. The engine records `scene.fields` itself, whether or not you give one |
-| `spawn` | `()` | `[W / 2, 0]`: where a new agent appears |
+| `attach` | `({ prefs })` | nothing. Called once, before the first scene: `prefs.get(key)` and `prefs.set(key, text)` are this world's own settings, kept in the browser (the farm keeps its porch album there). Keep them few and small: a world has 64 at most |
+| `setScene` | `(scene)` | returns `[]`. May return events `{ id?, at?: [x, y], text, cls?, log?, by? }`: a pop-up with `text` over the agent `id` (or at `at`), and a line in the log if `log` is set (under the agent's name, or `by`, a name of yours, for one that is nobody's). The engine records `scene.fields` itself, whether or not you give one |
+| `spawn` | `()` | `[W / 2, 0]`: where a new agent appears. A third item, `[[x, y], …]`, is its first steps from there (the farm: out of the front door, across the porch, down the steps); then it plans its own way from where they end |
 | `follow` | `(body, k, T, kid)` | where the k-th subagent stands beside its agent (`T` the clock, `kid` the subagent's scene entry) |
 | `startText` | `(n)` | "n agents here": the first line of the log |
 | `arriveText` | | the string `'arrives'`: the log line when an agent walks in |
-| `tag`, `tip` | `(agent)` | the name, cut to 16; the name |
+| `tag`, `tip` | `(agent, fit?)` | the name, cut to 16; the name. `fit`: how many characters the tag's place holds, when it has one (`tagSlot`) |
+| `tagSlot` | `(agent)` | `null`: the tag is as wide as its name, and lifted above a neighbour's when they would overlap. A number: the width of its place in world pixels (the farm's porch: 22). Such tags are fitted: all one size (the smaller one unless a place holds eight characters of the full one), `tag(agent, fit)` asked for a name that short; picked or pointed at, a tag is whole |
+| `tagBadge` | `(agent)` | `null`. `'ok'` or `'ask'`: a tick or a question mark at the tag's corner (the farm: a turn that ended, or ended with a question). Or `{ img, key }`: a picture of your own there (`img` a data URL, `key` a name for it that changes when the picture does; the farm: a working farmer's tool) |
 | `onMove` | `(agent, zone, prevZone, pop)` | nothing; `pop(text, cls)` shows a pop-up over the agent |
 | `speed` | `(agent)` | `40`: walking speed |
 | `zoneText` | `(agent, zone)` | `'moves'`: the log line when an agent changes zone |
 | `hud` | `(state)` | the dashboard's buttons: list, world, sidebar, sky, motion, help, zoom. `state` is `{ still, zoom, saysOn, skyMode, follow, canFollow, restingHidden, bell, nav, panelOpen, animals }` (`animals`: `true` or `false` for a world with animals, its Animals switch with `data-farm-animals`; `null` for one without). Your own should keep List and World: an engine world gets no corner control from the page |
 | `ground`, `shadows(body)`, `top`, `drawFx(agent, body)` | | nothing: drawn under the agents, under each agent, over everything, and over each agent |
 | `season` | `()` | `'summer'` |
-| `lights` | `()` | `[]`; each `[x, y, r, colour]` glows at night |
+| `lights` | `()` | `[]`; each `[x, y, r, core?]` glows at night. `core`: `[x, y, w, h, panes?]`, what is lit there. A lamp's is drawn over the dark; a window's (`panes: true`) is drawn with the land, so whoever stands before it stays before it |
 | `items` | `()` | `[]`; each `[y, draw]`, drawn among the agents in order of `y`. Return a fresh array each call: the engine pushes its own into it |
-| `movers` | `(posOf)` | `[]`; each `{ key, html, title, x, y }`, an HTML label that moves; `posOf(id)` gives an agent's body |
+| `movers` | `(posOf)` | `[]`; each `{ key, html, title, x, y, cls? }`, an HTML label that moves; `posOf(id)` gives an agent's body. `cls: 'spot'` is no plate but a spot that names itself on hover: give it `<button class="px-spot" data-farm-pick="<agent id>" data-farm-tab="subagents"><span>…</span></button>` and a click picks that agent, on its Subagents tab (the farm: a hen) |
+| `fieldNotes` | `(key)` | nothing: HTML of your own for a field's close-up, shown above its files (the farm: the field's record, what was done there). You escape what you put in it |
+| `chickens` | `()` | where the subagents' animals are, `[{ x, y }]`, for a world that moves them itself (the farm's hens); by default the engine's own followers (`follow`) |
+| `labelKey` | `()` | nothing: a string for what else your labels say besides the fields. `labels` is called again when it changes (the farm: the eggs in its nest) |
 | `labels` | `(lab, overflow)` | each field's name under its bed. `lab(x, y, html, cls, title)` places HTML at a world position; `overflow` counts the agents over each group's `cap` |
 | `fieldAt` | `(x, y)` | `null`: the field under that point, which opens its close-up |
 | `buildingAt` | `(x, y)` | `null`: the building under that point (a key, below) |
@@ -492,7 +516,7 @@ A hook you give always wins over its default.
 | `dialog` | `(key)` | `null`; or `{ title, html }` |
 | `boardSessions` | `()` | `[]`: the agents the notice board is read from |
 | `emit` | `(agent, body, dt, addParticle)` | nothing: called each frame per agent |
-| `tick` | `(dt, posOf, snap)` | nothing: called each frame, and `snap` is true when the world is drawn still |
+| `tick` | `(dt, posOf, snap)` | nothing: called each frame, and `snap` is true when the world is drawn still. `posOf(id)` is that agent's body (`x`, `y`, `tx`, `ty`, `path`: the steps it has left), or `undefined` when it is not on the map. Return `true` when your agents' places changed by themselves: the engine then asks `slots` again and lays the labels out anew (the farm: a farmer building its field leg by leg) |
 | `ambient` | `(dt, addParticle)` | nothing: called each frame |
 | `weather` | `(sky)` | nothing: drawn over the sky |
 | `animals` | `()` | `[]`: the world's creatures (see "Creatures"): a list, or `{ cast, gags, play }`. With any, the engine draws them and adds an Animals switch |
@@ -510,8 +534,9 @@ page's ＋ Session (starting a session) and `'board'` opens the notice board, bu
 
 ### `makeGrid(config)`
 
-The repo grid an engine world lays its fields out on, where a repo keeps its bed while you look, a
-project's repos sit together, and a repo that leaves keeps its bed for a day. `config`:
+The repo grid an engine world lays its fields out on (`web/worlds/sdk/grid.js`, a plain script with
+no DOM in it: the collector runs the same file to give each repo its `bed`), where a repo keeps its
+bed, a project's repos sit together, and a repo that leaves keeps its bed for a day. `config`:
 
 - `cols` (3), `colW`, `rowH`: beds across, and each bed's width and height;
 - `cx0`, `top0`: the centre x of the first column and the top of the first row;
@@ -591,7 +616,7 @@ A creature in `animals()`:
 
 The library's creatures, each drawn on its feet, facing either way: `cow`, `goat`, `sheepdog` (with a
 red bandana), `ostrich`, `lion`, `tiger`, `duck` (looks `drake`, `hen`, `duckling`), `cat` (looks `grey`,
-`black`), `dog`, `pigeon`, `mouse`, `fish` and `unicorn` (it twinkles). Their poses: `stand`, `walk`, `run`, `eat`, `sleep`, `happy`, `yawn`,
+`black`, `ginger`), `dog`, `pigeon`, `mouse`, `fish` and `unicorn` (it twinkles). Their poses: `stand`, `walk`, `run`, `eat`, `sleep`, `happy`, `yawn`,
 `startled`, `stretch`, `roll`; the duck's `swim`, `dabble` and `slide` (on ice); the ostrich's `hide`.
 What they can wear (the kit puts it on): a goat's scarf and a hat (a farmer's, in a gag), the
 ostrich's bucket (a cat's lies beside it, pushed over).

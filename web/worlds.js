@@ -76,7 +76,7 @@
       case 'loaded': return { kind: 'loaded', raw: m.raw === true }; // raw: the world draws itself, and gets the page's corner control
       case 'ready': case 'leaving': case 'startSession': case 'showRepos': return { kind: m.type };
       case 'error': return { kind: 'error', message: String(m.message ?? '').slice(0, 300), where: String(m.where ?? '').slice(0, 120) };
-      case 'pick': return agent(m.agentId) ? { kind: 'pick', agentId: m.agentId, from: m.from === 'say' ? 'say' : null } : null;
+      case 'pick': return agent(m.agentId) ? { kind: 'pick', agentId: m.agentId, from: m.from === 'say' ? 'say' : null, tab: m.tab === 'subagents' ? 'subagents' : null } : null;
       case 'openDoc': {
         const a = agent(m.agentId);
         if (!a || ctx.private || !short(m.path, PATH_MAX)) return null;
@@ -256,7 +256,7 @@
         console.warn(`The ${world} world: ${act.message}${act.where ? ` (${act.where})` : ''}`);
         break;
       }
-      case 'pick': opts.onPickAgent?.(act.agentId, act.from ? { from: act.from } : undefined); break;
+      case 'pick': opts.onPickAgent?.(act.agentId, act.from || act.tab ? { ...(act.from ? { from: act.from } : {}), ...(act.tab ? { tab: act.tab } : {}) } : undefined); break;
       case 'openDoc': opts.onOpenDoc?.(act.agentId, act.path); break;
       case 'openLink': window.open(act.url, '_blank', 'noopener'); break;
       case 'startSession': opts.onStartSession?.(); break;

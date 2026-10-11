@@ -29,6 +29,7 @@ import { parseMcpList, parsePluginDetails, projectServersOf, readOwnSkills, read
 import { applySince, buildAgent, countStates, sortAgents } from './derive/agent.mjs';
 import { findCollisions } from './derive/collisions.mjs';
 import { reposFor } from './derive/repos.mjs';
+import { createBeds } from './derive/beds.mjs';
 import { planReadings, planUsage } from './derive/plan.mjs';
 import { noteDirectDeploys } from './derive/deploys.mjs';
 import { AlertEngine, notifyMac } from './alerts.mjs';
@@ -149,8 +150,9 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   }
   const token = loadToken(join(stateDir, 'token'));
   const tail = new TailReader();
+  const beds = createBeds({ file: join(stateDir, 'beds.json'), log });
   const codexTurns = new Map(), codexMeta = new Map(); // thread id → its turn, rollout path → its first line
-  let codexList = [], codexListedAt = 0;
+  let codexList = [], codexListedAt = 0, codexSeen = null; // the freshest reading of Codex's limits, kept while Codex is closed
   const sessions = new Map();
   const cpuHist = new Map();
   const resolver = new RepoResolver();
@@ -224,6 +226,8 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       model.addEarlierSaid(earlier.said);
       model.addEarlierTasks(earlier.tasks);
       model.addEarlierBackground(earlier.background);
+      model.addEarlierChildren(earlier.children);
+      model.addEarlierWork(earlier.steps);
       scheduleLight();
     }).catch(err => log(`backfill of ${path} failed: ${err?.stack ?? err}`));
   }
@@ -310,13 +314,19 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     }
   }
 
+  /** Codex's plan usage, as the plan's own (planUsage): from the thread that heard from the API last, with its plan and credits. */
+  function codexPlan(now) {
+    for (const [id, t] of codexTurns) if (t.limits && t.limits.at >= (codexSeen?.at ?? 0)) codexSeen = { id, ...t.limits };
+    const usage = codexSeen && planUsage([{ id: codexSeen.id, lastActivityAt: codexSeen.at, rateLimits: codexSeen.rateLimits }], now);
+    return usage ? { ...usage, planType: codexSeen.planType, credits: codexSeen.credits } : null;
+  }
   // Codex runs its threads in one shared process, so its agents are the threads its rollouts
   // show at work lately, not its processes.
   function codexBases(now) {
     if (now - codexListedAt >= cfg.agentsCliPollMs) {
       codexListedAt = now;
       codexList = listCodexThreads(codexDir, now - cfg.staleAfterHours * 3_600_000, codexMeta);
-      const listed = new Set(codexList.map(t => `codex:${t.id}`));
+      const listed = new Set(codexList.flatMap(t => [t, ...t.subagents]).map(t => `codex:${t.id}`));
       for (const [id, turn] of codexTurns) {
         if (listed.has(id)) continue;
         tail.forget(turn.path);
@@ -327,7 +337,14 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       const id = `codex:${t.id}`;
       if (!codexTurns.has(id)) codexTurns.set(id, Object.assign(new CodexThread(t.mtimeMs), { path: t.path }));
       codexTurns.get(id).applyLines(tail.read(t.path));
-      return { id, kind: 'codex', name: t.name, cwd: t.cwd };
+      // its subagents: each has a rollout of its own, read as the thread's is (those written to in the last two hours)
+      const subagents = t.subagents.filter(s => now - s.mtimeMs < 2 * SUBAGENT_LOOKBACK_MS || codexTurns.get(`codex:${s.id}`)?.turnOpen).map(s => {
+        const sid = `codex:${s.id}`;
+        if (!codexTurns.has(sid)) codexTurns.set(sid, Object.assign(new CodexThread(s.mtimeMs, { from: s.at - 2000 }), { path: s.path, parent: id }));
+        codexTurns.get(sid).applyLines(tail.read(s.path));
+        return { ...s, thread: codexTurns.get(sid) };
+      });
+      return { id, kind: 'codex', name: t.name, cwd: t.cwd, subagents };
     });
   }
 
@@ -393,9 +410,11 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       agents: sortAgents(agents),
       repos: reposFor(agents, { deployRepos: cfg.deployRepos, repoInfo, deploys, directs: directDeploys, prs, lookup: p => resolver.lookup(p), home }),
       plan: planUsage(planReadings(beacons, agents), now),
+      codexPlan: codexPlan(now),
       helper: helper.view(),
       collisions,
     };
+    beds.place(snapshot, now); // each repo's field has its bed: the same in every browser
     prevAgents = new Map(agents.map(a => [a.id, a]));
     alerts.process(snapshot, now, cpuHist);
     writeState(snapshot);
@@ -479,6 +498,10 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
 
   /** A subagent's card, opened: the prompt it was given, its result once done, and its latest steps and words (newest first). */
   function getSubagent(id) {
+    if (id.startsWith('codex:')) { // codex:<thread>:<its subagent's thread>: its last answer; what it was asked and its steps aren't Codex's to show
+      const [, parent, child] = id.split(':'), t = codexTurns.get(`codex:${child}`);
+      return t && t.parent === `codex:${parent}` ? { prompt: null, result: t.turnOpen ? null : t.lastMessage ?? null, feed: [], codex: true } : null;
+    }
     const [sessionId, childId] = id.split(':');
     const rec = sessions.get(sessionId);
     const child = childId ? rec?.model.children.get(childId) : undefined;

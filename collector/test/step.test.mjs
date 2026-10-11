@@ -74,3 +74,10 @@ test('a web or connector call says who it goes out to', () => {
   assert.equal(serviceOf('WebSearch', { query: 'x' }), 'web search');
   assert.equal(serviceOf('Bash', { command: 'ls' }), undefined);
 });
+
+test('a test runner run through a project’s own runner is a test run too', async () => {
+  const { stepOf } = await import('../derive/step.mjs');
+  for (const command of ['uv run pytest tests/unit -q', 'poetry run pytest', 'uv run python -m pytest -x', 'bundle exec rspec', 'pnpm exec vitest run'])
+    assert.equal(stepOf('Bash', { command }), 'test', command);
+  assert.equal(stepOf('Bash', { command: 'uv run python tools/report.py' }), 'shell', 'any other script stays a command');
+});

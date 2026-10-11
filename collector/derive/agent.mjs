@@ -10,6 +10,8 @@ const HISTORY_SAMPLES = 200; // 10 minutes at the 3 s poll
 const ACTIVITY_MINUTES = 30;
 const TIMELINE_MAX = 120;
 const CHILD_RECENT_MS = 60_000;
+// A subagent said to be running that gave no sign of life for this long is not at work: its session was killed, or its notice never came.
+const CHILD_SILENT_MS = 6 * 60 * 60_000;
 const DOCS_MAX = 20;
 
 export function nowOf(model) {
@@ -17,6 +19,18 @@ export function nowOf(model) {
   if (!p) return undefined;
   const service = serviceOf(p.name, p.input);
   return { tool: p.name, summary: summarizeTool(p.name, p.input), step: stepOf(p.name, p.input), startedAt: p.at, ...(service ? { service } : {}) };
+}
+
+/** A Codex thread's step now: its last tool call, while its turn is open and that was within the last minute and a half. */
+function codexNow(base, codex, derived, now) {
+  const last = base?.kind === 'codex' && derived.state === 'working' ? codex?.lastStep : null;
+  return last && now - last.at < 90_000 ? { tool: last.tool, summary: '', step: last.step, startedAt: last.at } : undefined;
+}
+
+/** What a session (or a Codex thread) has done so far: { steps: { edit: 12, read: 30… }, failed, streak, lastTest: { ok, at } | null }. Undefined without one. */
+export function workOf(m) {
+  const w = m?.work;
+  return w ? { steps: { ...w.steps }, failed: w.failed, streak: w.streak, lastTest: w.lastTest ? { ...w.lastTest } : null } : undefined;
 }
 
 const TASKS_SHOWN = 12;
@@ -33,6 +47,27 @@ export function tasksOf(model) {
   };
 }
 
+/**
+ * A Codex thread's subagents, as a session's are (childrenOf): those at work, and those whose last turn ended within
+ * the hour. `subs`: [{ id, at, nickname, role, task, thread }], thread being what its own rollout says (CodexThread).
+ * A Codex subagent stays, for more tasks: it is running while a turn of its is open, done between them. What it was
+ * asked is not in its rollout to read, nor are its steps.
+ */
+export function codexChildrenOf(subs, now, cfg) {
+  const out = [];
+  for (const s of subs) {
+    const t = s.thread, running = deriveCodexState(t, now, cfg).state === 'working';
+    const endedAt = running ? undefined : t.lastTurnEndAt || t.lastActivityAt;
+    if (!running && now - endedAt > CHILD_KEEP_MS) continue;
+    const said = !running && t.lastTurnEndAt && t.lastReply ? t.lastReply : undefined;
+    out.push({
+      id: s.id, kind: 'subagent', agentType: s.role ?? 'subagent', label: [s.task, s.nickname].filter(Boolean).join(' · '), state: running ? 'running' : t.aborted ? 'failed' : 'done',
+      startedAt: t.turnStartAt || s.at || t.lastActivityAt, background: true, lastAt: t.lastActivityAt, endedAt, result: said, // its thread goes on beside it: in the background, as Claude Code's are when launched so
+    });
+  }
+  return out.sort((a, b) => b.startedAt - a.startedAt).slice(0, 20);
+}
+
 export function childrenOf(model, childModels, now) {
   const out = [];
   for (const c of model.children.values()) {
@@ -40,9 +75,9 @@ export function childrenOf(model, childModels, now) {
     let state = c.state;
     if (cm && !c.endedAt && (cm.pending.size > 0 || now - cm.lastActivityAt < CHILD_RECENT_MS)) state = 'running'; // a finish the parent recorded stands
     const lastAt = cm?.lastActivityAt || c.startedAt;
-    if (state !== 'running' && now - lastAt > CHILD_KEEP_MS) continue;
+    if (state === 'running' ? c.kind === 'subagent' && now - lastAt > CHILD_SILENT_MS : now - lastAt > CHILD_KEEP_MS) continue; // a background command may well run for days
     out.push({
-      id: c.id, kind: c.kind, agentType: c.agentType, label: c.label, state, startedAt: c.startedAt, now: cm ? nowOf(cm) : undefined,
+      id: c.id, kind: c.kind, agentType: c.agentType, label: c.label, state, startedAt: c.startedAt, background: c.isBackground === true, now: cm ? nowOf(cm) : undefined,
       // from its own transcript: its steps so far, what it last said; from the parent: when it finished, and its result's first line
       steps: cm?.toolCount, lastSaid: cm?.lastReply ? firstLine(cm.lastReply) : undefined, lastAt, endedAt: c.endedAt, result: c.result ? firstLine(c.result) : undefined,
     });
@@ -171,7 +206,7 @@ export function buildAgent({ base, model, codex, registry, proc, command, cpuHis
   const calls = model ? model.callsSince(since) : [];
   for (const cm of childModels.values()) calls.push(...cm.callsSince(since));
   const touching = collectTouches(calls, since, home).map(t => ({ ...t, repo: repoOf(t.path) ?? undefined }));
-  const recent = calls.filter(c => c.at > now - ACTIVITY_MINUTES * 60_000).sort((x, y) => x.at - y.at);
+  const recent = (model ? calls : codex?.recent ?? []).filter(c => c.at > now - ACTIVITY_MINUTES * 60_000).sort((x, y) => x.at - y.at); // a Codex thread's calls are kept by its rollout's reader
   return {
     id: base.id,
     kind: base.kind,
@@ -206,17 +241,18 @@ export function buildAgent({ base, model, codex, registry, proc, command, cpuHis
     naming, // the helper's name for it: an offer, asking, or why there is none
     usage: beacon?.usage ? { costUsd: beacon.usage.costUsd, contextPercent: beacon.usage.contextPercent } : undefined, // the plan's windows go in snapshot.plan
     lastActivityAt: model?.lastActivityAt || codex?.lastActivityAt || undefined,
-    now: nowOf(model),
+    now: nowOf(model) ?? codexNow(base, codex, derived, now),
+    work: workOf(model ?? codex), // what it has done so far, by kind of step
     lastPrompt: model?.lastPrompt ?? undefined,
     lastReply: model?.lastReply ?? codex?.lastReply ?? undefined,
     question: derived.state === 'yourTurn' ? trailingQuestion(model?.finalReply) ?? undefined : undefined,
     feed: model ? model.recent(20, 10).map(previewOf) : [], // the latest steps, and the latest messages however busy it was
-    children: model ? childrenOf(model, childModels, now) : [],
+    children: model ? childrenOf(model, childModels, now) : base.kind === 'codex' ? codexChildrenOf(base.subagents ?? [], now, cfg) : [],
     touching,
     docs: docsOf(model, childModels),
     proc: proc ? { ...proc, history: historyOf(cpuHistory) } : undefined,
     activity: activityOf(recent, now),
-    timeline: recent.slice(-TIMELINE_MAX).map(c => ({ at: c.at, tool: c.name })),
+    timeline: recent.slice(-TIMELINE_MAX).map(c => ({ at: c.at, tool: c.name, step: c.step ?? stepOf(c.name, c.input), ...(c.ok === false ? { ok: false } : {}) })),
   };
 }
 

@@ -8,7 +8,7 @@ import vm from 'node:vm';
 
 const web = f => readFileSync(fileURLToPath(new URL(`../../web/${f}`, import.meta.url)), 'utf8');
 // The scripts a world's frame runs (the bridge aside), and the styles it loads (it can't see the page's own).
-const FRAME_SCRIPTS = ['worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/engine.js', 'worlds/farm/world.js'];
+const FRAME_SCRIPTS = ['worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js', 'worlds/farm/world.js'];
 const FRAME_CODE = FRAME_SCRIPTS.map(web).join('\n');
 const FRAME_CSS = ['base.css', 'worlds/sdk/engine.css'].map(web).join('\n');
 // The page's scene and host, and the farm's frame, loaded together.
@@ -479,6 +479,26 @@ test('a long name is shortened in the middle, so both ends stay readable', () =>
   assert.equal(cutMid('ctd', 10), 'ctd');
 });
 
+test('a name that ends in a short code keeps the code and loses the end of the word before it; any other is cut in the middle', () => {
+  const { shortName } = load();
+  assert.deepEqual(['shiftaro-1a', 'kuberbase-f3', 'dev-a4', 'shiftaro-legal-7c', 'nachtlauf-modularisierung', 'Übernimm den Umsetzungslauf'].map(n => shortName(n, 8)),
+    ['shift-1a', 'kuber-f3', 'dev-a4', 'shift-7c', 'nach…ung', 'Über…auf']);
+  assert.deepEqual([6, 5, 4, 3].map(n => shortName('shiftaro-1a', n)), ['shi-1a', 'sh-1a', 'sh…a', 's…a'], 'two letters of the word at least, else the middle goes');
+  assert.equal(shortName('a-b-1a', 5), 'a-1a', 'no hyphen left hanging before the code');
+});
+
+test('a tag made to fit a place: all one size (the full one only where it holds eight characters), as many characters as it holds; picked, whole', () => {
+  const window = { Agentville: { raw: () => {} }, devicePixelRatio: 2 };
+  vm.runInNewContext(`${code}\n;window.__fit = tagFit;`, { window, console, Math, Date, JSON, Map, Set });
+  const fit = w => plain(window.__fit(w, 9)); // a character is 9 CSS pixels wide in the full size, 6 in the smaller
+  assert.deepEqual([44, 58, 76, 100].map(fit), [{ small: true, chars: 6 }, { small: true, chars: 9 }, { small: false, chars: 8 }, { small: false, chars: 10 }]);
+  assert.deepEqual(fit(10), { small: true, chars: 3 }, 'three characters at least');
+  const th = window.AgentvilleFarm.makeFarm(), f = over => ({ id: 'a', name: 'shiftaro-1a', state: 'turn', ...over });
+  assert.deepEqual([th.tagSlot(f()), th.tagSlot(f({ state: 'waiting' })), th.tagSlot(f({ state: 'working' })), th.tagSlot(f({ nap: true }))], [22, 22, null, null], 'a place on the porch is 22 wide');
+  assert.deepEqual([th.tagBadge(f()), th.tagBadge(f({ question: 'Push it?' })), th.tagBadge(f({ state: 'waiting' })), th.tagBadge(f({ nap: true }))], ['ok', 'ask', null, null], 'a tick or a question for a turn that ended; one waiting keeps its "!"');
+  assert.equal(th.tag(f(), 8), 'shift-1a');
+});
+
 test('on the porch a name tag is just the name, 10 characters at most; in the field it has its hearts and chores', () => {
   const { tagText } = load();
   const f = over => ({ name: 'inventory-management', kind: 'interactive', state: 'working', hearts: 3, tasks: { done: 2, total: 5 }, ...over });
@@ -695,4 +715,555 @@ test('the cats sleep in the basket and on the moss at the wood’s edge and curl
   assert.ok(far <= 8, `every step was a step: none was moved across the yard (longest ${far})`);
   assert.ok(crossed.has('cat') && crossed.size >= 4, `they walk from one half of the yard to the other, by the path beside the hammocks (${[...crossed]})`);
   assert.deepEqual(want.filter(id => !ran.has(id)), [], 'every gag that needs no farmer ran');
+});
+
+/* ---------- porch life ---------- */
+
+const loadFarm = (extra = {}) => { const window = { Agentville: { raw: () => {} } }; vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set, ...extra }); return window.AgentvilleFarm; };
+const MINUTE = 60_000, NOON = Date.UTC(2026, 4, 12, 12);
+const onPorch = (now, ages = {}) => [
+  ...['w1', 'w2', 'w3'].map((id, i) => ({ id, state: 'waiting', since: now - (ages[id] ?? [0.3, 3, 20][i]) * MINUTE })),
+  ...['t1', 't2', 't3'].map((id, i) => ({ id, state: 'turn', since: now - (ages[id] ?? [5, 30, 90][i]) * MINUTE })),
+];
+
+test('the porch has two ends, the door between them: waiting on the left, turn ended on the right, three each, in their own seats', () => {
+  const farm = loadFarm(), SPOTS = plain(farm.porch.SPOTS), th = farm.makeFarm();
+  assert.ok(Math.max(...SPOTS.desk) + 7 <= 191 && Math.min(...SPOTS.turn) - 7 >= 209, 'the door (191 to 209) stays clear');
+  assert.ok(Math.min(...SPOTS.turn) - Math.max(...SPOTS.desk) - 14 >= 24, 'well apart (they were 6 px apart)');
+  for (const row of Object.values(SPOTS)) assert.deepEqual([row[1] - row[0], row[2] - row[1]], [22, 22], 'a bubble clears its neighbour');
+  const farmers = [...onPorch(Date.now()), { id: 'w4', state: 'waiting', since: Date.now() }, { id: 't4', state: 'turn', since: Date.now() }];
+  th.setScene({ plan: null, chrome: {}, fields: [], farmers, carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  const count = {}, at = {};
+  for (const f of farmers) { const s = th.slots(f), i = count[s.group] ?? 0; count[s.group] = i + 1; if (i < s.cap) at[f.id] = [s.zone, ...s.at(i)]; }
+  assert.deepEqual(['w1', 'w2', 'w3'].map(id => at[id][1]).filter(x => !SPOTS.desk.includes(x) && !SPOTS.desk.includes(x - 3)), [], 'on the left (one waiting long may be a step along, pacing)');
+  assert.deepEqual(['t1', 't2', 't3'].map(id => at[id][1]).sort((a, b) => a - b), SPOTS.turn, 'each in a seat of its own');
+  assert.deepEqual([at.w4, at.t4, count.desk, count.turn], [undefined, undefined, 4, 4], 'a fourth is counted on the sign');
+  const seats = farm.porch.seats(['t1', 't2', 't3']);
+  assert.deepEqual(['t1', 't2', 't3'].map(id => at[id][1]), ['t1', 't2', 't3'].map(id => SPOTS.turn[seats.get(id)]), 'the one it likes best, or the next along');
+  assert.equal(farm.porch.seats(['t2']).get('t2'), farm.porch.seats(['t2', 't1', 't3']).get('t2'), 'first come keeps its favourite');
+});
+
+test('the longer one waits on you the more it wants you; the longer a turn has been over the more it settles in', () => {
+  const { stage } = loadFarm().porch, at = (zone, min) => stage(zone, NOON - min * MINUTE, NOON);
+  assert.deepEqual([0, 0.9, 1, 4.9, 5, 14, 15, 600].map(m => at('desk', m)), ['wave', 'wave', 'tap', 'tap', 'bell', 'bell', 'pace', 'pace']);
+  assert.deepEqual([0, 0.9, 1, 9, 10, 59, 60, 179, 180, 999].map(m => at('turn', m)), ['stand', 'stand', 'sit', 'sit', 'drink', 'drink', 'doze', 'doze', 'blanket', 'blanket']);
+  assert.deepEqual([stage('desk', NOON + 5000, NOON), stage('turn', null, NOON)], ['wave', 'stand'], 'a clock behind the collector’s, or no time at all: just come');
+});
+
+test('a seated farmer’s pastime changes, is the same for everyone looking, leans to its favourites, and follows how long it has sat', () => {
+  const { pastimeOf } = loadFarm().porch, PASTIMES = plain(loadFarm().porch.PASTIMES);
+  const day = stage => Array.from({ length: 24 * 60 * 2 }, (_, i) => pastimeOf('t1', stage, NOON + i * 30_000));
+  const tally = list => list.reduce((m, p) => ({ ...m, [p]: (m[p] ?? 0) + 1 }), {});
+  assert.equal(pastimeOf('t1', 'stand', NOON), 'stand', 'just come: on its feet');
+  assert.equal(pastimeOf('t1', 'sit', NOON + 7000), pastimeOf('t1', 'sit', NOON + 7000));
+  const sit = day('sit'), n = tally(sit);
+  assert.deepEqual(Object.keys(n).sort(), ['rest', ...PASTIMES].sort(), 'all of them in a day, and no drink yet');
+  let runs = 0, longest = 0, run = 0;
+  for (let i = 1; i < sit.length; i++) { if (sit[i] !== sit[i - 1]) { runs++; longest = Math.max(longest, run); run = 0; } else run++; }
+  assert.ok(runs > sit.length / 6 && longest <= 12, `it changes often (${runs} times in ${sit.length} half-minutes, at most ${longest / 2} min at one thing)`);
+  const top = Object.entries(n).filter(([k]) => k !== 'rest').sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  assert.ok(n[top[0]] > n[top.at(-1)] * 1.8, `it has favourites (${top[0]} ${n[top[0]]} times, ${top.at(-1)} ${n[top.at(-1)]})`);
+  assert.notDeepEqual(tally(Array.from({ length: 2880 }, (_, i) => pastimeOf('t2', 'sit', NOON + i * 30_000))), n, 'and another farmer has others');
+  assert.ok(tally(day('drink')).sip > 100, 'a drink from its tenth minute');
+  const doze = tally(day('doze'));
+  assert.ok(doze.doze > 2880 * 0.35 && doze.doze < 2880 * 0.7, `from its hour it mostly dozes (${doze.doze} of 2880), and wakes for the rest`);
+});
+
+test('the porch stays calm: at most two seated farmers are busy at once; those waiting never sit', () => {
+  const { now: porchNow } = loadFarm().porch;
+  let three = 0;
+  for (let i = 0; i < 2000; i++) {
+    const t = NOON + i * 17_000, p = porchNow(onPorch(t, { t1: 5, t2: 6, t3: 7 }), t);
+    const busy = ['t1', 't2', 't3'].filter(id => !['rest', 'doze', 'stand'].includes(p.who.get(id).pastime));
+    if (!p.surprise) { assert.ok(busy.length <= 2, `${busy.length} busy at ${i}`); three += busy.length === 2; }
+    for (const id of ['w1', 'w2', 'w3']) assert.deepEqual(Object.keys(p.who.get(id)).sort(), ['i', 'stage', 'zone'], 'no seat and no pastime for one that waits');
+    assert.deepEqual(['t1', 't2', 't3'].map(id => p.who.get(id).seat).sort(), [0, 1, 2]);
+  }
+  assert.ok(three > 200, 'and two often are');
+  const napper = porchNow([{ id: 'n', state: 'turn', nap: true, since: NOON }], NOON);
+  assert.equal(napper.who.size, 0, 'one that wakes by itself is in a hammock, not on the porch');
+});
+
+test('surprises go by the clock: each comes about as often as it should, one at a time, only with someone for it, the star only at night', () => {
+  const { now: porchNow, surpriseOf } = loadFarm().porch, SURPRISES = plain(loadFarm().porch.SURPRISES);
+  const seen = {}, DAYS = 21;
+  for (let m = 0; m < DAYS * 24 * 60; m++) { // every minute of three weeks, looked at six times
+    const keys = new Set();
+    for (let s = 2; s < 60; s += 10) { const t = NOON + m * MINUTE + s * 1000, night = m % 1440 > 600, sur = porchNow(onPorch(t, { t1: 20, t2: 30, t3: 40 }), t, { night }).surprise; if (sur) { keys.add(sur.key); assert.ok(sur.t >= 0 && sur.t < 1); if (sur.key === 'star') assert.ok(night); } }
+    assert.ok(keys.size <= 1, `two surprises in minute ${m}`);
+    for (const k of keys) seen[k] = (seen[k] ?? 0) + 1;
+  }
+  assert.deepEqual(Object.keys(seen).sort(), SURPRISES.map(s => s[0]).sort(), `every one of them in ${DAYS} days: ${JSON.stringify(seen)}`);
+  const perHour = k => seen[k] / (DAYS * 24);
+  assert.ok(perHour('bird') + perHour('lapcat') + perHour('sync') > 8 && perHour('bird') + perHour('lapcat') + perHour('sync') < 30, 'something small every few minutes');
+  assert.ok(perHour('duet') + perHour('spill') + perHour('yarn') + perHour('tip') > 0.3 && perHour('duet') + perHour('spill') + perHour('yarn') + perHour('tip') < 2.5, 'something rarer about once an hour');
+  assert.ok(seen.peek <= DAYS * 6 && seen.star <= DAYS * 6, 'the unicorn and the star a few times a day at most');
+  assert.equal(surpriseOf(NOON, {}), surpriseOf(NOON, {}) && null, 'an empty porch at noon: nothing');
+  let alone = 0;
+  for (let m = 0; m < 3000; m++) for (let s = 2; s < 60; s += 10) { const sur = surpriseOf(NOON + m * MINUTE + s * 1000, { sat: [], all: ['w1'], seating: ['rocker', 'bench', 'bench'] }); if (sur) { alone++; assert.ok(['bird', 'peek'].includes(sur.key), `${sur.key} with no one seated`); } }
+  assert.ok(alone > 0, 'a bird still finds the one who waits');
+});
+
+test('the album: everything the porch can show has a name; a thing drawn goes in once and is kept; a surprise is told in the diary, by the porch', () => {
+  const farm = loadFarm(), { ALBUM, SEATING, PASTIMES, SURPRISES, STAGES } = plain(farm.porch);
+  const keys = [...new Set(SEATING.flat()), ...PASTIMES, 'sip', ...SURPRISES.map(s => s[0]), 'cheers', 'tap', 'bell', 'pace', 'drink', 'doze', 'blanket', 'pumpkin', 'lights'];
+  assert.deepEqual(Object.keys(ALBUM).sort(), [...new Set(keys)].sort());
+  assert.equal(Object.keys(ALBUM).length, 30);
+  assert.ok(STAGES.desk.every(([, s]) => s === 'wave' || ALBUM[s]) && STAGES.turn.every(([, s]) => ['stand', 'sit'].includes(s) || ALBUM[s]));
+  assert.deepEqual([4, 9, 10, 11].map(m => farm.porch.seasonalOf(new Date(2026, m, 15).getTime())), [null, 'pumpkin', null, 'lights']);
+
+  const kept = new Map([['album', 'rocker,nonsense']]), prefs = { get: k => kept.get(k), set: (k, v) => kept.set(k, v) };
+  const fills = [], ctx = { fillRect() {}, set fillStyle(c) { fills.push(c); }, drawImage() {}, globalAlpha: 1 };
+  const window = { Agentville: { raw: () => {} } }, document = { createElement: () => ({ getContext: () => ({ fillRect() {}, clearRect() {}, set fillStyle(_) {} }) }) };
+  vm.runInNewContext(`${code}\n;window.__PXG = PXG;`, { window, document, console, Math, Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm(), sceneOf = farmers => ({ plan: null, chrome: {}, fields: [], farmers: farmers.map((f, i) => ({ color: i, look: { hat: 'straw', hatColor: '#e9c46a', band: '#b5562f', hair: '#2b1d14', skin: '#f1c7a1', overalls: '#3c5a99', extra: 'none' }, kids: [], ...f })), carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  th.attach({ prefs });
+  th.relayout(window.AgentvilleFarm.layoutFor([]));
+  window.__PXG.ctx = ctx; window.__PXG.T = 1;
+  const scene = sceneOf(onPorch(Date.now(), { w3: 20, t1: 5, t2: 30, t3: 300 }));
+  assert.deepEqual(plain(th.setScene(scene)), [], 'nothing drawn yet: nothing new');
+  th.ground();
+  for (const f of scene.farmers) { const b = { x: 200, y: 78, walk: false, zone: f.state === 'turn' ? 'turn' : 'desk', kids: [] }; th.drawChar(f, b); th.drawFx(f, b); }
+  th.top();
+  const rare = new Set([...SURPRISES.map(s => s[0]), 'cheers']);
+  const news = plain(th.setScene(scene)).filter(n => n.by === 'The porch');
+  const got = kept.get('album').split(',');
+  assert.ok(got.includes('rocker') && !got.includes('nonsense'), 'what was kept before stays; what the album doesn’t know is dropped');
+  for (const k of ['pace', 'tap', 'drink', 'blanket']) assert.ok(got.includes(k), `${k} was drawn (${got})`);
+  assert.equal(news.length, got.filter(k => rare.has(k)).length, 'the diary hears of surprises only: the everyday things would fill it');
+  assert.ok(news.every(n => /seen for the first time \(\d+ of 30 in the album\)/.test(n.log) && n.text === 'New!'));
+  assert.deepEqual(plain(th.setScene(scene)).filter(n => n.by === 'The porch'), [], 'told once');
+  // a merged pull request: a toast from everyone seated, and that is a surprise
+  th.setScene({ ...scene, fields: [{ key: '/r', name: 'r', prs: { open: [], merged: [] } }] });
+  th.setScene({ ...scene, fields: [{ key: '/r', name: 'r', prs: { open: [], merged: [{ number: 7, at: Date.now(), title: 'x' }] } }] });
+  for (const f of scene.farmers) { const b = { x: 200, y: 78, walk: false, zone: f.state === 'turn' ? 'turn' : 'desk', kids: [] }; th.drawChar(f, b); th.drawFx(f, b); }
+  const toast = plain(th.setScene(scene)).filter(n => n.by === 'The porch');
+  assert.ok(kept.get('album').split(',').includes('cheers') && toast.some(n => /a toast to a merge: seen for the first time/.test(n.log)), 'a merge is toasted, and the diary says so');
+  assert.match(th.dialog('house').html, new RegExp(`Porch album:</b> ${kept.get('album').split(',').length} of 30 seen`));
+  assert.match(th.dialog('house').html, /still to find/);
+});
+
+test('the silos: one for each plan there is a reading of; Claude\u2019s by the barn, Codex\u2019s left of it; alone, Codex has the one by the barn', () => {
+  const window = { Agentville: { raw: () => {} } }, fills = [], labels = [];
+  const ctx = { fillRect: (x, y, w, h) => fills.push({ x, y, w, h, c: ctx._c }), set fillStyle(c) { ctx._c = c; }, _c: null, globalAlpha: 1 };
+  const document = { createElement: () => ({ getContext: () => ({ fillRect() {}, clearRect() {}, set fillStyle(_) {} }), toDataURL: () => '' }) };
+  vm.runInNewContext(`${code}\n;window.__PXG = PXG;`, { window, document, console, Math, Date, JSON, Map, Set });
+  const farm = window.AgentvilleFarm, th = farm.makeFarm(), week = pct => ({ windows: [{ kind: 'seven_day', percentUsed: pct, resetsAt: null }] });
+  const show = (plan, codexPlan) => {
+    th.setScene({ plan, codexPlan, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+    th.relayout(farm.layoutFor([]));
+    window.__PXG.ctx = ctx; window.__PXG.T = 1; window.__PXG.lights = [];
+    fills.length = 0; labels.length = 0;
+    th.ground();
+    th.labels((x, y, html, cls, title) => labels.push({ x, title }), {});
+    const grain = x => fills.filter(f => f.c === '#e9c46a' && f.x === x + 7 && f.w === 6).map(f => f.h);
+    return { grain: [grain(92), grain(10)], silos: labels.filter(l => /silo/.test(l.title ?? '')).map(l => [l.x, l.title.split(':')[0]]), slate: fills.some(f => f.c === farm.ink('#5d7184')), clicks: [th.buildingAt(100, 40), th.buildingAt(20, 40)] };
+  };
+  assert.deepEqual(plain(show(null, null)), { grain: [[], []], silos: [], slate: false, clicks: ['silo', null] }, 'no reading: the silo by the barn stands empty');
+  assert.deepEqual(plain(show(week(50), null)), { grain: [[23], []], silos: [[102, 'Claude\u2019s silo'.replace('\u2019', "'")]], slate: false, clicks: ['silo', null] });
+  assert.deepEqual(plain(show(null, week(100))), { grain: [[46], []], silos: [[102, "Codex's silo"]], slate: true, clicks: ['silo', null] }, 'Codex alone: the silo by the barn, under a slate dome');
+  assert.deepEqual(plain(show(week(50), week(100))), { grain: [[23], [46]], silos: [[102, "Claude's silo"], [20, "Codex's silo"]], slate: true, clicks: ['silo', 'silo'] }, 'both: a second silo left of the barn');
+  const html = th.dialog('silo').html;
+  assert.match(html, /<b>Claude<\/b>[\s\S]*50% used[\s\S]*<b>Codex<\/b>[\s\S]*100% used/);
+  th.setScene({ plan: null, codexPlan: { ...week(100), planType: 'pro', credits: 53870.2 }, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  assert.match(th.dialog('silo').html, /<b>Codex<\/b> <span class="muted">pro plan · 53\D?870 credits left<\/span>[\s\S]*No reading of Claude's plan yet/);
+});
+
+test('the porch signs count those there is no place for; lit windows are drawn with the land, only when it is dark', () => {
+  const window = { Agentville: { raw: () => {} } }, labels = [], fills = [];
+  const document = { createElement: () => ({ getContext: () => ({ fillRect() {}, clearRect() {}, set fillStyle(_) {} }), toDataURL: () => '' }) };
+  vm.runInNewContext(`${code}\n;window.__PXG = PXG; window.__lit = drawLitWindows;`, { window, document, console, Math, Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm();
+  th.setScene({ plan: null, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
+  th.relayout(window.AgentvilleFarm.layoutFor([]));
+  th.labels((x, y, html) => labels.push(html), { desk: 2, turn: 0 });
+  const signs = labels.filter(h => /WAITING ON YOU|YOUR TURN/.test(h)).map(h => h.match(/<span class="px-sr">([^<]*)</)?.[1] ?? h);
+  assert.deepEqual(signs, ['WAITING ON YOU +2', 'YOUR TURN']);
+  assert.ok(!labels.some(h => /\+2 waiting/.test(h)), 'no count of its own any more');
+  window.__PXG.ctx = { fillRect: (x, y, w, h) => fills.push([x, y, w, h]), set fillStyle(_) {} };
+  const lights = [[62, 54, 11, [61, 47, 2, 1]], [158, 56, 16, [148, 46, 20, 14, true]]]; // a lamp, a window
+  window.__lit({ light: 1 }, lights);
+  assert.deepEqual(fills, [], 'by day: nothing');
+  window.__lit({ light: 0 }, lights);
+  assert.deepEqual(fills[0], [148, 46, 20, 14], 'at night: the window\u2019s panes (the lamp is lit over the dark, as before)');
+  assert.ok(fills.every(f => f[0] >= 148), 'and not the lamp');
+});
+
+// The porch cat goes by the clock: a clock the test holds, at a moment the cat is at `spot` (doing `act`) for the next minute and a half.
+function catClock(spot, act) {
+  const plan = loadFarm().cat.plan;
+  let clock = Date.UTC(2026, 4, 12, 9);
+  for (;; clock += 7000) { const ok = [0, 30_000, 60_000, 90_000].every(d => plan(clock + d).spot === spot) && (!act || plan(clock).act === act); if (ok) break; }
+  const held = { now: clock };
+  held.Date = class extends Date { constructor(...a) { super(...(a.length ? a : [held.now])); } static now() { return held.now; } };
+  return held;
+}
+// The farm's porch, drawn frame by frame on a context that keeps what was filled; a farmer walks where the test says.
+function porchStage(clock) {
+  const window = { Agentville: { raw: () => {} } }, fills = [];
+  const ctx = { fillRect: (x, y, w, h) => fills.push([x, y, w, h, ctx._c]), set fillStyle(c) { ctx._c = c; }, drawImage() {}, _c: null, globalAlpha: 1 };
+  const document = { createElement: () => ({ getContext: () => ({ fillRect() {}, clearRect() {}, set fillStyle(_) {} }), toDataURL: () => '' }) };
+  vm.runInNewContext(`${code}\n;window.__PXG = PXG;`, { window, document, console, Math, Date: clock.Date, JSON, Map, Set });
+  const farm = window.AgentvilleFarm, th = farm.makeFarm();
+  const f = { id: 'n', name: 'n', state: 'idle', color: 0, kids: [], look: { hat: 'straw', hatColor: '#e9c46a', band: '#b5562f', hair: '#2b1d14', skin: '#f1c7a1', overalls: '#3c5a99', extra: 'none' } };
+  th.setScene({ plan: null, chrome: {}, fields: [], farmers: [f], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 }, subagents: [] });
+  th.relayout(farm.layoutFor([]));
+  window.__PXG.ctx = ctx; window.__PXG.lights = [];
+  /** One frame at T (the clock goes with it); with `b`, the farmer walks there. What the porch drew. */
+  let T0 = null;
+  const base = clock.now;
+  const frame = (T, b) => { T0 ??= T; clock.now = base + Math.round((T - T0) * 1000); window.__PXG.T = T; fills.length = 0; th.ground(); const drawn = fills.slice(); if (b) th.drawChar(f, { walk: true, face: 'down', kids: [], zone: '', ...b }); return drawn; };
+  const ginger = farm.ink('#e9a23b'), shadow = farm.ink('#4e6b3a');
+  return { farm, th, frame, catHome: d => d.some(r => r[0] === 196 && r[1] === 77 && r[4] === shadow), catAt: d => { const g = d.filter(r => r[4] === ginger && r[1] < 95 && r[0] > 120 && r[0] < 290); return g.length ? [Math.round(g.reduce((t, r) => t + r[0], 0) / g.length), Math.min(...g.map(r => r[1]))] : null; } };
+}
+
+test('a new farmer comes out of the farmhouse: the door stands open while it does; the porch cat runs off its mat, round the house and up onto the roof, and is not back soon', () => {
+  const s = porchStage(catClock('mat', 'nap')), LANE = 87, leaf = s.farm.ink('#8b5a2b'), dark = s.farm.ink('#1b1420');
+  assert.deepEqual(plain(s.th.spawn()), [200, 65, [[200, LANE]]], 'from the front door’s sill, across the porch, down the steps onto the lane');
+  assert.equal(s.th.arriveText, 'comes out of the farmhouse');
+  const doorOpen = d => d.some(r => r[0] === 193 && r[1] === 47 && r[2] === 2 && r[3] === 18 && r[4] === leaf) && !d.some(r => r[4] === dark && r[0] >= 193 && r[0] < 207 && r[1] >= 47 && r[1] < 65);
+  assert.deepEqual([doorOpen(s.frame(1)), s.catHome(s.frame(1.1))], [false, true], 'nobody about: the door shut, the cat curled up on its mat');
+  s.frame(2, { x: 200, y: 65 }); // it steps onto the sill
+  s.frame(2.05, { x: 200, y: 70 });
+  const out = s.frame(2.1, { x: 200, y: 74 });
+  assert.deepEqual([doorOpen(out), s.catHome(out)], [true, false], 'the door is open, and the cat is off the mat');
+  const seen = [];
+  for (let T = 2.15; T < 14; T += 0.05) { const at = s.catAt(s.frame(T)); if (at) seen.push(at); }
+  assert.equal(doorOpen(s.frame(14)), false, 'the door shut behind the farmer');
+  const wall = seen.filter(([x, y]) => y > 44 && y < 74 && x > 136 && x < 264);
+  assert.deepEqual(wall, [], 'it never passes through the house: down the steps, along the lane, up beside the stall');
+  assert.ok(seen.some(([x, y]) => x > 272 && y > 50 && y < 86), 'it goes up beside the market stall, outside the house');
+  const up = seen.at(-1);
+  assert.ok(up[1] < 38 && up[0] > 185 && up[0] < 215, `and sits on the roof above the door (${up})`);
+  let home = null;
+  for (let T = 14; T < 30 && home === null; T += 0.1) if (s.catHome(s.frame(T))) home = T;
+  assert.equal(home, null, 'it is not back on its mat within the half minute: it stays away a good while');
+});
+
+test('the porch cat on the lane makes way for a farmer walking by: to the roof, or, with the farmer coming from that side, to the far end of the lane', () => {
+  const fromLeft = porchStage(catClock('laneR'));
+  const at = fromLeft.catAt(fromLeft.frame(1));
+  assert.ok(at && Math.abs(at[0] - 250) < 9 && at[1] > 78, `on the lane before the porch’s right end (${at})`);
+  fromLeft.frame(1.1, { x: 238, y: 87, face: 'right' });
+  let last = null;
+  for (let T = 1.2; T < 9; T += 0.05) last = fromLeft.catAt(fromLeft.frame(T)) ?? last;
+  assert.ok(last[1] < 40, `up on the roof (${last})`);
+  const fromRight = porchStage(catClock('laneR'));
+  fromRight.frame(1);
+  fromRight.frame(1.1, { x: 262, y: 87, face: 'left' });
+  for (let T = 1.2; T < 5; T += 0.05) last = fromRight.catAt(fromRight.frame(T)) ?? last;
+  assert.ok(Math.abs(last[0] - 142) < 9 && last[1] > 78, `the way to the roof is the farmer’s: off to the lane’s far end (${last})`);
+});
+
+test('the porch cat’s day goes by the clock, in stretches of uneven length: every place in turn, often indoors, sometimes away for long; at night only where the porch lamp shines', () => {
+  const { cat } = loadFarm(), t0 = Date.UTC(2026, 4, 12, 9), count = night => { const n = {}; for (let i = 0; i < 20000; i++) { const p = cat.plan(t0 + i * 10_000, { night }); n[p.spot] = (n[p.spot] ?? 0) + 1; } return n; };
+  const day = count(false), night = count(true), share = (n, k) => (n[k] ?? 0) / 20000;
+  assert.deepEqual(Object.keys(day).sort(), ['in', 'laneL', 'laneR', 'mat', 'roof', 'step']);
+  assert.ok(share(day, 'in') > 0.35 && share(day, 'in') < 0.55 && share(day, 'mat') < 0.3, `not always on its mat, and often not about (${JSON.stringify(day)})`);
+  assert.deepEqual(Object.keys(night).sort(), ['in', 'mat'], 'by night: its mat, under the porch lamp, or indoors');
+  assert.deepEqual(plain(cat.plan(t0 + 12_345)), plain(cat.plan(t0 + 12_345)), 'the same moment, the same cat');
+  const lengths = new Set();
+  let away = 0, longest = 0;
+  for (let t = t0; t < t0 + 12 * 3600_000;) { const st = cat.stretch(t); lengths.add(Math.round((st.until - st.from) / 1000)); assert.ok(st.until > t && st.until - st.from <= 240_000); t = st.until; }
+  for (let t = t0; t < t0 + 48 * 3600_000; t += 30_000) { away = cat.plan(t).spot === 'in' ? away + 30 : 0; longest = Math.max(longest, away); }
+  assert.ok(lengths.size > 40, `it stays for uneven lengths of time (${lengths.size} different ones)`);
+  assert.ok(longest >= 20 * 60, `and is sometimes gone for long (${Math.round(longest / 60)} min at most in two days)`);
+  const acts = new Set(), where = new Set();
+  for (let i = 0; i < 6000; i++) { const p = cat.plan(t0 + i * 7000); acts.add(p.act); if (p.act === 'play') where.add(p.spot); if (p.spot === 'in') assert.equal(p.act, null); }
+  assert.deepEqual([...acts].map(String).sort(), ['groom', 'nap', 'null', 'play', 'sit', 'stretch', 'watch']);
+  assert.deepEqual([...where].sort(), ['laneL', 'laneR'], 'it plays only where there is room: on the lane');
+});
+
+test('the porch cat’s ways keep to the mat, the steps and the lane, and go up to the roof from outside the house: by the stall’s awning', () => {
+  const { cat } = loadFarm(), S = plain(cat.SPOTS), U = plain(cat.UP), LANE = cat.LANE, ground = spot => ({ x: S[spot][0], y: S[spot][1], where: 'ground' });
+  const legs = (from, goal) => plain(cat.legs(from, goal));
+  assert.deepEqual(legs(ground('mat'), 'laneR'), [{ to: [200, LANE] }, { to: [250, LANE] }], 'down the steps, then along the lane');
+  assert.deepEqual(legs(ground('laneR'), 'laneL'), [{ to: [168, LANE] }], 'past the porch on the lane, before the sitters');
+  assert.deepEqual(legs(ground('laneL'), 'mat'), [{ to: [200, LANE] }, { to: S.mat }], 'and up the steps');
+  assert.deepEqual(legs(ground('mat'), 'in'), [{ to: S.in, in: true }]);
+  const up = [{ to: [200, LANE] }, { to: [U.foot[0], LANE] }, { jump: U.stall, where: 'stall' }, { jump: U.edge, where: 'roof' }, { to: [U.edge[0] - 6, U.ridge] }, { to: [S.roof[0] + 26, U.ridge] }, { to: S.roof }];
+  assert.deepEqual(legs(ground('mat'), 'roof'), up, 'to the roof: round to the stall, onto its awning, over to the roof’s edge, along the shingles');
+  assert.deepEqual(legs({ x: S.roof[0], y: S.roof[1], where: 'roof' }, 'step'), [{ to: [S.roof[0], U.ridge] }, { to: [U.edge[0] - 6, U.ridge] }, { to: U.edge }, { jump: U.stall, where: 'stall' }, { jump: U.foot, where: 'ground' }, { to: [196, LANE] }, { to: S.step }], 'and down the same way');
+  assert.deepEqual(legs({ x: 200, y: 69, where: 'in' }, 'laneL'), [{ out: true }, { to: S.mat }, { to: [200, LANE] }, { to: [168, LANE] }]);
+  assert.deepEqual(legs({ x: S.roof[0], y: S.roof[1], where: 'roof' }, 'roof'), []);
+  for (const from of ['mat', 'step', 'laneL', 'laneR', 'farL', 'farR']) for (const goal of ['mat', 'step', 'laneL', 'laneR', 'farL', 'farR', 'roof', 'in']) {
+    let high = false;
+    for (const leg of legs(ground(from), goal)) { if (leg.jump) high = leg.where !== 'ground'; else if (leg.to && !high) assert.ok(leg.to[1] >= 86 || Math.abs(leg.to[0] - 200) <= 4, `${from} → ${goal}: ${leg.to} is on the boards`); }
+  }
+  // a leap: a crouch first, then up beside what it leaps onto and across only at the top; never through the stall or the house's wall
+  const path = (a, b) => Array.from({ length: 41 }, (_, i) => cat.leap(a, b, i / 40));
+  assert.equal(path(U.foot, U.stall)[2].pose, 'crouch');
+  assert.deepEqual([...new Set(path(U.foot, U.stall).map(q => q.pose))], ['crouch', 'leap', 'jump'], 'it gathers itself, goes up stretched, levels out, and lands low');
+  for (const q of path(U.foot, U.stall)) assert.ok(q.x < 283 || q.y <= 50, `up beside the stall, not through it (${q.x}, ${q.y})`);
+  for (const q of path(U.stall, U.edge)) assert.ok(q.y <= 48.5 && (q.x > 268 || q.y <= 41), `over the gap above the wall’s top (${q.x}, ${q.y})`);
+  for (const q of path(U.stall, U.foot)) assert.ok(q.x < 284.5 || q.y <= 50.5, `down beside the stall (${q.x}, ${q.y})`);
+  assert.ok(path(U.stall, U.foot).some(q => q.pose === 'dive'));
+});
+
+test('with only Codex’s reading its silo by the barn is drawn each frame, and the notice board, which stands before it, after it', () => {
+  const window = { Agentville: { raw: () => {} } }, fills = [];
+  const ctx = { fillRect: (x, y, w, h) => fills.push([x, y, w, h, ctx._c]), set fillStyle(c) { ctx._c = c; }, _c: null, globalAlpha: 1 };
+  const document = { createElement: () => ({ getContext: () => ({ fillRect() {}, clearRect() {}, set fillStyle(_) {} }), toDataURL: () => '' }) };
+  vm.runInNewContext(`${code}\n;window.__PXG = PXG;`, { window, document, console, Math, Date, JSON, Map, Set });
+  const farm = window.AgentvilleFarm, th = farm.makeFarm(), week = { windows: [{ kind: 'seven_day', percentUsed: 100, resetsAt: null }] };
+  const draw = (plan, codexPlan) => { th.setScene({ plan, codexPlan, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } }); th.relayout(farm.layoutFor([])); window.__PXG.ctx = ctx; window.__PXG.T = 1; window.__PXG.lights = []; fills.length = 0; th.ground(); return fills.slice(); };
+  const body = d => d.findLastIndex(r => r[0] === 92 && r[1] === 16 && r[2] === 20 && r[3] === 64), board = d => d.findIndex(r => r[0] === 113 && r[1] === 62 && r[2] === 13 && r[3] === 9); // the silo's shell; the board's face
+  const alone = draw(null, week);
+  assert.ok(body(alone) >= 0 && board(alone) > body(alone), `the board (${board(alone)}) after the silo (${body(alone)})`);
+  for (const d of [draw(week, week), draw(week, null), draw(null, null)]) assert.deepEqual([body(d), board(d)], [-1, -1], 'Claude’s silo by the barn is part of the land: neither is drawn again');
+});
+
+test('a field is built and packed up leg by leg: the frame round, then row after row, each leg starting where the last ended', () => {
+  const { bedLegs, bedStanding } = load();
+  const legs = plain(bedLegs({ x0: 100, y0: 50 }));
+  assert.deepEqual(legs.map(l => l.part), ['top', 'right', 'front', 'left', null, 'row0', null, 'row1', null, 'row2', null, 'row3']);
+  for (let i = 1; i < legs.length; i++) assert.deepEqual(legs[i].a, legs[i - 1].b, `leg ${i} starts where leg ${i - 1} ended`);
+  assert.deepEqual(plain(bedStanding(legs, 0, 0)), [], 'nothing stands before the first plank');
+  assert.deepEqual(plain(bedStanding(legs, legs.length, 0)), legs.filter(l => l.part).map(l => l.box), 'all of it at the end');
+  const [top] = plain(bedStanding(legs, 0, 0.5)), whole = legs[0].box, mid = Math.round((whole.x0 + whole.x1) / 2);
+  assert.deepEqual(top, { ...whole, x1: mid }, 'half the top rail: from where its builder started');
+  const front = plain(bedStanding(legs, 2, 0.5)).at(-1);
+  assert.equal(front.x1, legs[2].box.x1, 'the front rail is built right to left, so it stands from the right');
+  assert.equal(plain(bedStanding(legs, 4, 0.5)).length, 4, 'walking across to a row builds nothing');
+  const rows = legs.filter(l => l.part?.startsWith('row')).map(l => l.box);
+  for (let k = 1; k < rows.length; k++) assert.ok(rows[k].y0 >= rows[k - 1].y1, 'the rows’ strips do not overlap');
+});
+
+// The farm with the engine's part played here: each farmer stands at once where slots() sends it, then the farm ticks.
+function stagedFarm() {
+  const window = { Agentville: { raw: () => {} } };
+  vm.runInNewContext(`${code}\n;window.__PXG = PXG;`, { window, console, Math, Date, JSON, Map, Set });
+  window.__PXG.T = 0;
+  const farm = window.AgentvilleFarm, th = farm.makeFarm(), bots = new Map(), posOf = id => bots.get(id);
+  let sc = null, news = [];
+  const give = (agents, repos) => { sc = th.fromScene(window.AgentvilleScene.toScene(snapOf(agents, repos))); news = plain(th.setScene(sc)); th.relayout(farm.layoutFor(sc.fields)); return sc; };
+  /** One round: everyone goes where it is sent (`shown`: which farmers are on the map); the zones they are in, and whether the farm asked for another round. */
+  const round = (shown = () => true) => {
+    const zones = {};
+    for (const id of [...bots.keys()]) if (!sc.farmers.some(f => f.id === id)) bots.delete(id);
+    for (const f of sc.farmers) {
+      const s = shown(f) ? th.slots(f) : null;
+      if (!s) { bots.delete(f.id); continue; }
+      const [x, y] = s.group.startsWith('st:') ? s.at([]) : s.at(0);
+      bots.set(f.id, { x, y, path: [] });
+      zones[f.id] = `${s.zone}${s.direct ? '*' : ''}`;
+    }
+    return { zones, more: th.tick(0.03, posOf) === true };
+  };
+  /** Rounds until the farm is at rest: each farmer's zones in order, without repeats. */
+  const play = shown => { const seen = {}; for (let n = 0; n < 60; n++) { const r = round(shown); for (const [id, z] of Object.entries(r.zones)) if ((seen[id] ??= []).at(-1) !== z) seen[id].push(z); if (!r.more) break; } return seen; };
+  /** The hens go on for `n` ticks of `dt` seconds, the farmers staying where they are. */
+  const hensGo = (n = 1, dt = 0.5) => { for (let i = 0; i < n; i++) th.tick(dt, posOf); return plain(th.chickens()); };
+  return { th, farm, give, round, play, hensGo, at: id => bots.get(id), news: () => news.map(e => e.log).filter(Boolean), still: () => th.tick(0, posOf, true), scene: () => sc };
+}
+const FA = '/Users/me/code/a', FB = '/Users/me/code/b';
+const onA = agent('a', { cwd: FA }), repoA = repo(FA, { agentIds: ['a'] }), repoB = repo(FB, { agentIds: ['n'] });
+
+test('a new field is built by the farmer it is for, who then goes where its state puts it; nothing is acted out for what is there when the page opens', () => {
+  const w = stagedFarm();
+  w.give([onA], [repoA]);
+  assert.deepEqual(w.play(), { a: [`st:${FA}:`] }, 'the page opens: the field stands, its farmer in it');
+  w.give([onA, agent('n', { cwd: FB, state: 'idle' })], [repoA, repoB]);
+  const seen = w.play();
+  assert.deepEqual(seen.n.slice(0, 2), [`build:${FB}`, `build:${FB}*`], 'to the bed by the paths, then along its legs in straight lines');
+  assert.ok(seen.n.length === 3 && !seen.n[2].startsWith('build'), `then to its own place (${seen.n[2]})`);
+  assert.equal(w.th.zoneText(w.scene().farmers[1], `build:${FB}`), 'unpacks the b field and builds it');
+  assert.deepEqual(seen.a, [`st:${FA}:`], 'the others go on as they were');
+});
+
+test('a farmer that waits on you does not build: its field just stands, and it comes to you', () => {
+  const w = stagedFarm();
+  w.give([onA], [repoA]); w.play();
+  w.give([onA, agent('n', { cwd: FB, state: 'waiting', ask: 'ok?' })], [repoA, repoB]);
+  assert.ok(!w.play().n.some(z => z.startsWith('build')));
+  w.give([onA, agent('n', { cwd: FB, state: 'idle' })], [repoA, repoB]);
+  assert.ok(!w.play().n.some(z => z.startsWith('build')), 'nor later: the field is there');
+});
+
+test('the last farmer to leave packs its field up and carries it into the farmhouse; the field holds its bed till then', () => {
+  const w = stagedFarm(), both = [[onA, agent('n', { cwd: FB, state: 'idle' })], [repoA, repoB]];
+  w.give(...both); w.play();
+  const sc = w.give([onA], [repoA]);
+  assert.deepEqual(plain(sc.fields.map(f => f.key)), [FA, FB], 'the field is kept while it is packed up');
+  const n = sc.farmers.find(f => f.id === 'n');
+  assert.equal(n.state, 'leaving');
+  assert.deepEqual(w.play().n, [`pack:${FB}`, `pack:${FB}*`, 'leave', 'leave*'], 'packed up, then to the steps, then up and in at the door');
+  assert.equal(n.packed, true, 'the field is in its sack');
+  assert.equal(w.th.slots(n), null, 'in: no place on the farm');
+  assert.deepEqual(plain(w.scene().farmers.map(f => f.id)), ['a'], 'and out of the farm’s counts');
+  assert.equal(w.th.zoneText(n, 'leave'), 'goes back into the farmhouse');
+  assert.equal(w.th.zoneText(n, `pack:${FB}`), 'packs up the b field to take along');
+  assert.deepEqual(plain(w.give([onA], [repoA]).fields.map(f => f.key)), [FA], 'with the next scene the field is gone');
+});
+
+test('a farmer whose session ends walks home, though others stay on its field; one that comes back turns round', () => {
+  const w = stagedFarm(), a2 = agent('a2', { cwd: FA }), two = repo(FA, { agentIds: ['a', 'a2'] });
+  w.give([onA, a2], [two]); w.play();
+  w.give([onA], [repoA]);
+  assert.deepEqual(w.round().zones.a2, 'leave', 'no field to pack: straight home');
+  w.give([onA, a2], [two]);
+  assert.deepEqual(w.play().a2, [`st:${FA}:`], 'back again: to its field');
+});
+
+test('a field whose only farmer went stale is packed up by the scarecrow itself, which then stands where scarecrows stand', () => {
+  const w = stagedFarm(), stale = agent('n', { cwd: FB, state: 'stale' });
+  w.give([onA, stale], [repoA, repoB]); w.play();
+  const before = w.th.slots(w.scene().farmers.find(f => f.id === 'n')).zone;
+  w.give([onA, stale], [repoA]);
+  const seen = w.play().n;
+  assert.deepEqual(seen.slice(0, 2), [`pack:${FB}`, `pack:${FB}*`]);
+  assert.deepEqual(seen.slice(2), [before], 'then a scarecrow again');
+});
+
+test('a field needed again while it is packed up is built again from where the packing had come, by the same farmer', () => {
+  const w = stagedFarm(), both = [[onA, agent('n', { cwd: FB, state: 'idle' })], [repoA, repoB]];
+  w.give(...both); w.play();
+  w.give([onA], [repoA]);
+  for (let i = 0; i < 5; i++) w.round();
+  w.give(...both);
+  const seen = w.play().n;
+  assert.equal(seen[0], `build:${FB}*`, 'it turns round where it stands');
+  assert.ok(seen.length === 2 && !/^(build|pack|leave)/.test(seen[1]), 'and stays');
+});
+
+test('with motion off, or for farmers that are not out on the farm, nothing is acted out: fields stand or are gone at once', () => {
+  const w = stagedFarm(), both = [[onA, agent('n', { cwd: FB, state: 'idle' })], [repoA, repoB]];
+  w.give([onA], [repoA]); w.play(); w.still();
+  w.give(...both);
+  assert.ok(!Object.values(w.round().zones).some(z => z.startsWith('build')), 'motion off: no building');
+  w.still();
+  assert.deepEqual(plain(w.give([onA], [repoA]).farmers.map(f => f.id)), ['a'], 'and nobody walks home');
+  const h = stagedFarm(), hidden = f => f.id !== 'n'; // the resting farmers are hidden: n is never on the map
+  h.give(...both); h.play(hidden);
+  const sc = h.give([onA], [repoA]);
+  assert.deepEqual(plain(sc.farmers.map(f => f.id)), ['a'], 'one that was never seen is not seen to go');
+  assert.deepEqual(plain(sc.fields.map(f => f.key)), [FA]);
+});
+
+test('a hen’s ways: out of the coop by the ramp and the yard’s path, into the run by the gap beside the coop, home with a peck in the run', () => {
+  const { henRoute, COOP: coop } = load(), COOP = plain(coop), LANE = 87, PECK = 3.5;
+  const out = plain(henRoute(COOP.door, [240, 140]));
+  assert.deepEqual(out.slice(0, 4), [COOP.foot, COOP.gate, [116, COOP.gate[1]], [116, LANE]], 'down the ramp, out below the run’s fence, up the yard’s path to the lane');
+  assert.deepEqual(out.at(-1), [240, 140]);
+  assert.deepEqual(plain(henRoute(COOP.door, [60, 250])), [COOP.foot, COOP.gate, [116, COOP.gate[1]], [116, 250], [60, 250]], 'a place in the yard: along the yard’s path, not up to the lane and back');
+  assert.deepEqual(plain(henRoute(COOP.door, 'run', { spot: [60, 120] })), [COOP.foot, COOP.gap, [60, 120]]);
+  assert.deepEqual(plain(henRoute([60, 120], 'door')), [COOP.gap, COOP.foot, COOP.door], 'from the run: back by the gap');
+  assert.deepEqual(plain(henRoute([60, 120], [60, 250])).slice(0, 3), [COOP.gap, COOP.foot, COOP.gate], 'and out to the farm by the ramp’s foot');
+  const home = plain(henRoute([240, 140], 'door', { spot: [60, 120], peck: true }));
+  assert.deepEqual(home.slice(-6), [COOP.gate, COOP.foot, COOP.gap, [60, 120, PECK], COOP.gap, COOP.foot, COOP.door].slice(-6), 'home: into the run to peck a while, then in at the hatch');
+  assert.deepEqual(plain(henRoute([240, 140], 'door')).slice(-3), [COOP.gate, COOP.foot, COOP.door], 'one that failed goes straight in');
+});
+
+const kid = (id, over = {}) => ({ id, kind: 'subagent', agentType: 'general-purpose', label: `Task ${id}`, state: 'running', startedAt: NOW, background: false, ...over });
+const withKids = (a, ...children) => ({ ...a, children });
+
+test('a subagent is a hen: there at once when the page opens; a new one comes out of the henhouse when its farmer whistles, and keeps beside it', () => {
+  const w = stagedFarm();
+  w.give([withKids(onA, kid('k1'))], [repoA]); w.round();
+  const near = (h, id, d = 20) => Math.hypot(h.x - w.at(id).x, h.y - w.at(id).y) < d;
+  let [h] = w.hensGo(1);
+  assert.deepEqual([h.phase, h.want, near(h, 'a')], ['at', 'follow', true], 'the page opens: beside its farmer, nothing acted out');
+  assert.deepEqual(w.news(), [], 'and nothing for the diary');
+  w.give([withKids(onA, kid('k1'), kid('k2', { label: 'Find callers' }))], [repoA]); w.round();
+  assert.deepEqual(w.news(), ['whistles for a hen: Find callers']);
+  h = w.hensGo(1, 0.01).find(x => x.id === 'k2');
+  assert.deepEqual([h.phase, Math.round(h.x), h.y < w.farm.COOP.foot[1]], ['go', w.farm.COOP.door[0], true], 'out at the hatch');
+  h = w.hensGo(60).find(x => x.id === 'k2');
+  assert.deepEqual([h.phase, h.want, near(h, 'a')], ['at', 'follow', true], 'and over to its farmer');
+});
+
+test('in the background a hen works on its farmer’s field by itself, Claude Code’s and Codex’s alike; a Codex one is a subagent like any other', () => {
+  const w = stagedFarm(), codex = agent('codex:t', { kind: 'codex', cwd: FB });
+  w.give([onA, codex], [repoA, repo(FB, { agentIds: ['codex:t'] })]); w.round();
+  w.give([withKids(onA, kid('bg', { background: true }), kid('fg')), withKids(codex, kid('cx', { agentType: 'ship-reviewer', label: 'security_all · Socrates', background: true }))], [repoA, repo(FB, { agentIds: ['codex:t'] })]); w.round();
+  assert.deepEqual(w.news().sort(), ['whistles for 2 hens', 'whistles for a hen: security_all · Socrates']);
+  const hens = Object.fromEntries(w.hensGo(80).map(h => [h.id, h]));
+  assert.deepEqual([hens.bg.want, hens.fg.want, hens.cx.want], [`field:${FA}`, 'follow', `field:${FB}`]);
+  const subs = plain(w.scene().subagents).map(s => [s.id, s.by, s.background, s.codex]);
+  assert.deepEqual(subs, [['bg', 'a', true, false], ['fg', 'a', false, false], ['cx', 'codex:t', true, true]], 'the scene says whose each is, and how it runs');
+  const tips = plain(w.th.movers(id => w.at(id))).filter(m => m.key.startsWith('hen:')).map(m => [m.key, m.title, /data-farm-pick="([^"]+)" data-farm-tab="subagents"/.exec(m.html)?.[1]]);
+  assert.deepEqual(tips.find(t => t[0] === 'hen:cx'), ['hen:cx', 'codex:t\'s hen: ship-reviewer · security_all · Socrates (in the background)', 'codex:t'], 'hover it for its task; a click opens its farmer’s subagents');
+});
+
+test('a hen whose subagent is done walks home and lays its egg; one that failed lays none; one called again on the way turns round', () => {
+  const w = stagedFarm();
+  w.give([withKids(onA, kid('ok'), kid('bad'), kid('again'))], [repoA]); w.round(); w.hensGo(1);
+  const done = withKids(onA, kid('ok', { state: 'done', endedAt: NOW + 5, result: 'Three callers.' }), kid('bad', { state: 'failed', endedAt: NOW + 5 }), kid('again', { state: 'done', endedAt: NOW + 6 }));
+  w.give([done], [repoA]); w.round();
+  assert.deepEqual(w.news().sort(), ['2 of its hens head home, each with an egg to lay', 'its hen flutters home: it failed (Task bad)']);
+  assert.deepEqual(w.hensGo(1, 0.01).map(h => h.phase), ['home', 'home', 'home']);
+  const key = w.th.labelKey();
+  assert.ok(!key.includes('ok'), 'no egg while its hen is still on the way');
+  w.give([withKids(onA, kid('ok', { state: 'done', endedAt: NOW + 5, result: 'Three callers.' }), kid('bad', { state: 'failed', endedAt: NOW + 5 }), kid('again'))], [repoA]); w.round();
+  assert.deepEqual(w.hensGo(1, 0.01).find(h => h.id === 'again').phase, 'go', 'called again: it turns round');
+  const left = w.hensGo(120);
+  assert.deepEqual(left.map(h => [h.id, h.phase]), [['again', 'at']], 'the other two are in');
+  assert.notEqual(w.th.labelKey(), key, 'the henhouse’s labels are laid out anew');
+  const labels = [];
+  w.th.labels((x, y, html, cls, title) => labels.push([cls, title, html]), {});
+  assert.deepEqual(labels.filter(l => l[0] === 'egg').map(l => l[1]), ['a: general-purpose · Task ok → Three callers.'], 'one egg: the one that failed laid none');
+  assert.ok(labels.some(l => l[0] === 'cnt' && /1 out · 1 egg/.test(l[2].replace(/<[^>]*>/g, '')) || /henhouse/.test(l[1])), 'and the henhouse’s sign counts them');
+});
+
+test('a farmer leads four hens; more wait in the run, as do those of a farmer that is not out on the farm; with motion off nothing is acted out', () => {
+  const w = stagedFarm(), six = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6'].map(id => kid(id));
+  w.give([onA], [repoA]); w.round();
+  w.give([withKids(onA, ...six)], [repoA]); w.round();
+  assert.deepEqual(w.hensGo(120).map(h => h.want), ['follow', 'follow', 'follow', 'follow', 'run', 'run']);
+  const hidden = stagedFarm();
+  hidden.give([onA], [repoA]); hidden.round(() => false);
+  hidden.give([withKids(onA, kid('k1'))], [repoA]); hidden.round(() => false);
+  assert.deepEqual(hidden.hensGo(60).map(h => [h.want, h.phase]), [['run', 'at']], 'its farmer is hidden: in the run');
+  const still = stagedFarm();
+  still.give([onA], [repoA]); still.round(); still.still();
+  still.give([withKids(onA, kid('k1'))], [repoA]); still.round(); still.still();
+  assert.deepEqual([still.news(), plain(still.th.chickens()).map(h => h.phase)], [[], ['at']], 'motion off: beside its farmer at once, and no diary line');
+  still.give([withKids(onA, kid('k1', { state: 'done', endedAt: NOW }))], [repoA]); still.round(); still.still();
+  assert.deepEqual(plain(still.th.chickens()), [], 'and in at once when it is done');
+});
+
+test('a farmer whose session ends waits a moment where it stands while its hens set off home', () => {
+  const w = stagedFarm(), two = repo(FA, { agentIds: ['a', 'a2'] }), a2 = agent('a2', { cwd: FA });
+  w.give([onA, withKids(a2, kid('k1'))], [two]); w.round(); w.hensGo(1);
+  const stood = plain(w.at('a2'));
+  w.give([onA], [repoA]);
+  const leaver = w.scene().farmers.find(f => f.id === 'a2'), s = w.th.slots(leaver);
+  assert.deepEqual([leaver.state, s.zone, plain(s.at(0))], ['leaving', 'leave', [stood.x, stood.y]], 'not off to the farmhouse yet');
+  assert.deepEqual(w.hensGo(1, 0.01).map(h => h.phase), ['home'], 'its hen goes first');
+});
+
+test('a field’s record adds up what its farmers did: steps by kind and in groups, failures, the latest test run, the last half hour in order', () => {
+  const { tallyOf, tallyLines, spanText } = load(), now = 10_000_000;
+  const a = { name: 'cart-ui', state: 'working', step: 'edit', startedAt: now - 72 * 60_000, turn: { startedAt: now - 180_000 }, work: { steps: { edit: 30, write: 4, read: 41, test: 6 }, failed: 4, streak: 3, lastTest: { ok: false, at: now - 180_000 } }, timeline: [{ at: now - 60_000, step: 'edit', ok: true }, { at: now - 10_000, step: 'test', ok: false }] };
+  const b = { name: 'codex', state: 'working', step: 'test', work: { steps: { edit: 8, shell: 22, test: 3 }, failed: 0, streak: 0, lastTest: { ok: true, at: now - 60_000 } }, timeline: [{ at: now - 30_000, step: 'shell', ok: true }] };
+  const t = plain(tallyOf([a, b, { name: 'idle', state: 'idle', work: null }]));
+  assert.equal(t.total, 114);
+  assert.deepEqual(t.groups.map(g => [g.key, g.n]), [['make', 42], ['look', 41], ['check', 9], ['ship', 0], ['plan', 0], ['run', 22]]);
+  assert.deepEqual([t.failed, t.streak, t.lastTest, t.testing], [4, 3, { ok: true, at: now - 60_000 }, true], 'the latest test run of any of them; one of them runs its tests now');
+  assert.deepEqual(t.timeline.map(e => e.step), ['edit', 'shell', 'test'], 'oldest first, whoever did it');
+  const one = plain(tallyLines(tallyOf([a]), [a], now)).map(l => l.text);
+  assert.deepEqual(one, ['81 steps so far, 4 failed', 'changing files: 30 edits, 4 new files', 'reading and searching: 41 reads', 'testing and building: 6 test runs', 'tests: the last run failed, 3 min ago', '3 steps failed in a row just now', 'session 1h 12m, this turn 3 min']);
+  const two = plain(tallyLines(tallyOf([a, b]), [a, b], now)).map(l => l.text);
+  assert.ok(two.includes('tests: running now') && two.includes('cart-ui: 81 steps') && two.includes('codex: 33 steps'), 'with two at a bed: who did how much');
+  assert.deepEqual([spanText(40_000), spanText(12 * 60_000), spanText(65 * 60_000)], ['40 s', '12 min', '1h 05m']);
+  assert.deepEqual(plain(tallyOf([])), { total: 0, steps: {}, groups: t.groups.map(g => ({ ...g, n: 0 })), failed: 0, streak: 0, lastTest: null, testing: false, timeline: [] });
+});
+
+test('a farmer at a step of the bed’s walks at it: along the rows for an edit, round the frame for a search; one whose step is done standing stays at the bed’s front', () => {
+  const w = stagedFarm(), step = (s, tool) => agent('a', { cwd: FA, now: { tool, step: s, summary: '', startedAt: NOW } });
+  w.give([step('edit', 'Edit')], [repoA]);
+  const seen = [], go = n => { for (let i = 0; i < n; i++) { const r = w.round(); const b = w.at('a'); seen.push([Math.round(b.x), Math.round(b.y), r.zones.a]); } };
+  go(10);
+  const s = plain(w.farm.layoutFor(w.scene().fields).ST[0]), rows = [6, 14, 22, 30].map(d => s.y0 + d);
+  assert.ok(seen.every(([x, y]) => rows.includes(y) && x >= s.x0 && x <= s.x0 + 72), `on the rows, inside the bed (${JSON.stringify(seen.slice(0, 4))})`);
+  assert.deepEqual([...new Set(seen.map(p => p[1]))], rows, 'row after row');
+  assert.ok(seen[0][2].endsWith(':hoe') && !seen[0][2].endsWith('*') && seen[1][2].endsWith('*'), 'to the bed by the paths, then straight along its rows');
+  assert.equal(w.th.speed(w.scene().farmers[0]), 7, 'at a working pace');
+  seen.length = 0;
+  w.give([step('search', 'Grep')], [repoA]); go(6);
+  assert.ok(seen.every(([x, y]) => (x < s.x0 || x > s.x0 + 72) || (y < s.y0 || y > s.y0 + 34)), `round the frame, outside the bed (${JSON.stringify(seen.slice(0, 4))})`);
+  seen.length = 0;
+  w.give([step('test', 'Bash')], [repoA]); go(3);
+  assert.deepEqual([...new Set(seen.map(p => `${p[0]},${p[1]}`))], [`${s.cx},${s.lane}`], 'a test run is done standing, at the bed’s front');
+  assert.equal(w.th.speed(w.scene().farmers[0]), 40);
 });

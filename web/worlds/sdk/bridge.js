@@ -86,7 +86,7 @@
     get still() { return settings.still; },
     navState: () => settings.nav,
     request,
-    onPickAgent: (agentId, o) => send({ type: 'pick', agentId, ...(o?.from === 'say' ? { from: 'say' } : {}) }),
+    onPickAgent: (agentId, o) => send({ type: 'pick', agentId, ...(o?.from === 'say' ? { from: 'say' } : {}), ...(o?.tab ? { tab: o.tab } : {}) }),
     onOpenDoc: (agentId, path) => send({ type: 'openDoc', agentId, path }),
     onShowRepos: () => send({ type: 'showRepos' }),
     onStartSession: () => send({ type: 'startSession' }),

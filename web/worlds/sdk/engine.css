@@ -107,8 +107,15 @@ html[data-view="farm"] .px-host { border: 0; border-radius: 0; }
 .px-pop.dim { color: #e6f4ff; opacity: .8; }
 @keyframes pop-up { 0% { opacity: 0; transform: translate(-50%, -60%) scale(.7); } 15% { opacity: 1; transform: translate(-50%, -100%) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, -280%) scale(1); } }
 .px-tag { position: absolute; left: 0; top: 0; pointer-events: auto; cursor: pointer; border: 0; white-space: nowrap; font: 600 10px system-ui, sans-serif; padding: 0 5px; border-radius: 3px; background: rgba(10, 12, 15, .7); color: #e8edf2; line-height: 15px; }
-.px-tag.st-waiting { background: var(--crit); color: #fff; }
-.px-tag.st-turn { background: var(--warn); color: #1d1d1d; }
+/* every tag is the same quiet plate; its state is the line under it (the porch's ends, rugs and bubbles say it too) */
+.px-tag.st-waiting { box-shadow: inset 0 -2px 0 var(--crit); }
+.px-tag.st-turn { box-shadow: inset 0 -2px 0 var(--warn); }
+.px-tag.slot { padding: 0 2px; } /* fitted to its place on the porch */
+.px-tag.st-leaving { opacity: .55; } /* its session has ended: it is on its way home */
+/* its turn's sign, at the tag's corner: a tick, or a question for you */
+.px-badge { position: absolute; right: -6px; top: -7px; width: 11px; height: 11px; border-radius: 3px; background: #fff; border: 1px solid #15191e; font: 800 9px/10px system-ui, sans-serif; text-align: center; }
+.px-badge.ok::before { content: '✓'; color: #0ca30c; }
+.px-badge.ask::before { content: '?'; color: #c98500; }
 .px-tag { opacity: 0; transition: opacity .12s; } /* a name shows on hover; always for the farmer picked and those who need you */
 .px-tag.st-waiting, .px-tag.st-turn, .px-tag.sel, .px-tag.hover, .px-tag:hover { opacity: 1; }
 .px-tag.hover, .px-tag:hover { z-index: 70; }
@@ -189,3 +196,23 @@ a.pile { text-decoration: none; color: inherit; }
 .px-animal-menu button[data-animal-act]:hover { background: #ffe8a3; }
 .px-animal-who { display: flex; align-items: center; gap: 3px; margin-top: 2px; font-weight: 400; }
 .px-animal-who button { width: 10px; height: 10px; padding: 0; border: 1px solid #4e3626; border-radius: 50%; cursor: pointer; }
+/* A spot that moves and names itself on hover (the farm: a hen, a subagent at work): no plate until then; a click picks what it stands for. */
+.px-mover.spot { background: none; padding: 0; border-radius: 0; z-index: 2; }
+.px-spot { display: block; position: relative; width: 20px; height: 18px; margin: 0; padding: 0; border: 0; background: none; cursor: pointer; }
+.px-spot > span { display: none; position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); white-space: nowrap; line-height: 0; background: rgba(255, 248, 225, .96); padding: 2px 4px; border-radius: 6px; }
+.px-spot:hover > span, .px-spot:focus-visible > span { display: block; }
+.px-lab.egg { background: none; padding: 0; width: 8px; height: 10px; transform: translate(-50%, -100%); cursor: help; }
+/* A label that is such a spot (the farm: the slate at a bed, with the field's record on hover); its lines, and a colour chip before one. */
+.px-lab.spot { background: none; padding: 0; transform: translate(-50%, -100%); z-index: 4; pointer-events: auto; }
+.px-lab.spot .px-spot { width: 34px; height: 26px; }
+.px-lab.spot:hover { z-index: 6; }
+.px-spot > span > i { display: block; margin: 2px 0; font-style: normal; text-align: left; }
+.px-chip { display: inline-block; width: 6px; height: 6px; margin-right: 3px; vertical-align: 1px; border-radius: 1px; }
+.px-badge.pic { width: 16px; height: 20px; right: -14px; top: -12px; padding: 1px; object-fit: contain; image-rendering: pixelated; background: #fff8e1; }
+.px-lab.spot .px-spot > span { left: auto; right: 0; transform: none; }
+/* A field's record in its close-up (a world's fieldNotes): what was done there, and the last half hour stretch by stretch. */
+.fv-rec { margin: 0 0 10px; font-size: 12px; line-height: 1.5; }
+.fv-rec b { display: block; margin: 6px 0 2px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #8a94a0); }
+.fv-rec ul, .fv-rec ol { list-style: none; margin: 0; padding: 0; }
+.fv-rec em { font-style: normal; color: var(--crit, #e04a3a); }
+.fv-chip { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; }

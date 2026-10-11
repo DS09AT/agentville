@@ -1,7 +1,8 @@
+import { SessionModel } from '../transcript/session-model.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS } from '../config.mjs';
-import { applySince, buildAgent, countStates, effortOf, modeOf, nowOf, sortAgents, tasksOf, turnOf } from '../derive/agent.mjs';
+import { applySince, buildAgent, codexChildrenOf, countStates, effortOf, modeOf, nowOf, sortAgents, tasksOf, turnOf } from '../derive/agent.mjs';
 import { at, modelOf, prompt, reply, title, toolResult, toolUse, turnEnd } from './fixtures.mjs';
 
 const cfg = { ...DEFAULTS };
@@ -66,7 +67,7 @@ test("each subagent goes out with its steps so far, what it last said, its step 
   const reviewed = modelOf(prompt(2, 'Review'), toolUse(10, 'r1', 'Read', { file_path: '/w/order.ts' }), toolResult(11, 'r1'), reply(39, 'No blocking issues.'));
   const a = buildAgent({ base: base(), model: parent, childModels: new Map([['tA', working], ['tB', reviewed]]), repoOf, now: at(55), cfg, home: '/h' });
   const [review, explore] = a.children;
-  assert.deepEqual({ ...explore, now: undefined }, { id: 'tA', kind: 'subagent', agentType: 'Explore', label: 'Find callers', state: 'running', startedAt: at(1), now: undefined, steps: 2, lastSaid: 'Two callers so far.', lastAt: at(50), endedAt: undefined, result: undefined });
+  assert.deepEqual({ ...explore, now: undefined }, { id: 'tA', kind: 'subagent', agentType: 'Explore', label: 'Find callers', state: 'running', startedAt: at(1), background: false, now: undefined, steps: 2, lastSaid: 'Two callers so far.', lastAt: at(50), endedAt: undefined, result: undefined });
   assert.equal(explore.now.tool, 'Grep');
   assert.match(explore.now.summary, /createOrder/);
   assert.deepEqual([review.state, review.steps, review.endedAt, review.result, review.lastSaid], ['done', 1, at(40), 'No blocking issues.', 'No blocking issues.']);
@@ -236,7 +237,7 @@ test('activity counts tool calls per minute over the last 30 minutes, newest las
 test('the timeline lists recent tool calls with their time, newest last', () => {
   const m = modelOf(prompt(0, 'go'), toolUse(5, 't1', 'Edit', { file_path: '/a' }), toolUse(9, 't2', 'Bash', { command: 'ls' }));
   const a = buildAgent({ base: base(), model: m, repoOf, now: at(10), cfg, home: '/h' });
-  assert.deepEqual(a.timeline, [{ at: at(5), tool: 'Edit' }, { at: at(9), tool: 'Bash' }]);
+  assert.deepEqual(a.timeline, [{ at: at(5), tool: 'Edit', step: 'edit' }, { at: at(9), tool: 'Bash', step: 'read' }], 'each with the kind of step it is (ls is a look round)');
 });
 
 test('an offer whose mod stopped refreshing it is not answerable, so the page cannot promise a delivery', () => {
@@ -358,4 +359,54 @@ test("a working session's turn: since when and its tokens from the transcript, t
   const working = buildAgent({ base: base(), model: modelOf(prompt(10, 'go'), toolUse(11, 't1', 'Bash', { command: 'sleep 9' })), now: at(12), cfg, repoOf, home: '/h', beacon: { version: '0.5.0', live: true, effort: 'xhigh' } });
   assert.equal(working.effort, 'xhigh', 'the effort its requests go out with, from its mod');
   assert.equal(working.turn.startedAt, at(10));
+});
+
+test('a Codex thread’s subagents are its children: running while a turn of theirs is open, done or failed between turns, gone an hour after', () => {
+  const now = 10_000_000_000, MIN = 60_000;
+  const thread = over => ({ turnOpen: undefined, lastActivityAt: now - MIN, turnStartAt: 0, lastTurnEndAt: 0, aborted: false, lastReply: null, ...over });
+  const sub = (id, over, extra = {}) => ({ id, at: now - 50 * MIN, nickname: 'Socrates', role: 'ship-reviewer', task: `${id}_task`, ...extra, thread: thread(over) });
+  const kids = codexChildrenOf([
+    sub('busy', { turnOpen: true, turnStartAt: now - 5 * MIN, lastActivityAt: now - 1000, lastReply: 'An earlier answer.', lastTurnEndAt: now - 20 * MIN }),
+    sub('fresh', { lastActivityAt: now - 1000 }, { role: undefined, nickname: undefined }),
+    sub('done', { turnOpen: false, turnStartAt: now - 12 * MIN, lastTurnEndAt: now - 10 * MIN, lastReply: 'No findings.' }),
+    sub('cut', { turnOpen: false, turnStartAt: now - 9 * MIN, lastTurnEndAt: now - 8 * MIN, aborted: true }),
+    sub('old', { turnOpen: false, lastTurnEndAt: now - 61 * MIN, lastActivityAt: now - 61 * MIN }),
+    sub('hung', { turnOpen: true, turnStartAt: now - 200 * MIN, lastActivityAt: now - 90 * MIN }),
+  ], now, cfg);
+  assert.deepEqual(kids.map(c => [c.id, c.kind, c.agentType, c.label, c.state, c.startedAt, c.endedAt, c.result]), [
+    ['busy', 'subagent', 'ship-reviewer', 'busy_task · Socrates', 'running', now - 5 * MIN, undefined, undefined],
+    ['cut', 'subagent', 'ship-reviewer', 'cut_task · Socrates', 'failed', now - 9 * MIN, now - 8 * MIN, undefined],
+    ['done', 'subagent', 'ship-reviewer', 'done_task · Socrates', 'done', now - 12 * MIN, now - 10 * MIN, 'No findings.'],
+    ['fresh', 'subagent', 'subagent', 'fresh_task', 'running', now - 50 * MIN, undefined, undefined],
+  ], 'newest first; one quiet for an hour and a half with its turn open is no longer shown as running');
+  const agent = buildAgent({ base: { id: 'codex:t', kind: 'codex', name: 'Fix the cart', cwd: '/p', subagents: [sub('busy', { turnOpen: true, lastActivityAt: now - 1000 })] }, model: null, codex: thread({ turnOpen: true, lastActivityAt: now - 1000 }), now, cfg, home: '/h', repoOf: () => null });
+  assert.deepEqual(agent.children.map(c => [c.id, c.state]), [['busy', 'running']]);
+});
+
+test('a subagent said to be running that gave no sign of life for six hours is not shown (its session was killed, or its notice never came); a background command is', () => {
+  const now = 10_000_000_000, H = 3_600_000;
+  const child = (id, startedAt) => [id, { id, kind: 'subagent', label: id, state: 'running', startedAt }];
+  const model = Object.assign(new SessionModel(), { children: new Map([child('zombie', now - 7 * H), child('quietButAlive', now - 7 * H), child('long', now - 5 * H), ['server', { id: 'server', kind: 'bgjob', label: 'npm run dev', state: 'running', startedAt: now - 30 * H }]]) });
+  const childModels = new Map([['quietButAlive', Object.assign(new SessionModel(), { lastActivityAt: now - 2 * H })]]);
+  const agent = buildAgent({ base: { id: 's', kind: 'interactive', name: 's', cwd: '/p' }, model, childModels, now, cfg, home: '/h', repoOf: () => null });
+  assert.deepEqual(agent.children.map(c => [c.id, c.state]).sort(), [['long', 'running'], ['quietButAlive', 'running'], ['server', 'running']]);
+});
+
+test('a session’s work is counted as it goes: its steps by kind, those that failed (and how many in a row just now), and how its last test run went', () => {
+  const m = modelOf(prompt(0, 'go'),
+    toolUse(1, 't1', 'Read', { file_path: '/a' }), toolResult(2, 't1'),
+    toolUse(3, 't2', 'Edit', { file_path: '/a' }), toolResult(4, 't2'),
+    toolUse(5, 't3', 'Edit', { file_path: '/b' }), toolResult(6, 't3', true),
+    toolUse(7, 't4', 'Bash', { command: 'npm test' }), toolResult(8, 't4', true),
+    toolUse(9, 't5', 'Write', { file_path: '/c' }));
+  const a = buildAgent({ base: base(), model: m, repoOf, now: at(10), cfg, home: '/h' });
+  assert.deepEqual(a.work, { steps: { read: 1, edit: 2, test: 1, write: 1 }, failed: 2, streak: 2, lastTest: { ok: false, at: at(8) } });
+  assert.deepEqual(a.timeline.map(t => [t.step, t.ok]), [['read', undefined], ['edit', undefined], ['edit', false], ['test', false], ['write', undefined]], 'the last half hour says which failed');
+  m.applyLine(toolResult(11, 't5'));
+  m.applyLine(toolUse(12, 't6', 'Bash', { command: 'npm test' }));
+  m.applyLine(toolResult(13, 't6'));
+  assert.deepEqual([m.work.streak, m.work.failed, m.work.lastTest], [0, 2, { ok: true, at: at(13) }], 'one that goes through ends the run of failures');
+  m.addEarlierWork({ edit: 10, commit: 2 });
+  assert.deepEqual(m.work.steps, { read: 1, edit: 12, test: 2, write: 1, commit: 2 }, 'with what the part of the transcript read later holds');
+  assert.equal(buildAgent({ base: base(), model: null, repoOf, now: at(10), cfg, home: '/h' }).work, undefined, 'no transcript, no record');
 });

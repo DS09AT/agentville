@@ -124,12 +124,14 @@
     const kids = agents.map(a => a.children ?? []);
     const now = snap?.generatedAt ?? Date.now();
     const waiting = agents.filter(a => a.state === 'waiting'), cpuUsed = agents.reduce((t, a) => t + (a.proc?.cpu ?? 0), 0);
-    const windows = (snap?.plan?.windows ?? []).map(w => ({ kind: w.kind, pct: w.reset ? 0 : w.percentUsed, resetsAt: w.resetsAt ?? null, reset: w.reset === true }));
+    const windowsOf = plan => (plan?.windows ?? []).map(w => ({ kind: w.kind, pct: w.reset ? 0 : w.percentUsed, resetsAt: w.resetsAt ?? null, reset: w.reset === true }));
+    const planOf = plan => { const windows = windowsOf(plan); return plan ? { windows, fiveHour: windows.find(w => w.kind === 'five_hour') ?? null, weekly: windows.find(w => w.kind === 'seven_day') ?? null } : null; };
     return {
       version: VERSION,
       generatedAt: now,
       private: false,
-      plan: snap?.plan ? { windows, fiveHour: windows.find(w => w.kind === 'five_hour') ?? null, weekly: windows.find(w => w.kind === 'seven_day') ?? null } : null,
+      plan: planOf(snap?.plan),
+      codexPlan: snap?.codexPlan ? { ...planOf(snap.codexPlan), planType: snap.codexPlan.planType ?? null, credits: snap.codexPlan.credits ?? null } : null, // Codex's own limits, when it runs here
       // what the dashboard's top bar and count cards say, for a world's own panel (it fills the window)
       chrome: {
         counts: snap?.counts ?? null, asking: agents.filter(a => a.question).length, agents: agents.length,
@@ -140,7 +142,7 @@
         collector: snap?.collector ?? null,
         errors: Object.entries(snap?.sources ?? {}).filter(([, v]) => v && v.ok === false).map(([k, v]) => `${k}: ${String(v.error ?? 'failing').slice(0, 60)}`),
       },
-      subagents: agents.flatMap(a => (a.children ?? []).filter(c => c.kind === 'subagent').map(c => ({ id: c.id, label: c.label ?? '', type: c.agentType ?? null, state: c.state, parent: a.name, startedAt: c.startedAt }))),
+      subagents: agents.flatMap(a => (a.children ?? []).filter(c => c.kind === 'subagent').map(c => ({ id: c.id, label: c.label ?? '', type: c.agentType ?? null, state: c.state, parent: a.name, by: a.id, startedAt: c.startedAt, endedAt: c.endedAt ?? null, background: c.background === true, codex: a.kind === 'codex', result: c.result ?? '' }))),
       // subagents that finished lately; running ones beyond the four an agent leads
       subagentCounts: {
         done: Math.min(6, kids.flat().filter(c => c.kind !== 'bgjob' && c.state === 'done').length),
@@ -155,12 +157,13 @@
           deploy: deployOf(r),
           collision: (snap.collisions ?? []).find(c => c.repo === r.path)?.severity ?? null,
           worktree: r.worktree === true, main: r.main ?? null,
+          bed: Number.isInteger(r.bed) ? r.bed : null, // its place on the grid, from the collector: the same for everyone looking
           project, projectName: project ? project.split('/').pop() : null,
           prs: r.prs ?? null,
         };
       }),
       agents: agents.map(a => ({
-        id: a.id, name: a.name, kind: a.kind, cwd: a.cwd ?? null, state: a.state === 'yourTurn' ? 'turn' : a.state, repo: fieldOf(a, repos),
+        id: a.id, name: a.name, kind: a.kind, cwd: a.cwd ?? null, state: a.state === 'yourTurn' ? 'turn' : a.state, since: a.stateSince ?? null, repo: fieldOf(a, repos),
         tool: a.now?.tool ?? a.feed?.find(f => f.kind === 'tool')?.tool ?? null, summary: a.now?.summary ?? '',
         step: a.now?.step ?? a.feed?.find(f => f.kind === 'tool')?.step ?? null, // test, push, install… (the collector reads commands)
         contextPct: contextPct(a.contextTokens), hot: (a.proc?.cpu ?? 0) >= cpuAlertPct,
@@ -169,6 +172,9 @@
         colorIndex: colorIndex(a.id), color: colorOf(a.id), cost: a.usage?.costUsd ?? null, mode: a.mode ?? null,
         kids: (a.children ?? []).filter(c => c.state === 'running' && c.kind !== 'bgjob').slice(0, 4).map(c => ({ id: c.id, dog: c.agentType === 'Explore' })),
         tasks: a.tasks ?? null, compactions: a.compactions ?? 0,
+        work: a.work ? { steps: { ...a.work.steps }, failed: a.work.failed ?? 0, streak: a.work.streak ?? 0, lastTest: a.work.lastTest ?? null } : null, // what it has done so far, by kind of step
+        timeline: (a.timeline ?? []).filter(t => t.step).map(t => ({ at: t.at, step: t.step, ok: t.ok !== false })), // its steps of the last half hour
+        startedAt: a.startedAt ?? null,
         thinking: a.kind !== 'codex' && a.state === 'working' && (a.turn?.mode ? a.turn.mode === 'thinking' : !a.now), // the working line says thinking (else: between tool calls)
         turn: a.state === 'working' ? a.turn ?? null : null, effort: a.effort ?? null,
         model: a.modelLabel ?? a.model ?? null, family: familyOf(a.modelLabel ?? a.model), fast: a.fast === true,
@@ -208,7 +214,7 @@
     return {
       ...s, private: true,
       chrome: { ...s.chrome, errors: [] },
-      subagents: s.subagents.map(x => ({ ...x, label: '', parent: byName.get(x.parent) ?? null })),
+      subagents: s.subagents.map(x => ({ ...x, label: '', result: '', parent: byName.get(x.parent) ?? null })),
       mail: s.mail.map(m => ({ ...m, text: '' })),
       repos: s.repos.map(r => ({
         ...r, key: standIn(r.key, 'r'), main: standIn(r.main, 'r'), branch: null, project: standIn(r.project, 'p'),

@@ -38,7 +38,8 @@ const SHELL = [
   ['commit', [/\bgit\s+(?:commit|add|stash|tag)\b/]],
   ['pull', [/\bgit\s+(?:pull|fetch|clone|merge|rebase|cherry-pick)\b/]],
   ['test', [new RegExp(`\\b${PM}\\s+(?:run\\s+)?test\\b`), cmd('jest|vitest|mocha|pytest|rspec|phpunit'), /\bnpx\s+(?:jest|vitest|mocha)\b/, /\b(?:cypress\s+run|playwright\s+test)\b/, /\bnode\s+--test\b/,
-    /\b(?:go|cargo|swift|dotnet|mix|deno)\s+test\b/, /\bmake\s+(?:test|check)\b/, /\bpython3?\s+-m\s+(?:pytest|unittest)\b/]],
+    /\b(?:go|cargo|swift|dotnet|mix|deno)\s+test\b/, /\bmake\s+(?:test|check)\b/, /\bpython3?\s+-m\s+(?:pytest|unittest)\b/,
+    /\b(?:uv|poetry|pipenv|hatch|pdm|bundle|pnpm|yarn|npx)\s+(?:run|exec)\s+(?:python3?\s+-m\s+)?(?:pytest|unittest|jest|vitest|mocha|rspec|phpunit)\b/]], // a test runner run through a project's own runner (uv run pytest)
   ['lint', [/\b(?:eslint|prettier|ruff|black|flake8|pylint|mypy|stylelint|biome|rubocop|golangci-lint|gofmt|swiftlint|shellcheck)\b/, new RegExp(`\\b${PM}\\s+(?:run\\s+)?(?:lint|format|fmt|typecheck|check)\\b`),
     /\btsc\b.*--noEmit\b/i, /\bnode\s+--check\b/, /\bcargo\s+(?:fmt|clippy|check)\b/]],
   ['install', [new RegExp(`\\b${PM}\\s+(?:install|i|ci|add)\\b`), /\bpip3?\s+install\b/, /\b(?:uv|poetry)\s+(?:add|install|sync)\b/, /\bbrew\s+install\b/, /\bcargo\s+(?:add|install)\b/,
