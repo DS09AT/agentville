@@ -1,0 +1,5 @@
+# Runner labels actionlint does not know natively: Ubicloud's managed runners.
+# Keep this list to labels actually in use.
+self-hosted-runner:
+  labels:
+    - ubicloud-standard-2-ubuntu-2404
