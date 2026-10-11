@@ -22,8 +22,8 @@ already writes to disk and listens on `127.0.0.1` unless you turn on network acc
 - **Manage Claude Code:** plugins and skills with their context cost, MCP servers, permission rules.
 - **Read what agents wrote:** files with git status, documents, pictures, PDFs, spreadsheets.
 - **Get notified:** system notifications, a bell in the page, a pane and toasts inside Claude Code.
-- **Worlds:** the dashboard as a pixel farm or a robot factory, or a world you write yourself. Every
-  browser shows the same world at the same moment.
+- **Worlds:** the dashboard as a pixel farm, a robot factory or a tennis club in 3D, or a world you
+  make yourself. Every browser shows the same world at the same moment.
 - **Share it:** other devices on your network can watch read-only, optionally limited by IP, behind
   a password and over HTTPS. A kiosk can keep its screen on.
 
@@ -108,14 +108,15 @@ Every part is described in [docs/guide.md](docs/guide.md).
 - 🌾 **Farm:** every agent a farmer, every repo a field. Crops grow as context fills, weather shows
   the last deploy.
 - 🏭 **Robot factory:** every agent a robot, every repo an assembly bay.
-- **Your own:** `agentville new-world <name>` copies a starter into `~/.agentville/worlds`
-  ([docs/worlds.md](docs/worlds.md)).
+- 🎾 **Tennis club:** every agent a player, every repo a court, in 3D.
+- **Your own:** `agentville new-world <name>` copies a starter into `~/.agentville/worlds`. One
+  file describes the world; it is drawn in 3D ([docs/worlds.md](docs/worlds.md)).
 
-![The robot factory](docs/factory.png)
+![The tennis club](docs/tennis.png)
 
-The collector moves each world, so every browser shows the same picture, and anyone watching can
-ask an animal for an action. A world you write runs sandboxed and sees no names or text until you
-tick **Can see what agents say** for it.
+The collector moves each world, so every browser shows the same picture. On the farm and in the
+factory anyone watching can ask an animal for an action. A world you make runs sandboxed and sees
+no names or text until you tick **Can see what agents say** for it.
 
 ## Settings
 
@@ -224,10 +225,10 @@ More: [docs/guide.md](docs/guide.md#known-limits).
 ```
 bin/         agentville.mjs, the command
 collector/   the collector and its tests (test/)
-web/         the dashboard; worlds/ holds the farm, the factory, the starter and the SDK
+web/         the dashboard; worlds/ holds the worlds, the starter, the SDK and the pixel engine (legacy/)
 mod/         the Claude Code mod and its tests
 scripts/     end-to-end checks, world tools, demo videos
-docs/        guide.md, security.md, worlds.md, screenshots
+docs/        guide.md, security.md, worlds.md, worlds-legacy.md, screenshots
 ```
 
 ```bash

@@ -1,4 +1,4 @@
-// The props kit (web/worlds/sdk/props.js): every step Claude Code takes has a prop that draws, no two
+// The props kit (web/worlds/legacy/props.js): every step Claude Code takes has a prop that draws, no two
 // alike; a world swaps in its own and keeps the rest.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,7 @@ const plain = v => JSON.parse(JSON.stringify(v));
 function load() {
   const window = { Agentville: {} };
   const ctx = vm.createContext({ window, console, Math, JSON, Map, Set });
-  vm.runInContext(`${web('worlds/sdk/pixel.js')}\n;${web('worlds/sdk/props.js')}`, ctx);
+  vm.runInContext(`${web('worlds/legacy/pixel.js')}\n;${web('worlds/legacy/props.js')}`, ctx);
   const PXG = vm.runInContext('PXG', ctx), rpAt = vm.runInContext('rpAt', ctx);
   /** What a prop draws at a few moments: rectangles with their colours. */
   const drawing = (draw, prop, flag = false) => [0.1, 0.4, 0.7].map(T => {

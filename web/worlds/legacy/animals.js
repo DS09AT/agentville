@@ -1,4 +1,4 @@
-// The animals kit: creatures that live in a world just for fun (docs/worlds.md, "Creatures"). They
+// The animals kit: creatures that live in a world just for fun (docs/worlds-legacy.md, "Creatures"). They
 // never stand for data. A world gives its cast (animals()), where they may walk (roam()) and what they
 // must keep off (avoid(), and its own fields and buildings); the kit keeps where each one is and what it
 // does, its lines and its actions; the engine draws them, places their bubbles, and sends a farmer when
@@ -26,7 +26,7 @@
 
   const STEPS = ['go', 'chase', 'say', 'pose', 'wear', 'wait', 'fx', 'stay'];
   const plainObject = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-  /** What is wrong with a gag as written, or '' (docs/worlds.md, "Gags and play"). */
+  /** What is wrong with a gag as written, or '' (docs/worlds-legacy.md, "Gags and play"). */
   function gagProblem(g) {
     if (!plainObject(g.needs)) return 'its needs is not an object';
     if (g.needs.farmer !== undefined && g.needs.farmer !== 'idle' && g.needs.farmer !== 'busy') return `its farmer is ${g.needs.farmer} (idle or busy)`;
@@ -63,7 +63,7 @@
   /**
    * The kit. `world` is the cast (a list), or { cast, gags, play }: gags are short scripts of steps the
    * creatures (and farmers lent by the engine's crew) play out now and then; play is a farmer idle a while
-   * playing with one (docs/worlds.md, "Creatures").
+   * playing with one (docs/worlds-legacy.md, "Creatures").
    */
   function makeAnimals(world, { random = seededRandom(7), warn = m => console.warn(m) } = {}) {
     const cast = Array.isArray(world) ? world : world?.cast ?? [];
@@ -227,7 +227,7 @@
     const movingPose = o => (water(o) ? (winter ? 'slide' : 'swim') : 'walk');
     const restPose = o => (water(o) ? (winter ? 'stand' : random() < 0.3 ? 'dabble' : 'swim') : random() < 0.5 ? 'eat' : 'stand');
     const shown = () => ones.filter(o => !o.away);
-    /** A habit, now and then, when it rests: what its kind is known for (docs/worlds.md, "Creatures"). */
+    /** A habit, now and then, when it rests: what its kind is known for (docs/worlds-legacy.md, "Creatures"). */
     function habit(o) {
       const list = (o.def.habits ?? []).filter(h => HABITS.has(h));
       if (!list.length || random() >= 0.35) return false;
@@ -668,7 +668,7 @@
       gagNow() { const g = running.find(r => !r.play); return g ? { id: g.def.id } : null; },
       /** What the animals have taken just now ('bucket'): the world doesn't draw it where it was. */
       taken() { return new Set(taken); },
-      /** The helper's lines (docs/worlds.md, "Messages"): kept per kind and situation, for kinds this world has; a new batch replaces the last. */
+      /** The helper's lines (docs/worlds-legacy.md, "Messages"): kept per kind and situation, for kinds this world has; a new batch replaces the last. */
       chatter(lines) {
         const kinds = new Set(ones.map(o => o.kind));
         fresh = new Map();
@@ -688,7 +688,7 @@
       list() { return ones.map(o => ({ id: o.id, kind: o.kind, x: Math.round(o.x), y: Math.round(o.y), pose: o.pose, lift: o.lift || 0, wear: { ...o.wear }, ...(denOf(o) ? denOf(o) : {}), ...(o.away ? { away: true } : {}) })); },
       /**
        * All of it as plain data, for whoever only watches (the collector moves a built-in world's animals, every browser draws them:
-       * docs/worlds.md, "One world for everyone"): each creature as [id, x, y, bits, pose, lift, den], the lines being said as
+       * docs/worlds-legacy.md, "One world for everyone"): each creature as [id, x, y, bits, pose, lift, den], the lines being said as
        * [id, text, plain] (plain: what a guest reads when the line is the helper's; null when the line is the world's own), and what
        * is taken. The bits: 1 away, 2 faces left, 4 a hat, 8 the bucket, 16 a scarf, 32 ice, 64 asleep in its den.
        */
@@ -785,7 +785,7 @@
   }
 
   /**
-   * What is asked of the animals, by you or by anyone watching (docs/worlds.md, "One world for everyone"): a job is an animal,
+   * What is asked of the animals, by you or by anyone watching (docs/worlds-legacy.md, "One world for everyone"): a job is an animal,
    * one of its actions and the farmer that goes. They are done in the order asked. At most `outMax` farmers are out at once,
    * and they set off `gap` seconds apart, so none walks inside another; a job over that waits (`held`: its farmer at the world's
    * waiting place) until one is back. At an animal they stand in line: the first does its action and stays a moment, the next

@@ -1,4 +1,4 @@
-// The starter world (web/worlds/starter/): it registers, places every agent, draws, gives a valid
+// The starter world (web/worlds/legacy-starter/): it registers, places every agent, draws, gives a valid
 // world.json, and stays short enough to read at once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,10 +41,10 @@ function load() {
   const dom = stubDom();
   const window = { Agentville: { raw: h => { window.registered = h; } } };
   const ctx = vm.createContext({ window, document: dom.document, console, Math, Date, JSON, Map, Set, Intl, ResizeObserver: class { observe() {} disconnect() {} }, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {}, Image: class {}, Path2D: class {} });
-  for (const f of ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js']) vm.runInContext(web(f), ctx, { filename: f });
+  for (const f of ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js']) vm.runInContext(web(f), ctx, { filename: f });
   const engineWorld = window.Agentville.world; // the hooks the starter gives, kept for the tests
   window.Agentville.world = hooks => { window.hooks = hooks; return engineWorld(hooks); };
-  vm.runInContext(web('worlds/starter/world.js'), ctx, { filename: 'worlds/starter/world.js' });
+  vm.runInContext(web('worlds/legacy-starter/world.js'), ctx, { filename: 'worlds/legacy-starter/world.js' });
   return { window, dom, ctx };
 }
 
@@ -84,6 +84,6 @@ test('its cat keeps to the grass below the path, beside the fence: never on the 
 });
 
 test('its world.json is valid, and its world.js short enough to read at once', () => {
-  assert.equal(checkWorldJson(JSON.parse(web('worlds/starter/world.json'))), null);
-  assert.ok(web('worlds/starter/world.js').split('\n').length <= 120, 'at most 120 lines');
+  assert.equal(checkWorldJson(JSON.parse(web('worlds/legacy-starter/world.json'))), null);
+  assert.ok(web('worlds/legacy-starter/world.js').split('\n').length <= 120, 'at most 120 lines');
 });

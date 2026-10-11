@@ -1,5 +1,6 @@
-// The starter world: a plain world with everything a world needs, short enough to read at once. Make your
-// own from it with `npm run new-world -- <name>` and change anything (docs/worlds.md, "Making a world").
+// The pixel engine's starter: a plain world of api 1 with everything such a world needs, short enough to read
+// at once. To make one more world of the pixel engine, copy this folder and change anything
+// (docs/worlds-legacy.md, "Making a world"); new worlds are made for api 2, from web/worlds/starter/.
 // It draws with the SDK in its frame (pixel.js, people.js, props.js, engine.js), whose names the frame
 // shares, so it keeps its own inside this function.
 (() => {
@@ -31,7 +32,7 @@
     setScene(next) { scene = next; return []; },
     spawn: () => [W / 2, DOOR_Y],
 
-    // A cat, just for fun: it never stands for data (docs/worlds.md, "Creatures"). It walks the grass below the
+    // A cat, just for fun: it never stands for data (docs/worlds-legacy.md, "Creatures"). It walks the grass below the
     // path (the door and the bench are above it) down to the fence's foot, beside the fence: never on the plots.
     // Now and then it yawns or chases its tail, and once in a while it jumps at nothing (a gag).
     animals: () => ({

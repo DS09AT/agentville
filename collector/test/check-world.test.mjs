@@ -18,7 +18,7 @@ const builtIn = n => fileURLToPath(new URL(`../../web/worlds/${n}`, import.meta.
 const run = (...args) => spawnSync(process.execPath, [fileURLToPath(new URL('../../scripts/check-world.mjs', import.meta.url)), ...args], { encoding: 'utf8', timeout: 60_000 });
 
 test('the starter passes clean', async () => {
-  const r = await checkWorld({ dir: builtIn('starter') });
+  const r = await checkWorld({ dir: builtIn('legacy-starter') });
   assert.deepEqual(r.errors, []);
   assert.equal(r.json, null);
   assert.ok(r.ran >= 30, 'every stop ran');
@@ -122,7 +122,7 @@ test('animals() may return { cast }: its creatures are checked as the plain list
 });
 
 test('the command: exit 0 for a clean world, 1 with a ✗ line for a creature problem; it says it runs contained', () => {
-  const clean = run('starter');
+  const clean = run('legacy-starter');
   assert.equal(clean.status, 0, clean.stdout + clean.stderr);
   assert.match(clean.stdout, /✓ \d+ stops of the tour/);
   assert.match(clean.stdout, /· contained: it can read only the SDK and this world's world\.js and world\.json, and can't write or start programs \(it can still reach the network\)/);
@@ -178,7 +178,7 @@ test("contained as the command runs a world: it reads the SDK and the world's tw
     const code = `const fs = require('node:fs'), cp = require('node:child_process');
       const t = f => { try { f(); return 'allowed'; } catch (e) { return e.code ?? e.message; } };
       const read = p => t(() => fs.readFileSync(p));
-      console.log(JSON.stringify({ sdk: read(${JSON.stringify(builtIn('sdk/engine.js'))}), js: read(${JSON.stringify(world.js)}), json: read(${JSON.stringify(world.json)}),
+      console.log(JSON.stringify({ sdk: read(${JSON.stringify(builtIn('legacy/engine.js'))}), js: read(${JSON.stringify(world.js)}), json: read(${JSON.stringify(world.json)}),
         notes: read(${JSON.stringify(join(dir, 'notes.txt'))}), peek: read(${JSON.stringify(join(dir, 'peek'))}), up: read(${JSON.stringify(join(dir, 'up', 'outside.txt'))}),
         outside: read(${JSON.stringify(outside)}), write: t(() => fs.writeFileSync(${JSON.stringify(target)}, 'x')), program: t(() => cp.spawnSync('ls')),
         env: Object.keys(process.env) }));`;
@@ -195,7 +195,7 @@ test("contained as the command runs a world: it reads the SDK and the world's tw
 test("the command refuses a world whose world.js leads out of its folder, before starting anything; one inside it is fine", () => {
   const tmp = mkdtempSync(join(tmpdir(), 'check-world-')), worlds = join(tmp, 'worlds');
   try {
-    const starter = readFileSync(join(builtIn('starter'), 'world.js'), 'utf8'), json = '{ "name": "w", "api": 1 }\n';
+    const starter = readFileSync(join(builtIn('legacy-starter'), 'world.js'), 'utf8'), json = '{ "name": "w", "api": 1 }\n';
     writeFileSync(join(tmp, 'elsewhere.js'), starter);
     mkdirSync(join(worlds, 'linked'), { recursive: true });
     writeFileSync(join(worlds, 'linked', 'world.json'), json);
@@ -236,7 +236,7 @@ test("worldFiles: each of the two files a regular file inside the folder's real 
 });
 
 test('the contained half refuses to run unless it is contained', () => {
-  const r = spawnSync(process.execPath, [RUNNER, 'starter', builtIn('starter')], { encoding: 'utf8', timeout: 60_000 });
+  const r = spawnSync(process.execPath, [RUNNER, 'legacy-starter', builtIn('legacy-starter')], { encoding: 'utf8', timeout: 60_000 });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /runs a world only contained/);
   assert.equal(r.stdout, '', 'no check ran');
@@ -310,7 +310,7 @@ test('creature rules: animals() without roam() is a pointer, not a problem', asy
 });
 
 test("creature rules: the copied lists match what creatures.js, animals.js and engine.js define (drift fails here, not a user's world)", () => {
-  const src = f => readFileSync(builtIn(`sdk/${f}`), 'utf8'), lits = (s, re) => new Set([...s.matchAll(re)].map(m => m[1]));
+  const src = f => readFileSync(builtIn(`legacy/${f}`), 'utf8'), lits = (s, re) => new Set([...s.matchAll(re)].map(m => m[1]));
   // fx: the engine's showFx
   assert.deepEqual(lits(src('engine.js'), /r\.fx === '(\w+)'/g), new Set(RULES.FX));
   // poses: every pose creatures.js and the kit name (POSE_AS: the ones every creature is drawn in as
@@ -335,7 +335,7 @@ test("creature rules: the copied lists match what creatures.js, animals.js and e
 
 /* ---------- gags and play: the kit's own gagProblem says what's written wrong, so check-world says it before the browser's console does ---------- */
 
-const kitCtx = (() => { const ctx = vm.createContext({ console }); vm.runInContext(readFileSync(builtIn('sdk/animals.js'), 'utf8'), ctx); return ctx; })();
+const kitCtx = (() => { const ctx = vm.createContext({ console }); vm.runInContext(readFileSync(builtIn('legacy/animals.js'), 'utf8'), ctx); return ctx; })();
 const POUNCE = { id: 'pounce', needs: { cat: 1 }, steps: [{ pose: 'cat', is: 'startled', ms: 600 }, { say: 'cat', line: 'idle' }] };
 const gagRules = (world, spots = {}) => creatureProblems({ cast: [cat()], ...world }, { kinds: KINDS, gagProblem: kitCtx.gagProblem, spots });
 
@@ -377,13 +377,13 @@ test("check-world runs a world's gags through the kit: the fixture's spot that i
 });
 
 test('the starter has a gag, and it passes', async () => {
-  const src = readFileSync(builtIn('starter/world.js'), 'utf8');
+  const src = readFileSync(builtIn('legacy-starter/world.js'), 'utf8');
   assert.match(src, /gags: \[\{ id: 'pounce'/);
-  assert.deepEqual((await checkWorld({ dir: builtIn('starter') })).creatures, []);
+  assert.deepEqual((await checkWorld({ dir: builtIn('legacy-starter') })).creatures, []);
 });
 
 test("gag rules: the copied habits and reactions match animals.js (drift fails here, not a user's world)", () => {
-  const src = readFileSync(builtIn('sdk/animals.js'), 'utf8');
+  const src = readFileSync(builtIn('legacy/animals.js'), 'utf8');
   assert.deepEqual(new Set(JSON.parse(src.match(/const HABITS = new Set\((\[[^\]]*\])\)/)[1].replaceAll("'", '"'))), new Set(RULES.HABITS));
   assert.deepEqual(new Set([...src.matchAll(/byWhat\('(\w+)'\)/g)].map(m => m[1])), new Set(RULES.REACTS));
 });
@@ -405,6 +405,6 @@ test("the kit's gag check is called as world code: under the timeout, and only a
 });
 
 test("the starter draws several accounts (a meter for each), so check-world doesn't flag the item", async () => {
-  const r = await checkWorld({ dir: builtIn('starter') });
+  const r = await checkWorld({ dir: builtIn('legacy-starter') });
   assert.ok(!r.same.some(s => s.includes('several accounts')), r.same.join('\n'));
 });

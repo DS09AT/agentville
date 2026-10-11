@@ -49,6 +49,9 @@ export async function doctor({ dataDir, script, version, say, platform = process
   const require = createRequire(import.meta.url);
   const packages = ['@colyseus/core', '@colyseus/sdk/package.json', 'quickjs-emscripten-core'].filter(p => { try { require.resolve(p); return false; } catch { return true; } });
   if (packages.length) missing('live worlds', `missing packages (${packages.join(', ')}); reinstall Agentville`); else good('live worlds', 'packages installed');
+  let three = true;
+  try { require.resolve('three'); } catch { three = false; }
+  if (three) good('3D worlds', 'three.js installed'); else missing('3D worlds', 'three.js is missing; reinstall Agentville (the farm and the factory still run)');
 
   let accounts = [];
   try { accounts = findAccounts({ claudeDir: join(home, '.claude'), names: cfg.accounts, home, log: () => {} }); } catch { /* none to read */ }

@@ -1,8 +1,69 @@
 {
   "name": "Starter",
   "icon": "🌱",
-  "description": "A plain world to start from: people working in plots",
-  "api": 1,
+  "description": "A plain world to start from: people at work on a plot for each repo",
+  "api": 2,
   "author": "",
-  "nouns": { "agent": "person", "agents": "people", "repo": "plot", "repos": "plots", "diary": "Diary" }
+  "nouns": { "agent": "person", "agents": "people", "repo": "plot", "repos": "plots", "place": "yard", "diary": "Diary" },
+  "help": "Working people stand on their repo's plot. Whoever needs you waits in front of the hut; the rest sit on the benches.",
+  "ground": { "size": [44, 28], "color": "#5d9b46" },
+  "camera": { "view": "iso" },
+  "spawn": [6, 7.2],
+  "places": {
+    "wait": { "name": "Needs you", "row": { "from": [11, 8], "step": [1.3, 0], "count": 12 } },
+    "idle": { "name": "Benches", "grid": { "from": [31.5, 4.9], "step": [1.5, 2.3], "cols": 6, "count": 12 }, "face": [0, 1] }
+  },
+  "plots": {
+    "grid": { "origin": [6.2, 14.2], "step": [6.3, 4.9], "cols": 6 },
+    "size": [5.5, 3.8],
+    "work": [[0, 0.4], [-1.5, 0.4], [1.5, 0.4], [-0.75, 1.35], [0.75, 1.35], [0, 1.35]],
+    "face": { "to": [0, -1.1] },
+    "label": [0, 2.05],
+    "scenery": [
+      { "shape": "plane", "size": [5.5, 3.8], "color": "#7a5230" },
+      { "shape": "box", "size": [2.4, 0.8, 0.8], "at": [0, -1.1], "color": "#c98d4f" },
+      { "shape": "plane", "size": [4.9, 0.35], "at": [0, -1.68], "y": 0.02, "color": "#3a3a40" },
+      { "shape": "plane", "size": [4.9, 0.35], "at": [0, -1.68], "y": 0.04, "color": "#6cc04a", "shows": "context", "tip": "How much of their context the people here have used" },
+      { "shape": "cylinder", "size": [0.1, 2.3, 0.1], "at": [2.45, -1.6], "color": "#4e3626" },
+      { "shape": "box", "size": [0.8, 0.5, 0.06], "at": [2.05, -1.6], "y": 1.7, "color": "#9aa4ad", "shows": "deploy", "tip": "The last deploy: green ok, red failed, amber running" },
+      { "shape": "cone", "size": [0.6, 0.9, 0.6], "at": [-2.35, 1.5], "color": "#ff8c42", "shows": "collision", "tip": "Two agents write here at once" },
+      { "shape": "cylinder", "size": [0.08, 1.4, 0.08], "at": [-2.45, -1.6], "color": "#4e3626", "shows": "busy" },
+      { "shape": "sphere", "size": [0.36, 0.36, 0.36], "at": [-2.45, -1.6], "y": 1.4, "color": "#ffd43b", "glow": true, "shows": "busy" }
+    ],
+    "empty": [{ "shape": "plane", "size": [5.5, 3.8], "color": "#6aa84f" }]
+  },
+  "paths": [
+    [[1.5, 9.6], [42.5, 9.6]],
+    [[2.6, 9.6], [2.6, 26.5]],
+    [[41.3, 9.6], [41.3, 26.5]],
+    [[22, 9.6], [22, 26.5]],
+    [[9.35, 11.75], [9.35, 26.5]],
+    [[15.65, 11.75], [15.65, 26.5]],
+    [[28.25, 11.75], [28.25, 26.5]],
+    [[34.55, 11.75], [34.55, 26.5]],
+    [[2.6, 11.75], [41.3, 11.75]],
+    [[2.6, 16.65], [41.3, 16.65]],
+    [[2.6, 21.55], [41.3, 21.55]],
+    [[2.6, 26.5], [41.3, 26.5]]
+  ],
+  "prefabs": {
+    "tree": [{ "shape": "cylinder", "size": [0.4, 1.3, 0.4], "color": "#6b4320" }, { "shape": "cone", "size": [2.1, 2.8, 2.1], "y": 1.1, "color": "#2f6b2f" }],
+    "bench": [
+      { "shape": "box", "size": [1.2, 0.1, 0.4], "y": 0.36, "color": "#a8703c" },
+      { "shape": "box", "size": [1.2, 0.5, 0.08], "at": [0, -0.2], "y": 0.36, "color": "#a8703c" },
+      { "shape": "box", "size": [0.1, 0.36, 0.36], "at": [-0.5, 0], "color": "#6b4320" },
+      { "shape": "box", "size": [0.1, 0.36, 0.36], "at": [0.5, 0], "color": "#6b4320" }
+    ]
+  },
+  "scenery": [
+    { "shape": "plane", "size": [41, 1.4], "at": [22, 9.6], "color": "#c9a46a" },
+    { "shape": "box", "size": [6, 2.8, 3.8], "at": [6, 4.2], "color": "#e8d8b0", "opens": "session", "tip": "The hut: start a session" },
+    { "shape": "box", "size": [6.6, 0.35, 4.4], "at": [6, 4.2], "y": 2.8, "color": "#9c3b30", "opens": "session", "tip": "The hut: start a session" },
+    { "shape": "box", "size": [1.1, 1.9, 0.1], "at": [6, 6.12], "color": "#6b4320", "opens": "session", "tip": "The hut: start a session" },
+    { "shape": "box", "size": [0.8, 0.8, 0.1], "each": [[4, 6.12], [8, 6.12]], "y": 1.1, "color": "#ffd43b", "glow": true },
+    { "shape": "box", "size": [2.6, 1.5, 0.12], "at": [27, 4.4], "y": 0.8, "color": "#a8703c", "opens": "board", "tip": "The notice board: what your projects remember" },
+    { "shape": "cylinder", "size": [0.14, 0.8, 0.14], "each": [[26, 4.4], [28, 4.4]], "color": "#6b4320" },
+    { "use": "bench", "each": [[31.5, 4.35], [33, 4.35], [34.5, 4.35], [36, 4.35], [37.5, 4.35], [39, 4.35], [31.5, 6.65], [33, 6.65], [34.5, 6.65], [36, 6.65], [37.5, 6.65], [39, 6.65]] },
+    { "use": "tree", "each": [[1.5, 1.8], [11.5, 2.2], [16, 3], [21, 2], [41.5, 2.5], [42.5, 13.5], [42.8, 19], [42.5, 24.5], [1.2, 14], [1.2, 19.5], [1.2, 25]] }
+  ]
 }

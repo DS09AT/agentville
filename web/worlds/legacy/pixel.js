@@ -41,7 +41,7 @@ const ago = ms => {
 const PXG = {
   ctx: null, T: 0, k: 1, lights: null, ext: null, W: 400, season: null,
   // The time of day everyone draws by (ms): this machine's, or, in a world the collector moves, the collector's for the moment
-  // shown (docs/worlds.md, "One world for everyone"). A world reads now() where it would read Date.now(), so what goes by the clock
+  // shown (docs/worlds-legacy.md, "One world for everyone"). A world reads now() where it would read Date.now(), so what goes by the clock
   // (who naps where, what happens on the porch) is the same in every browser.
   wall: null, now() { return this.wall ?? Date.now(); },
 }; // ext: the world drawn, past the farm's own edges when the frame has room // the canvas being drawn now, the animation clock, device pixels per world pixel, lights to glow at night // season: the season to draw (the engine's, held by the Season switch or live), null before the first frame

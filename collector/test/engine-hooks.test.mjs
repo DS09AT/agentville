@@ -1,5 +1,5 @@
 // A world of four hooks, mounted and drawn on a stand-in DOM; the defaults the engine fills in
-// (docs/worlds.md, "Hooks"): the fields kept for the labels, overflow of any group, a grid centred on W.
+// (docs/worlds-legacy.md, "Hooks"): the fields kept for the labels, overflow of any group, a grid centred on W.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const web = f => readFileSync(fileURLToPath(new URL(`../../web/${f}`, import.meta.url)), 'utf8');
-const code = ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js'].map(web).join('\n;\n');
+const code = ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'].map(web).join('\n;\n');
 const plain = v => JSON.parse(JSON.stringify(v));
 const NOW = Date.now();
 const tiny = { W: 200, slots: () => ({ group: 'all', cap: 9, at: i => [20 + i * 10, 40], zone: 'all' }), drawChar() {}, bg() {} };

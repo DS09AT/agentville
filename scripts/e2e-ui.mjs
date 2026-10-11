@@ -88,6 +88,9 @@ writeFileSync(join(worldsDir, 'pets', 'world.js'), `(() => {
   });
 })();`);
 // One that throws as it loads, and so never starts.
+// A world of api 2 of your own: the starter, as new-world would have copied it.
+cpSync(join(ROOT, 'web', 'worlds', 'starter'), join(worldsDir, 'club'), { recursive: true });
+writeFileSync(join(worldsDir, 'club', 'world.json'), readFileSync(join(worldsDir, 'club', 'world.json'), 'utf8').replace('"name": "Starter"', '"name": "Club"'));
 mkdirSync(join(worldsDir, 'throws'));
 writeFileSync(join(worldsDir, 'throws', 'world.json'), JSON.stringify({ name: 'Throws', api: 1 }));
 writeFileSync(join(worldsDir, 'throws', 'world.js'), "throw new Error('no barn here');");
@@ -1186,11 +1189,11 @@ try {
   const pageToken = await js('TOKEN'), dashboardStorage = await js('JSON.stringify(Object.entries(localStorage).sort())');
   const testPageHtml = await (await fetch(addr('/worlds/test'))).text();
   check(typeof pageToken === 'string' && pageToken.length > 8 && !testPageHtml.includes(pageToken), 'the test page holds no token');
-  await send('Page.navigate', { url: addr('/worlds/test?world=starter&stop=waiting') });
+  await send('Page.navigate', { url: addr('/worlds/test?world=legacy-starter&stop=waiting') });
   check(await until("document.body.dataset.shown === 'waiting'", 15_000), 'a stop of the tour shows, at its own address');
   check(await js("document.getElementById('stops').value") === 'waiting', 'the stop picker names it');
   await shot('world-test-page');
-  check(Boolean(await chrome.inFrame('/world/starter/', "document.querySelectorAll('.px-tag').length > 0").catch(() => false)), 'the starter draws its people in its frame');
+  check(Boolean(await chrome.inFrame('/world/legacy-starter/', "document.querySelectorAll('.px-tag').length > 0").catch(() => false)), 'the starter draws its people in its frame');
   check(await js("typeof TOKEN === 'undefined' && typeof window.TrackerFarm?.mount === 'function'"), 'the page itself has no token either');
   await send('Page.navigate', { url: addr('/worlds/test?world=farm&stop=compaction') });
   check(await until("document.body.dataset.shown === 'compaction'", 15_000), 'a two-snapshot stop plays both');
@@ -1219,6 +1222,70 @@ try {
   await until("!document.getElementById('worlds-dlg').open");
 
   for (let i = errors.length - 1; i >= 0; i--) if (/no barn here/.test(errors[i])) errors.splice(i, 1); // the throw was the test's own
+
+  console.log('A world of api 2, drawn with three.js');
+  const inWorld = (key, expr) => chrome.inFrame(`/world/${key}/`, expr).catch(() => undefined);
+  const worldUntil = async (key, expr, ms = 10_000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await inWorld(key, expr)) return true; return false; };
+  const askedOf = () => js("JSON.stringify([...document.querySelectorAll('#asked li')].map(l => l.textContent))");
+  await send('Page.navigate', { url: addr('/worlds/test?world=starter&stop=everyone') });
+  check(await until("document.body.dataset.shown === 'everyone'", 15_000), 'the starter shows a stop of the tour');
+  check(await worldUntil('starter', "document.querySelectorAll('.wv-tag').length === 7 && !document.querySelector('.wv-loading')"), 'each of its seven agents has its tag over the canvas');
+  check(await worldUntil('starter', "(s => s.figures === 7 && s.calls > 10 && s.triangles > 1000)(window.Agentville.statsNow())"), `three.js draws them in its sandboxed frame (${await inWorld('starter', 'JSON.stringify(window.Agentville.statsNow())')})`);
+  check(await inWorld('starter', "fetch('/api/state').then(() => 'ALLOWED', () => 'blocked')") === 'blocked', "its frame can fetch nothing, as any world's");
+  check(await inWorld('starter', "new Promise(r => { try { const w = new Worker('/world/sdk/plugins.js'); w.onerror = () => r('blocked'); setTimeout(() => r('ALLOWED'), 800); } catch { r('blocked'); } })") === 'blocked', 'nor start a worker');
+  check(await js("!document.querySelector('.world-strip') && !document.querySelector('.world-panel')"), 'and nothing of it failed');
+  await shot('world-api2-starter');
+  await inWorld('starter', "document.querySelector('.wv-tag.st-waiting').click(); true");
+  check(await until("[...document.querySelectorAll('#asked li')].some(l => /^pick a2/.test(l.textContent))"), `a click on a tag picks its agent (${await askedOf()})`);
+  await sleep(350); // (the page takes one pick a quarter second)
+  await inWorld('starter', "document.querySelector('.wv-say').click(); true");
+  check(await until("[...document.querySelectorAll('#asked li')].some(l => /^pick a2 \\(from its bubble\\)/.test(l.textContent))"), 'a click on its bubble too, saying so');
+  await inWorld('starter', "document.querySelector('[data-do=\"menu\"]').click(); true");
+  check(await worldUntil('starter', "!document.querySelector('.wv-menu').hidden && ['nav:list', 'nav:worlds', 'sky', 'motion', 'zoom:1', 'help'].every(d => document.querySelector(`[data-do=\"${d}\"]`))"), "its Menu holds the dashboard's buttons and the world's switches");
+  await inWorld('starter', "document.querySelector('[data-do=\"sky\"]').click(); document.querySelector('[data-do=\"zoom:1\"]').click(); true");
+  check(await worldUntil('starter', "/night/.test(document.querySelector('[data-do=\"sky\"]').textContent) && /125%/.test(document.querySelector('[data-do=\"zoom:0\"]').textContent) && !document.querySelector('.wv-menu').hidden"), 'the switches change what they say (the sky from day to night, the zoom a step in), and leave the Menu open');
+  await inWorld('starter', "document.querySelector('[data-do=\"nav:list\"]').click(); true");
+  check(await until("[...document.querySelectorAll('#asked li')].some(l => l.textContent === 'go to: list')") && await inWorld('starter', "document.querySelector('.wv-menu').hidden"), 'List asks the page for the list view, and shuts the Menu');
+  await inWorld('starter', "document.querySelector('.wv-plot').click(); true");
+  check(await worldUntil('starter', "document.querySelector('.wv-dlg').open && document.querySelectorAll('.wv-file').length === 2"), "a click on a plot's label opens its repo's close-up: the files touched there");
+  await inWorld('starter', "document.querySelector('.wv-file .k-doc').closest('button').click(); true");
+  await inWorld('starter', "document.querySelector('[data-do=\"file-read\"]')?.click(); true");
+  check(await until("[...document.querySelectorAll('#asked li')].some(l => /^open .*README\\.md$/.test(l.textContent))"), `a document in it opens in the page's reader (${await askedOf()})`);
+  await send('Page.navigate', { url: addr('/worlds/test?world=starter&stop=compaction') });
+  check(await until("document.body.dataset.shown === 'compaction'", 15_000) && await worldUntil('starter', "[...document.querySelectorAll('.wv-pop')].some(p => p.textContent === 'Compacted')", 4000), 'what happens between two scenes pops up where it happened');
+  await send('Page.navigate', { url: addr('/worlds/test?world=tennis&stop=everyone') });
+  check(await until("document.body.dataset.shown === 'everyone'", 15_000) && await worldUntil('tennis', "(s => s.figures === 7 && s.geometries > 20)(window.Agentville.statsNow())"), `the tennis club's models (its players, their rackets, its trees) come through the page as bytes, and are drawn (${await inWorld('tennis', 'JSON.stringify(window.Agentville.statsNow())')})`);
+  check(await js("!document.querySelector('.world-strip')"), 'with no error');
+  await shot('world-api2-tennis');
+  await send('Page.navigate', { url: addr('/worlds/test?world=u/club&stop=private') });
+  check(await until("document.body.dataset.shown === 'private'", 15_000) && await worldUntil('u/club', "(t => t.length === 7 && t.every(x => /^agent \\d+:/.test(x.title)))([...document.querySelectorAll('.wv-tag')])"), 'a world of api 2 of your own gets the private scene at the privacy stop');
+  await send('Page.navigate', { url: addr('/') });
+  await dashboardSettled();
+  await js("document.getElementById('view-farm').click()");
+  await until("document.getElementById('main').dataset.view === 'farm' && !!document.querySelector('#farm .world-frame')");
+  await js("document.getElementById('view-farm').click()");
+  await until("document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"tennis\"]')");
+  await shot('worlds-list-api2');
+  await js("document.querySelector('[data-world=\"tennis\"]').click()");
+  check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/tennis/')"), 'the tennis club is in the list of worlds, and picking it shows it');
+  check(await until("window.TrackerLive.watching() && window.TrackerLive.world() === 'tennis' && /^[1-9]\\d* online$/.test(document.querySelector('#farm .world-online-chip')?.textContent.trim() ?? '')", 12_000), 'the collector moves it for everyone: this page has joined its room');
+  check(await worldUntil('tennis', "document.querySelectorAll('.wv-tag').length >= 2 && window.Agentville.statsNow().figures >= 2"), 'and its agents stand where the collector says');
+  check(await js("!document.querySelector('#farm .world-corner')"), 'a built-in world has the way back in its own Menu: the page adds no corner');
+  await shot('world-api2-live');
+  await inWorld('tennis', "document.querySelector('.wv-tag[data-agent=\"ui-worker\"]').click(); true");
+  check(await until("/ui-worker/.test(document.getElementById('farm-sidebar')?.textContent ?? '')"), "a click on an agent's tag opens it in the sidebar");
+  await inWorld('tennis', "document.querySelector('[data-do=\"menu\"]').click(); document.querySelector('[data-do=\"nav:worlds\"]').click(); true");
+  check(await until("document.getElementById('worlds-dlg').open"), 'its Menu’s World opens the list of worlds');
+  await js("document.querySelector('[data-world=\"u/club\"]').click()");
+  check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/club/') && !!document.querySelector('#farm .world-corner')"), 'a world of api 2 of your own shows, with the page’s corner over it');
+  check(await worldUntil('u/club', "(t => t.length >= 2 && t.every(x => /^agent \\d+:/.test(x.title)))([...document.querySelectorAll('.wv-tag')])") && await until("window.TrackerLive.world() === 'u/club' && window.TrackerLive.watching()", 12_000), 'it sees numbers for names, and the collector moves it too, shut in');
+  check(await worldUntil('u/club', "document.querySelector('.wv-panel').classList.contains('own')"), 'its panel sits below the corner');
+  await js("document.querySelector('#farm .world-corner [data-corner-worlds]').click()");
+  await until("document.getElementById('worlds-dlg').open");
+  await js("document.querySelector('[data-world=\"farm\"]').click()");
+  check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await worldUntil('farm', "document.querySelectorAll('.px-tag').length >= 2", 20_000), 'and the farm comes back');
+  await js("document.getElementById('view-list').click()");
+  await until("document.getElementById('main').dataset.view === 'list' && !document.documentElement.dataset.guard"); // (the corner's World ▾ held the page's buttons for a second)
 
   console.log('Claude Code setup');
   await js("document.getElementById('setup-open').click()");

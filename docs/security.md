@@ -60,7 +60,7 @@ In `~/.agentville`, readable only by you:
 
 ## Worlds
 
-Built-in worlds (the farm, the factory) are part of Agentville.
+Built-in worlds (the farm, the factory, the tennis club) are part of Agentville.
 
 A world from your folder is someone's code. Agentville limits what it can do:
 
@@ -73,5 +73,7 @@ It cannot fully stop a world from sending what it is shown to another server. So
 you trust, and tick **Can see what agents say** only for a world whose author you would trust with
 your agents' words.
 
-`agentville check-world` runs a world's code on your computer with restricted file access, but the
-world can still reach the network. Check only worlds you trust.
+`agentville check-world` runs a world's code on your computer where it can reach no file and no
+network. A world made for the older pixel engine (`"api": 1` in its `world.json`) is checked with
+restricted file access only, and can still reach the network: check such a world only if you trust
+it.

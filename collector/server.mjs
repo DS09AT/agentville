@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { hostname, networkInterfaces } from 'node:os';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { FRAME_CSP } from './worlds.mjs';
+import { frameCsp } from './worlds.mjs';
 import { GUEST_COOKIE, cookieOf, makeAttempts } from './access.mjs';
 
 const BODY_LIMIT = 64 * 1024;
@@ -240,7 +240,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           let html = worlds?.frame(m[1]);
           if (!html) return send(res, 404, 'text/plain', 'not found');
           if (framePass) html = html.replaceAll('href="/', `href="/f/${framePass}/`).replaceAll('src="/', `src="/f/${framePass}/`); // what it loads carries the pass too
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': FRAME_CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': frameCsp(html), 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
           return res.end(html);
         }
         if ((m = path.match(/^\/world\/((?:u\/)?[a-z0-9-]+)\/(.+)$/))) { // one of a world's files, from inside its folder only
@@ -261,8 +261,10 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
         if (path === '/worlds/test') { // a world's test page: no token and no real data (web/worlds/test/)
           let html;
           try { html = readFileSync(join(dirname(webFile), 'worlds', 'test', 'index.html'), 'utf8'); } catch { return send(res, 404, 'text/plain', 'not found'); }
-          // connect-src 'none': it fetches nothing (no list of worlds, made-up answers), so /api/state, which needs no token, is out of its reach by policy.
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; connect-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", 'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
+          // connect-src: it fetches a world's own files (a world asks the page for its models as bytes) and nothing else: no list of
+          // worlds, made-up answers. So /api/state, which needs no token, is out of its reach by policy. (The host is one of this server's own names: checked above.)
+          const worldFiles = `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}/world/`;
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': `default-src 'self'; connect-src ${worldFiles}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, 'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
           return res.end(html);
         }
         if ((m = path.match(/^\/worlds\/test\/([a-z]+)\.js$/))) { // its scripts, by plain name only
@@ -475,7 +477,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
     httpServer: server, token, lan, webDir: dirname(webFile), log,
     getGuestJson: () => JSON.stringify(guestSnapshot(getSnapshot())),
     getChatter: () => getSnapshot()?.chatter ?? null,
-    ownFile: key => worlds?.file(key, 'world.js').real ?? null, // a world from your folder: its world.js, really inside its folder
+    source: key => worlds?.source(key) ?? null, // what a world is moved with: its files, really inside its folder
     allowed: req => isAllowedHost(req.headers.host ?? '') && (!req.headers.origin || isAllowedOrigin(req.headers.origin)) && !mustBeSecure(req) && (!isGuest(req) || guestIn(req)),
   })), err => { log(`live worlds are off: ${err?.message ?? err} (its packages are missing: install Agentville again)`); return null; }));
 

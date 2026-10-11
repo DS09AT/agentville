@@ -68,6 +68,10 @@ export async function openChrome({ prepare = async () => {} } = {}) {
   const targets = (await raw('Target.getTargets')).result.targetInfos;
   page = (await raw('Target.attachToTarget', { targetId: targets.find(t => t.type === 'page').targetId, flatten: true })).result.sessionId;
   await adopt(page);
+  // A headless page has the keyboard only some of the time (document.hasFocus() is false until something gives
+  // it), and a key sent to a page without it can be lost, the more often the slower the machine. With this the
+  // page counts as the focused one throughout, as a page someone looks at does.
+  await raw('Emulation.setFocusEmulationEnabled', { enabled: true }, page);
   async function evaluate(expression, sessionId, contextId) {
     const r = await raw('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, ...(contextId ? { contextId } : {}) }, sessionId);
     if (r.error) throw new Error(r.error.message);

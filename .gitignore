@@ -8,3 +8,4 @@ mod/.claude-plugin/types/
 .DS_Store
 *.mp4
 CLAUDE.md
+AGENTS.md

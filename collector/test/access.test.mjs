@@ -145,7 +145,7 @@ test('with a password set, a guest is shown the form and nothing else until it g
   assert.doesNotMatch(form.body, /<script|TOKEN|tracker|agentville|watch|dashboard|farm|world/i, 'a form that says nothing of what is behind it: no name, no hint');
   assert.match(form.body, /<title>Sign in<\/title>/);
   assert.match(form.headers['content-security-policy'], /default-src 'none'/);
-  for (const path of ['/api/state', '/api/events', '/api/worlds', '/app.js', '/scene.js', '/live.js', '/colyseus.js', '/worlds/test', '/world/farm/', '/world/sdk/engine.js', '/base.css', '/brand.js', '/nothing-here', `/f/${'0'.repeat(32)}/world/farm/`]) {
+  for (const path of ['/api/state', '/api/events', '/api/worlds', '/app.js', '/scene.js', '/live.js', '/colyseus.js', '/worlds/test', '/world/farm/', '/world/legacy/engine.js', '/base.css', '/brand.js', '/nothing-here', `/f/${'0'.repeat(32)}/world/farm/`]) {
     const got = await ask('https', OWN, d.port, path);
     assert.equal(got.status, 401, path);
     assert.doesNotMatch(got.body, /agentville|tracker|world|farm/i, `${path}: the same form, whatever was asked for`);
@@ -173,8 +173,8 @@ test('with a password set, a guest is shown the form and nothing else until it g
   assert.match(frames, /^\/f\/[0-9a-f]{32}$/);
   const frame = await ask('https', OWN, d.port, `${frames}/world/farm/`);
   assert.equal(frame.status, 200, 'with no cookie at all');
-  assert.ok(frame.body.includes(`src="${frames}/world/sdk/engine.js"`) && frame.body.includes(`href="${frames}/base.css"`) && frame.body.includes(`src="${frames}/world/farm/world.js"`), 'and what it loads carries the pass in turn');
-  for (const path of ['/world/sdk/engine.js', '/base.css', '/brand.js', '/world/farm/world.js']) assert.equal((await ask('https', OWN, d.port, `${frames}${path}`)).status, 200, path);
+  assert.ok(frame.body.includes(`src="${frames}/world/legacy/engine.js"`) && frame.body.includes(`href="${frames}/base.css"`) && frame.body.includes(`src="${frames}/world/farm/world.js"`), 'and what it loads carries the pass in turn');
+  for (const path of ['/world/legacy/engine.js', '/base.css', '/brand.js', '/world/farm/world.js']) assert.equal((await ask('https', OWN, d.port, `${frames}${path}`)).status, 200, path);
   for (const path of ['/api/state', '/app.js', '/', '/colyseus.js']) assert.equal((await ask('https', OWN, d.port, `${frames}${path}`)).status, 401, `${path}: a frame's files only`);
   // the password is changed: the pass is void at once
   const kept = hashPassword('another one');

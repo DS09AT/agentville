@@ -1,4 +1,4 @@
-// The people kit (web/worlds/sdk/people.js): every part in every view is a 14 × 16 person; the farm's
+// The people kit (web/worlds/legacy/people.js): every part in every view is a 14 × 16 person; the farm's
 // farmer is the kit in farm clothes, row for row; a part the kit lacks is drawn as the default and noted.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ function load() {
   const canvas = () => { const g = { fillStyle: '', fillRect: (x, y, w, h) => drawn.push([g.fillStyle, x, y, w, h]), clearRect() {} }; return { width: 0, height: 0, getContext: () => g }; };
   const window = { Agentville: {} };
   const ctx = vm.createContext({ window, document: { createElement: () => canvas() }, console, Math, JSON, Map, Set });
-  vm.runInContext(`${web('worlds/sdk/pixel.js')}\n;${web('worlds/sdk/people.js')}\n;window.ink = ink;`, ctx);
+  vm.runInContext(`${web('worlds/legacy/pixel.js')}\n;${web('worlds/legacy/people.js')}\n;window.ink = ink;`, ctx);
   return { people: window.Agentville.people, ink: window.ink, drawn };
 }
 const farmLook = over => ({ hat: 'straw', hatColor: '#e9c46a', band: '#b5562f', hair: '#5a3a22', skin: '#e0a878', top: 'shirt', bottom: 'overalls', bottomColor: '#3c5a99', extra: 'none', ...over });

@@ -1,6 +1,6 @@
 // The world engine: it places each agent where its world says, walks it there, and draws the world's
 // pieces each frame; it keeps the name tags, speech bubbles, pop-ups, zoom, panning, the minimap, the
-// HUD's switches and a field's close-up. A world gives it hooks (docs/worlds.md, "Hooks"). Plain script
+// HUD's switches and a field's close-up. A world gives it hooks (docs/worlds-legacy.md, "Hooks"). Plain script
 // in a world's frame, after pixel.js. No dependencies.
 'use strict';
 
@@ -56,7 +56,7 @@ function defaultHud({ zoom = 1, skyMode = 'live', seasonMode = 'live', seasons =
  * state plus the world's engine `scene`, its live `season`, and its `iconImg(name)` (HTML for an icon),
  * `seasonIcon(level)` (the icon's name) and `seasonTip(mode)` (the season's tooltip). `words` are the
  * world's words and colours; any it leaves out are plain ones in its `place`, `agent` and `agents`
- * (docs/worlds.md, "panelHud"). The buttons keep their data-farm-* attributes: the engine's clicks read them.
+ * (docs/worlds-legacy.md, "panelHud"). The buttons keep their data-farm-* attributes: the engine's clicks read them.
  */
 function panelHud({ still, zoom = 1, saysOn = true, skyMode = 'live', seasonMode = 'live', seasons = true, seasonNames, follow = false, canFollow = false, restingHidden = null, bell = false, awake = false, nav = {}, panelOpen = true, animals = null, menuOpen = false,
   scene = { farmers: [] }, season = 'summer', iconImg = () => '', seasonIcon = s => s, seasonTip = () => '' }, words = {}) {
@@ -192,7 +192,7 @@ function holdHud(kept, now) {
 }
 
 const BOARD_TITLE = 'The notice board: what your projects remember';
-/** A world's hooks, with the engine's default for each one it leaves out (docs/worlds.md, "Hooks"). */
+/** A world's hooks, with the engine's default for each one it leaves out (docs/worlds-legacy.md, "Hooks"). */
 function withDefaults(h) {
   if (!(h.W > 0)) throw new Error('A world needs its width, W (in world pixels).');
   for (const need of ['slots', 'drawChar', 'bg']) if (typeof h[need] !== 'function') throw new Error(`A world needs a ${need}() hook.`);
@@ -247,7 +247,7 @@ window.Agentville.world = hooks => {
   let view = null, field = null;
   window.Agentville.raw({
     start({ el, opts, prefs }) {
-      th.attach?.({ prefs }); // the world's own settings, kept in the browser (docs/worlds.md, "Hooks")
+      th.attach?.({ prefs }); // the world's own settings, kept in the browser (docs/worlds-legacy.md, "Hooks")
       view = makePixelView(th, prefs);
       field = makeField(view);
       field.setOptions(opts);
@@ -287,7 +287,7 @@ const glide = (x0, y0, x1, y1, k) => (Math.abs(x1 - x0) + Math.abs(y1 - y0) > 12
 /**
  * What the collector says a world looks like, twenty times a second, played back a moment late (`delay`, seconds): of the two
  * states either side of the moment shown, everyone is drawn part of the way between, so they glide though the states come in
- * steps (docs/worlds.md, "One world for everyone"). A state: { t (the world's clock, s), b: bodies as [id, x, y, tx, ty, bits,
+ * steps (docs/worlds-legacy.md, "One world for everyone"). A state: { t (the world's clock, s), b: bodies as [id, x, y, tx, ty, bits,
  * zone], a: animals as [id, x, y, bits, pose, lift, den], says, taken, o (how many over each place's cap), sp (how many stand in
  * reserve), j (jobs under way), wl (the collector's time of day, ms), f (messages on their way, as [from, to, when they set off]),
  * w (what the world itself shares, as { key: JSON }, only what changed) }. `reach(state)` is called with each state as its
@@ -384,7 +384,7 @@ function makePixelView(th, prefs, { headless = false, onFx = null } = {}) {
   const parts = []; // particles on the farm now
   const flights = [], seenMail = new Set(); // carrier pigeons between farmers: { from, to, start }
   const addPart = p => { if (parts.length < 400) parts.push(p); };
-  // The world's animals (sdk/animals.js), when it has any: on unless switched off (docs/worlds.md, "Creatures").
+  // The world's animals (legacy/animals.js), when it has any: on unless switched off (docs/worlds-legacy.md, "Creatures").
   const animalWorld = typeof th.animals === 'function' ? th.animals() ?? [] : []; // the cast, or { cast, gags, play }
   const cast = Array.isArray(animalWorld) ? animalWorld : animalWorld.cast ?? [];
   const kit = cast.length && typeof makeAnimals === 'function' ? makeAnimals(animalWorld, { random: seededRandom(cast.length * 7919) }) : null;
@@ -402,14 +402,14 @@ function makePixelView(th, prefs, { headless = false, onFx = null } = {}) {
   let stillAt = 0; // when the animals were last drawn still: their lines keep time with motion off
   if (typeof window !== 'undefined' && window.Agentville) window.Agentville.animalsNow = () => (kit ? kit.list() : []); // read-only: where they are (the browser test)
   if (typeof window !== 'undefined' && window.Agentville) window.Agentville.freshLinesNow = () => (kit ? kit.freshLines() : []); // read-only: the helper's lines not said yet (the browser check)
-  const errands = typeof makeErrands === 'function' ? makeErrands() : null; // farmers borrowed by animals' gags and play (sdk/animals.js)
+  const errands = typeof makeErrands === 'function' ? makeErrands() : null; // farmers borrowed by animals' gags and play (legacy/animals.js)
   const jobs = typeof makeJobs === 'function' ? makeJobs({ outMax: JOBS_OUT, gap: JOB_GAP_S }) : null; // what you (or anyone watching) asked of an animal: who goes, in turn
   const spares = new Map(); // farmer id → { x, y }: one over its place's cap that could step out for a job, and where from
   const away = id => (following ? Boolean(bots.get(id)?.away) : Boolean(errands?.has(id) || jobs?.has(id))); // borrowed by a gag, or out on a job
   const idleSince = new Map(); // farmer id → when it was first seen idle (frame time): play waits for 3 minutes
   let nextPlay = 45;
   const xy = id => { const b = bots.get(id); return { x: b.x, y: b.y }; };
-  /** The farmers the animals' gags and play may borrow (sdk/animals.js): an errand each, given up when work comes. */
+  /** The farmers the animals' gags and play may borrow (legacy/animals.js): an errand each, given up when work comes. */
   const crew = {
     idle: () => scene.farmers.filter(f => f.state === 'idle' && !f.nap && bots.has(f.id) && !away(f.id)).map(f => ({ id: f.id, ...xy(f.id) })), // never one napping: it wakes by itself
     busy: () => scene.farmers.filter(f => f.state === 'working' && bots.has(f.id) && !away(f.id)).map(f => ({ id: f.id, ...xy(f.id) })),
@@ -1550,7 +1550,7 @@ function makePixelView(th, prefs, { headless = false, onFx = null } = {}) {
     update(next) { apply(next); },
     chatter(lines) { kit?.chatter(lines); },
     /**
-     * From the page, for a world the collector moves (docs/worlds.md, "One world for everyone"): { on } says whether it does
+     * From the page, for a world the collector moves (docs/worlds-legacy.md, "One world for everyone"): { on } says whether it does
      * (false: this page moves the world itself again), { s } is a state, { fx } something to show (hearts, crumbs), { re }
      * the answer to what was asked of an animal ({ ok, wait, why }).
      */

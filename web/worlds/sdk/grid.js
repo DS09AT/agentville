@@ -1,6 +1,6 @@
 // The repo grid: which bed each repo's field has. A plain script with no DOM in it, so the collector runs the very
 // same code (collector/derive/beds.mjs) to give every browser the same beds; the engine lays the fields out on it
-// (docs/worlds.md, "Hooks": grid). Only makeGrid and projectOf are global.
+// (docs/worlds-legacy.md, "Hooks": grid). Only makeGrid and projectOf are global.
 'use strict';
 
 // A project: the folder holding sibling repos. The scene says which (a repo's `project`); a field

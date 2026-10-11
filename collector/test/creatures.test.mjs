@@ -1,4 +1,4 @@
-// The creature library (web/worlds/sdk/creatures.js), drawn on a recording stand-in canvas: every
+// The creature library (web/worlds/legacy/creatures.js), drawn on a recording stand-in canvas: every
 // creature, in every pose, stays inside its own box and is mirrored when it faces left.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ function load() {
   const window = { Agentville: {} };
   const sandbox = { window, console, Math, Date, JSON, Map, Set };
   vm.createContext(sandbox);
-  vm.runInContext(`${web('worlds/sdk/pixel.js')}\n;${web('worlds/sdk/creatures.js')}\n;PXG.ctx = __ctx; window.lib = { CREATURES, creaturePainter };`, Object.assign(sandbox, { __ctx: ctx }));
+  vm.runInContext(`${web('worlds/legacy/pixel.js')}\n;${web('worlds/legacy/creatures.js')}\n;PXG.ctx = __ctx; window.lib = { CREATURES, creaturePainter };`, Object.assign(sandbox, { __ctx: ctx }));
   return { ...window.lib, rects };
 }
 const KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'pig', 'sheep', 'horse', 'goose', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'unicorn', 'robodog', 'vacuum'];

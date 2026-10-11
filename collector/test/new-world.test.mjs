@@ -23,7 +23,9 @@ test('copies the starter, with the name in world.json, and the world lists witho
     const j = JSON.parse(readFileSync(join(dir, 'world.json'), 'utf8'));
     assert.equal(j.name, 'My bakery');
     assert.equal(checkWorldJson(j), null);
-    assert.equal(readFileSync(join(dir, 'world.js'), 'utf8'), readFileSync(join(starterDir, 'world.js'), 'utf8'));
+    assert.equal(j.api, 2, 'a new world is a world of api 2');
+    for (const f of ['sim.js', 'view.js']) assert.equal(readFileSync(join(dir, f), 'utf8'), readFileSync(join(starterDir, f), 'utf8'), f);
+    assert.equal(readFileSync(join(dir, 'world.json'), 'utf8'), readFileSync(join(starterDir, 'world.json'), 'utf8').replace('"name": "Starter"', '"name": "My bakery"'), 'world.json keeps its layout: only the name is put in');
     const listed = makeWorlds({ builtinDir: join(root, 'none'), userDir: worldsDir }).list().find(w => w.key === 'u/my-bakery');
     assert.ok(listed && !listed.error, listed?.error);
   } finally { rmSync(root, { recursive: true, force: true }); }

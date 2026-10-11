@@ -1,4 +1,4 @@
-// Loads the SDK (web/worlds/sdk/pixel.js, engine.js) in a vm, with a stand-in bridge: the engine with
+// Loads the SDK (web/worlds/legacy/pixel.js, engine.js) in a vm, with a stand-in bridge: the engine with
 // a world of its own, the grid, the defaults, and the engine's scene.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const web = f => readFileSync(fileURLToPath(new URL(`../../web/${f}`, import.meta.url)), 'utf8');
-const code = ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js'].map(web).join('\n;\n');
+const code = ['scene.js', 'worlds/legacy/pixel.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'].map(web).join('\n;\n');
 function load() {
   const window = { Agentville: { raw: h => { window.registered = h; } } };
   vm.runInNewContext(`${code}\n;window.sdk = { makeGrid, withDefaults, engineScene, makePixelView, ACTIVE };`, { window, console, Math, Date, JSON, Map, Set });
@@ -90,7 +90,7 @@ test("the frame's scripts, loaded one by one in one context, register the farm w
   const document = { addEventListener: (t, fn) => { (listeners[t] ??= []).push(fn); }, createElement: el, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], documentElement: { dataset: {}, style: {} }, body: el(), readyState: 'loading', hidden: false };
   Object.assign(window, { window, document, parent, console, Math, Date, JSON, Map, Set, Intl, URL });
   const ctx = vm.createContext(window);
-  for (const f of ['worlds/sdk/bridge.js', 'brand.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js', 'worlds/farm/world.js']) vm.runInContext(web(f), ctx, { filename: f });
+  for (const f of ['worlds/sdk/bridge.js', 'brand.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js', 'worlds/farm/world.js']) vm.runInContext(web(f), ctx, { filename: f });
   assert.equal(typeof window.AgentvilleFarm.layoutFor, 'function', 'the farm exported its helpers');
   assert.equal(vm.runInContext("legFrame({ walk: true }) + pixelOrigin({ x: 9, y: 9, walk: true }, 16).length", ctx), 'a2', 'the kit draws a walker without a name the farm hides');
   for (const fn of listeners.DOMContentLoaded ?? []) fn();

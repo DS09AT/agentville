@@ -169,7 +169,8 @@ your network.
 ### Your own worlds
 
 - `agentville new-world <name>` creates a world from the starter in `~/.agentville/worlds/<name>/`.
-  How to build one: [worlds.md](worlds.md).
+  One file, `world.json`, describes it, and it is drawn in 3D. How to make one: [worlds.md](worlds.md).
+- A world made for the older pixel engine keeps working ([worlds-legacy.md](worlds-legacy.md)).
 - **Privacy mode:** a world from your folder gets numbers instead of names (`repo 1`, `agent 1`)
   and no text or paths. Tick **Can see what agents say** in the list to show it everything, per
   browser. Do that only for a world you trust.
@@ -269,6 +270,36 @@ opens the full legend.
 | Manuals shelf | Each project's CLAUDE.md and memory |
 | Loading dock | Pull requests |
 
+### The tennis club
+
+![The tennis club](tennis.png)
+
+The same data in 3D: every agent a player, every repo a court. Every world drawn in 3D, yours too,
+shows agents the same way. **Help** in the Menu lists every sign.
+
+| You see | It means |
+|---|---|
+| A player at reception, waving, with a red **!** or **?** | Waiting on you: a permission or a question |
+| A player at reception with an amber **✓** | Its turn ended (a **?**: it asked you something) |
+| A player on a court, with a sign over it | Working in that repo. The sign is its step: ✏️ editing, 📖 reading, 🔍 searching, 🧪 tests, 🔨 build, 🔖 commit, 🚀 deploy |
+| 💭 | Thinking, or between two steps |
+| The bar in a name tag | Context used |
+| **Compacted** | Its conversation was compacted |
+| Small orbs circling a player | Subagents |
+| A letter in the air | One session messaging another |
+| A player on the terrace, 💤 / grey, **…** | Idle or napping / stale |
+| Signs beside a court's name: ✓ ✗ ◌ / ⚠ / ●3 ↑2 ↓1 / #2 | Last deploy passed, failed, running / two agents writing the repo / uncommitted, unpushed, behind / open pull requests |
+| The scoreboard / the floodlight / the yellow line | Last deploy / someone works there / context used |
+| **Merged #12** | A pull request was merged |
+
+**Controls.** The panel (top left) shows cost, counts and gauges; click a count to open its first
+agent. The **Menu** (top right) holds the dashboard's buttons and the switches: Follow, Resting,
+Bubbles, Sky, Motion, Bell, Screen, Help and zoom. ⌘/Ctrl + scroll or a pinch zooms, drag moves.
+
+**Clicks.** A player opens in the sidebar. A court or its name shows the files agents touched
+there. A speech bubble opens the conversation. The clubhouse starts or resumes a session; the
+notice board shows each project's CLAUDE.md and memory.
+
 ## Notifications
 
 - **System notifications** come from the collector: an agent needs you, finished, collides with
@@ -309,6 +340,7 @@ until you run `/reload-plugins` in it.
 | The bell is silent | Click the page once and allow notifications |
 | My world shows `repo 1`, `agent 1` | It is in privacy mode: tick **Can see what agents say** |
 | A world "didn't start" | Run `agentville check-world <name>` to see the error |
+| A world says it "is drawn with WebGL" | Turn on hardware acceleration in the browser's settings, or pick the farm |
 | Two browsers show different animals | Sharing is off (no "online" chip). Run `npm install` in the Agentville folder, then `agentville restart` |
 | The animals say nothing new | Tick **Animal lines** in ✨ Helper; a session with the mod must be open |
 
@@ -322,3 +354,4 @@ until you run `/reload-plugins` in it.
   and a console window flashes at login.
 - On Linux, ending a session does not close a tmux session that holds more than Claude.
 - ⑂ Fork and ↺ Restore rely on Claude Code options that a Claude Code update could change.
+- Worlds drawn in 3D (the tennis club, and worlds you make) need WebGL and have no animals.

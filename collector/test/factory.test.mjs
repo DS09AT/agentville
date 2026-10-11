@@ -46,7 +46,7 @@ function load({ wrap = null } = {}) {
   const dom = stubDom();
   const window = { Agentville: { raw: h => { window.registered = h; } } };
   const ctx = vm.createContext({ window, document: dom.document, console, Math, Date, JSON, Map, Set, Intl, ResizeObserver: class { observe() {} disconnect() {} }, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {}, Image: class {}, Path2D: class {} });
-  for (const f of ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js']) vm.runInContext(web(f), ctx, { filename: f });
+  for (const f of ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js']) vm.runInContext(web(f), ctx, { filename: f });
   const engineWorld = window.Agentville.world; // the hooks the factory gives, kept for the tests
   window.Agentville.world = hooks => { window.hooks = hooks; wrap?.(hooks); return engineWorld(hooks); };
   vm.runInContext(web('worlds/factory/world.js'), ctx, { filename: 'worlds/factory/world.js' });
@@ -1395,7 +1395,7 @@ test("messages: a capsule goes from one robot into its bay's tube outlet, throug
   assert.ok(near(capsule(a, desk, 0.9999), [desk.x, desk.y - 8], 3), 'a robot away from the bays gets one too (at your desk)');
 });
 
-/* ---------- the creatures: a robot dog, a robot vacuum and a cat on the conveyor (sdk/animals.js) ---------- */
+/* ---------- the creatures: a robot dog, a robot vacuum and a cat on the conveyor (legacy/animals.js) ---------- */
 
 /** The factory with n repos' bays, and the animals kit from its frame; `animals(seed)` is a fresh kit placed on its floor, as the engine places it. */
 function creatureFloor(n = 3) {

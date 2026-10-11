@@ -1,6 +1,6 @@
 // The robot factory: the second built-in world. Every agent is a robot, put together from a head, a body in
 // its agent's colour and a drive, picked by its id; every repo is an assembly bay. A bright, friendly
-// workshop on the shared engine (web/worlds/sdk/engine.js), like the farm, in the frame's shared scope
+// workshop on the shared engine (web/worlds/legacy/engine.js), like the farm, in the frame's shared scope
 // (pixel.js, people.js, props.js, creatures.js, animals.js, engine.js), so it keeps its own names inside
 // this function. Classic script, no dependencies, one file (the frame loads only world.js).
 (() => {
@@ -1206,7 +1206,7 @@
     else { px(x - 1, y - 2, 3, 5, '#ffffff'); px(x - 1, y - 2, 3, 1, DARK); px(x - 1, y + 2, 3, 1, DARK); px(x - 1, y, 3, 1, '#f08a24'); }
   }
 
-  /* ---------- the creatures: a robot dog, a robot vacuum and a cat on the conveyor (sdk/animals.js) ---------- */
+  /* ---------- the creatures: a robot dog, a robot vacuum and a cat on the conveyor (legacy/animals.js) ---------- */
 
   // Just for fun, never data. The dog and the vacuum go about the walkway, the left side and the conveyor: never
   // into the bays (inside the safety line), the queue at your desk or the AGVs' rank, nor through the left side's

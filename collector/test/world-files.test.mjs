@@ -11,7 +11,8 @@ const plain = v => JSON.parse(JSON.stringify(v));
 function builtins() {
   const dir = mkdtempSync(join(tmpdir(), 'worlds-'));
   mkdirSync(join(dir, 'sdk'));
-  writeFileSync(join(dir, 'sdk', 'frame.html'), '<title>__TITLE__</title><script src="__BASE__world.js"></script>');
+  mkdirSync(join(dir, 'legacy'));
+  writeFileSync(join(dir, 'legacy', 'frame.html'), '<title>__TITLE__</title><script src="__BASE__world.js"></script>');
   writeFileSync(join(dir, 'sdk', 'bridge.js'), '1');
   mkdirSync(join(dir, 'farm', 'art'), { recursive: true });
   writeFileSync(join(dir, 'farm', 'world.json'), JSON.stringify({ name: 'The <farm>', icon: '🌾', api: 1 }));
@@ -61,8 +62,8 @@ test('the frame runs sandboxed, its scripts from the dashboard only, and can rea
 });
 
 test("the frame page loads the SDK's and the world's scripts in CORS mode, so their errors say what and where", () => {
-  const html = readFileSync(fileURLToPath(new URL('../../web/worlds/sdk/frame.html', import.meta.url)), 'utf8');
-  const sdk = ['/world/sdk/bridge.js', '/world/sdk/pixel.js', '/world/sdk/people.js', '/world/sdk/props.js', '/world/sdk/creatures.js', '/world/sdk/animals.js', '/world/sdk/grid.js', '/world/sdk/engine.js', '__BASE__world.js'];
+  const html = readFileSync(fileURLToPath(new URL('../../web/worlds/legacy/frame.html', import.meta.url)), 'utf8');
+  const sdk = ['/world/sdk/bridge.js', '/world/legacy/pixel.js', '/world/legacy/people.js', '/world/legacy/props.js', '/world/legacy/creatures.js', '/world/legacy/animals.js', '/world/sdk/grid.js', '/world/legacy/engine.js', '__BASE__world.js'];
   for (const src of sdk) {
     assert.match(html, new RegExp(`<script src="${src.replace(/[.]/g, '\\.')}" crossorigin="anonymous"></script>`), src);
   }
@@ -81,7 +82,7 @@ function users() {
   writeFileSync(join(dir, 'space', 'preview.png'), 'png');
   world('farm', { name: 'My farm', api: 1 });
   world('broken', '{ nope');
-  world('newer', { name: 'Newer', api: 2 });
+  world('newer', { name: 'Newer', api: 3 });
   world('nojs', { name: 'No script', api: 1 }, null);
   world('Bad_Name', { name: 'Bad', api: 1 });
   world('linked', { name: 'Linked', api: 1 }, null);
@@ -101,7 +102,7 @@ test('your worlds are listed after the built-in ones, each with what is wrong wi
   const w = makeWorlds({ builtinDir: builtins(), userDir: users() });
   const all = w.list(), byKey = Object.fromEntries(all.map(x => [x.key ?? x.name, x]));
   assert.deepEqual(all.map(x => x.key ?? x.name), ['farm', 'Bad_Name', 'u/broken', 'u/escape', 'u/farm', 'u/linked', 'u/linkjson', 'u/newer', 'u/nojs', 'u/space']);
-  assert.deepEqual(plain(byKey['u/space']), { key: 'u/space', builtIn: false, error: null, name: 'Space station', icon: '🚀', description: 'Astronauts', nouns: {}, taken: [], preview: '/world/u/space/preview.png' });
+  assert.deepEqual(plain(byKey['u/space']), { key: 'u/space', builtIn: false, error: null, api: 1, name: 'Space station', icon: '🚀', description: 'Astronauts', nouns: {}, taken: [], preview: '/world/u/space/preview.png' });
   assert.equal(byKey.farm.builtIn, true);
   assert.equal(byKey['u/farm'].name, 'My farm', 'yours may share a name; it never replaces the built-in one');
   assert.match(byKey['u/broken'].error, /can't be read/);
@@ -252,13 +253,13 @@ test('a change to a world is told once per burst, by its key; the SDK as "*"', a
   assert.deepEqual(seen.sort(), ['*', 'u/space']);
 });
 
-test('the starter world can be framed and served, but is never in the list', () => {
+test('LEGACY: the starter of the pixel engine can be framed and served, but is never in the list', () => {
   const builtinDir = fileURLToPath(new URL('../../web/worlds', import.meta.url));
   const w = makeWorlds({ builtinDir });
-  assert.ok(!w.list().some(x => x.key === 'starter'), 'not listed');
-  assert.match(w.frame('starter') ?? '', /\/world\/starter\/world\.js/);
-  assert.ok(w.file('starter', 'world.js').real, 'its files are served');
-  assert.equal(w.info('starter')?.name, 'Starter');
+  assert.ok(!w.list().some(x => x.key === 'legacy-starter'), 'not listed');
+  assert.match(w.frame('legacy-starter') ?? '', /\/world\/legacy-starter\/world\.js/);
+  assert.ok(w.file('legacy-starter', 'world.js').real, 'its files are served');
+  assert.equal(w.info('legacy-starter')?.name, 'Starter');
   assert.equal(w.dirOf('test'), null, 'test stays reserved');
 });
 
