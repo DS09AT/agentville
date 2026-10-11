@@ -5,16 +5,27 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    # The tracker is macOS-only (launchd, ps, osascript); the runner also has Chrome for the browser test.
-    runs-on: macos-latest
+    runs-on: ubicloud-standard-2-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Dependencies
+        run: npm ci
       - name: Collector and dashboard
         run: npm test
+      # Ubuntu 24.04 keeps unprivileged user namespaces from Chrome's sandbox unless this is switched off.
+      - name: Let headless Chrome use its sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Dashboard in a browser
         run: npm run test:ui
