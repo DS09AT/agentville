@@ -44,8 +44,11 @@ function overviewHtml(a) {
     ${a.kind === 'codex' ? '' : `<a class="act" href="/agent/${encodeURIComponent(a.id)}/transcript" target="_blank" rel="noopener">Full transcript</a>`}</div>`;
 }
 
+/** The page from the newest snapshot; the keyboard stays where it was (core.js, keepFocus). */
 function render() {
-  if (!snap) return;
+  if (snap) keepFocus(draw);
+}
+function draw() {
   syncSlots(snap.agents);
   $('kpis').innerHTML = kpisHtml();
   $('errors').innerHTML = Object.entries(snap.sources).filter(([, s]) => !s.ok)

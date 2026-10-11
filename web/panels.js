@@ -766,6 +766,7 @@ async function sendMessage(agentId, button, quick = null, { now = false } = {}) 
     bad: !r.ok,
     text: r.ok ? (r.held ? `Waiting for ${agent?.name ?? 'the session'} to finish${extra}: it goes out when this turn ends (remove or edit it below).` : `✓ Sent to ${agent?.name ?? 'the session'}${extra}.`) : `Not sent: ${r.error}`,
   });
+  if (r.ok && document.activeElement?.matches?.('#msg-text, #convo-msg-text')) document.activeElement.blur(); // sent: out of the box, so the page goes on updating (it waits while you are in one)
   render();
   return Boolean(r.ok);
 }

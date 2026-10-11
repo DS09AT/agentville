@@ -42,6 +42,34 @@ const groupHead = (key, title, count, extra = '') => {
 };
 
 const $ = id => document.getElementById(id);
+
+/** How to find again the element the keyboard is on, once it has been written anew: by its id, else by its tag and data attributes among its like under the nearest element with an id. Null when it can't be told apart. */
+function focusMark(el) {
+  if (!el?.isConnected || el === document.body) return null;
+  let caret = null;
+  try { if (el.matches('input, textarea') && el.selectionStart != null) caret = [el.selectionStart, el.selectionEnd, el.selectionDirection, el.scrollTop]; } catch { /* a field with no selection */ }
+  if (el.id) return { find: () => document.getElementById(el.id), caret };
+  const home = el.parentElement?.closest('[id]');
+  const like = el.tagName.toLowerCase() + [...el.attributes].filter(a => a.name.startsWith('data-') && a.name !== 'data-tip').map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
+  if (!home || like === el.tagName.toLowerCase()) return null;
+  const nth = [...home.querySelectorAll(like)].indexOf(el);
+  return { find: () => document.getElementById(home.id)?.querySelectorAll(like)[nth] ?? null, caret };
+}
+/**
+ * Runs `draw`, which writes parts of the page anew, and leaves the keyboard where it was. Writing an element anew
+ * takes the keyboard from it, and the page is written anew every few seconds: without this, a button you had
+ * tabbed to, or a box you were typing in when something else finished, would lose it. A draw that moves the
+ * keyboard itself, or takes it away on purpose before it starts, has its way.
+ */
+function keepFocus(draw) {
+  const was = document.activeElement, mark = focusMark(was);
+  draw();
+  if (!mark || was.isConnected || (document.activeElement && document.activeElement !== document.body)) return;
+  const el = mark.find();
+  if (!el || el.disabled) return;
+  el.focus({ preventScroll: true });
+  if (mark.caret) { try { el.setSelectionRange(mark.caret[0], mark.caret[1], mark.caret[2]); el.scrollTop = mark.caret[3]; } catch { /* its text is shorter now */ } }
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clock = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const hhmm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

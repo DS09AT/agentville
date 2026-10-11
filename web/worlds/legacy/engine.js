@@ -572,6 +572,13 @@ function makePixelView(th, prefs, { headless = false, onFx = null } = {}) {
     setTimeout(() => el.remove(), 1700);
   }
   function renderHud() {
+    // drawn anew, the keyboard stays on the button it was on (found again by its data attributes)
+    const on = hudEl?.contains?.(document.activeElement) ? document.activeElement : null;
+    const like = on && [...on.attributes].filter(a => a.name.startsWith('data-')).map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
+    drawHud();
+    if (like && !on.isConnected) hudEl.querySelector(like)?.focus?.({ preventScroll: true });
+  }
+  function drawHud() {
     if (hudEl) hudEl.innerHTML = th.hud({ still, zoom, saysOn, skyMode, seasonMode, seasons: th.hasSeasons, follow, canFollow: Boolean(selectedId && bots.has(selectedId)), restingHidden: restingShown ? null : scene.farmers.filter(resting).length, bell: bellOn, awake: prefs.get('awake') === 'on', nav: opts.navState?.() ?? {}, panelOpen, animals: kit ? animalsOn : null, menuOpen: hudMenu, seasonNames: th.seasonNames });
     placeMini();
     // a panel that outgrew what was kept for it: the farm moves clear of it on the next frame, not in

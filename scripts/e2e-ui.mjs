@@ -384,6 +384,8 @@ try {
     for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await fjs(expr)) return true;
     return false;
   };
+  /** Puts the keyboard in the page's field `id` and answers once it is there: a key sent before that goes nowhere. */
+  const focusOn = id => until(`(f => Boolean(f) && (document.activeElement === f || (f.focus(), false)))(document.getElementById(${JSON.stringify(id)}))`, 4000);
   /** Where the world's frame sits in the page, for real mouse events (which take the page's coordinates). */
   const frameAt = async () => JSON.parse(await js("JSON.stringify((r => [r.left, r.top])(document.querySelector('#farm .world-frame').getBoundingClientRect()))"));
   await send('Page.enable');
@@ -456,7 +458,7 @@ try {
   await js("document.getElementById('convo').close()");
   check(await until("!document.getElementById('convo').open && !CSS.highlights.has('convo-hit')"), 'closing it clears the highlights');
   const key = (type, mods = 0) => send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: mods, ...(type === 'keyDown' ? { text: '\r' } : {}) }); // a real key press carries its text
-  await js("document.getElementById('msg-text').focus()");
+  await focusOn('msg-text');
   await send('Input.insertText', { text: 'First line' });
   await key('keyDown', 8); await key('keyUp', 8); // Shift+Enter
   await send('Input.insertText', { text: 'second line' });
@@ -470,24 +472,28 @@ try {
   check(received[0] === 'First line\nsecond line', `⚡ Send now sends it (got ${JSON.stringify(received)})`);
   check(await until("document.getElementById('msg-text')?.value === ''"), 'the message box clears once it is sent');
   const arrow = async (name, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code }); };
-  await js("document.getElementById('msg-text').focus()"); // sending leaves the box (so the page can update): back in it
+  await focusOn('msg-text'); // sending leaves the box (so the page can update): back in it
   await arrow('ArrowUp', 38);
   check(await until("document.getElementById('msg-text')?.value === 'Plan the next crop'"), `↑ in the message box brings back what you said to the session (got ${JSON.stringify(await js("document.getElementById('msg-text')?.value"))})`);
   await arrow('ArrowDown', 40);
   check(await until("document.getElementById('msg-text')?.value === ''"), '↓ goes back to what you were typing');
+  // The page is written anew every few seconds and whenever something finishes: the keyboard stays where it was.
+  check(await js("(() => { const box = document.getElementById('note-text'); box.focus(); box.value = 'abc'; box.dispatchEvent(new Event('input', { bubbles: true })); box.setSelectionRange(1, 2); render(); const now = document.getElementById('note-text'), kept = now !== box && document.activeElement === now && now.selectionStart === 1 && now.selectionEnd === 2; now.value = ''; now.dispatchEvent(new Event('input', { bubbles: true })); return kept; })()"), 'the page drawn anew, the box you were typing in still has the keyboard, and your place in it');
+  check(await js("(() => { const b = document.querySelector('button[data-group]'); b.focus(); render(); const now = document.activeElement; return now !== b && now?.dataset.group === b.dataset.group; })()"), 'and so does a button with no name of its own, found again by what it is for');
+  check(await js("(() => { document.getElementById('note-text').focus(); document.activeElement.blur(); render(); return document.activeElement === document.body; })()"), 'a box left on purpose is not gone back to');
   // Notes: written for later, used into the message box, sent from there; Send now; a fork gets a copy
-  await js("document.getElementById('note-text').focus()");
+  await focusOn('note-text');
   await send('Input.insertText', { text: 'Ask about the frost' });
   await key('keyDown'); await key('keyUp');
   check(await until("[...document.querySelectorAll('#center-body .note-text')].some(b => b.textContent === 'Ask about the frost') && document.getElementById('note-text')?.value === ''"), 'a note is added with Enter, and its box empties for the next');
   await js("document.querySelector('#center-body [data-note-use]').click()");
   check(await until("document.getElementById('msg-text')?.value === 'Ask about the frost'"), '↳ Use puts the note in the message box');
-  await js("document.getElementById('msg-text').focus()");
+  await focusOn('msg-text');
   await key('keyDown'); await key('keyUp');
   await sendHeldNow();
   for (let i = 0; i < 40 && received.at(-1) !== 'Ask about the frost'; i++) await sleep(150);
   check(received.at(-1) === 'Ask about the frost' && await until("!!document.querySelector('#center-body .note.used')"), `sent from the message box, the note is crossed out as used (got ${JSON.stringify(received.at(-1))})`);
-  await js("document.getElementById('note-text').focus()");
+  await focusOn('note-text');
   await send('Input.insertText', { text: 'Water the beans' });
   await key('keyDown'); await key('keyUp');
   await until("!!document.querySelector('#center-body .note:not(.used) [data-note-send]')");
@@ -524,7 +530,7 @@ try {
   check(await until("!document.getElementById('restore-dlg').open"), 'Cancel leaves it as it is');
   await js("document.querySelector('#center-body [data-convo=\"ui-asker\"]').click()");
   await until("!!document.getElementById('convo-msg-text')");
-  await js("document.getElementById('convo-msg-text').focus()"); // before the conversation has loaded
+  await focusOn('convo-msg-text'); // before the conversation has loaded
   await until("/messages since/.test(document.getElementById('convo-sub').textContent)");
   check(await js("document.activeElement?.id === 'convo-msg-text'"), 'the reply box keeps the focus once the conversation has loaded');
   await send('Input.insertText', { text: 'Sent from the conversation dialog' });
@@ -845,6 +851,8 @@ try {
   check(await until("localStorage.getItem('tracker-awake') === 'off'") && await funtil("/Screen: may sleep/.test(document.querySelector('[data-farm-awake]').textContent)"), 'and lets it sleep again');
   await fjs("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   check(await funtil("document.querySelector('.px-menu').hidden && document.activeElement?.hasAttribute('data-farm-menu')"), 'Esc shuts it, back on its button');
+  await fjs("document.querySelector('[data-farm-menu]').drawnBefore = true");
+  check(await funtil("(b => !b.drawnBefore && document.activeElement === b)(document.querySelector('[data-farm-menu]'))", 15_000), "and stays there when the farm's HUD is drawn anew, as it is every few seconds");
   await sleep(300); // the page takes one press of the top bar's buttons a quarter second
   await fjs("document.querySelector('[data-farm-menu]').click()");
   await fjs("document.querySelector('[data-farm-nav=\"broadcast\"]').click()");
@@ -1024,6 +1032,7 @@ try {
   check(await js("(p => { const r = p.getBoundingClientRect(), s = document.getElementById('farm-sidebar').getBoundingClientRect(); return r.left >= s.left - 1 && r.right <= s.right + 1 && r.bottom <= s.bottom + 1; })(document.querySelector('#fs-pop .fs-pop'))"), 'the picker fits inside the sidebar');
   await js("document.getElementById('fs-find').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   check(await until("!document.querySelector('#fs-pop .fs-pop') && document.activeElement?.id === 'fs-switch'"), 'Esc closes it, back on the name');
+  check(await js("(() => { const b = document.getElementById('fs-switch'); b.focus(); render(); const now = document.getElementById('fs-switch'); return now !== b && document.activeElement === now; })()"), 'and stays there when the sidebar is drawn anew');
   await js("document.getElementById('fs-session').click()");
   check(await until("!!document.querySelector('#fs-pop [data-end-session], #fs-pop #fs-list')"), 'Session opens its menu');
   await js("document.getElementById('tab-activity').click()");
