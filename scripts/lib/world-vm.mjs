@@ -30,7 +30,7 @@ const NUMBERS = new Set(['offsetWidth', 'offsetHeight', 'clientWidth', 'clientHe
 // Copies: check-world.test.mjs fails when they drift.
 const FX = ['hearts', 'crumbs', 'dust', 'sparkle'];
 const POSES = ['stand', 'walk', 'run', 'eat', 'sleep', 'happy', 'yawn', 'startled', 'stretch', 'roll'];
-const POSES_OF = { duck: [...POSES, 'swim', 'dabble', 'slide'], ostrich: [...POSES, 'hide'] };
+const POSES_OF = { duck: [...POSES, 'swim', 'dabble', 'slide'], ostrich: [...POSES, 'hide'], goose: [...POSES, 'hide'] };
 const LOOKS_OF = { duck: ['drake', 'hen', 'duckling'], cat: ['grey', 'black'] };
 const LINE_MAX = 40, COUNT_MAX = 12, ACTIONS = [2, 4];
 // The habits a creature may have, and what it may do when something happens (animals.js, HABITS and react).

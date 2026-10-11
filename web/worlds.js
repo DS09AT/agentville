@@ -11,11 +11,15 @@
   const PREF_NAME = /^[a-z][a-z0-9-]{0,31}$/;
   // The creature library's kinds (sdk/creatures.js) and the situations the helper writes for (collector/sources/lines.mjs):
   // a world's cast names only these. Copies: worlds.test.mjs fails when they drift.
-  const CREATURE_KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'robodog', 'vacuum'];
+  const CREATURE_KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'pig', 'sheep', 'horse', 'goose', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'robodog', 'vacuum'];
   const SITUATIONS = ['idle', 'deployFailed', 'deployOk', 'harvest', 'merged', 'arrive'];
   // The built-in worlds the helper's lines are written for by name (the mod has its own words for each): a cast names
   // its world only if it is one of these, and not private. Copy: worlds.test.mjs fails when it drifts.
   const LINE_WORLDS = ['farm', 'factory'];
+  // The worlds the collector moves for everyone who watches (collector/live.mjs, LIVE_WORLDS): the page joins such a world's room (web/live.js).
+  const LIVE_WORLDS = ['farm', 'factory'];
+  const OWN_WORLD = /^u\/[a-z0-9][a-z0-9-]{0,39}$/; // a world from your folder: moved by the collector too, in a process of its own (unless it draws itself)
+  const ANIMAL_ID = /^[a-z]{1,16}-\d{1,3}$/, RID = /^[\w-]{1,40}$/;
   const CONTROL = /[\x00-\x1f\x7f-\x9f]/g;
   const PREF_MAX = 16_384, DIARY_MAX = 20, IN_FLIGHT_MAX = 4, ID_MAX = 200, PATH_MAX = 4096;
   // A world keeps at most 64 settings, 64 KB in all (names and values, what is saved already included):
@@ -24,8 +28,8 @@
   // What a world can make the page do, each at most once a quarter second: the first at once, the rest
   // dropped (a flood of setup dialogs, chimes or file reads costs a click's worth). The bell and motion
   // are settings, so the newest of those waits its turn instead, and the page and the world agree.
-  const ACTIONS = new Set(['pick', 'openDoc', 'openLink', 'startSession', 'showRepos', 'nav', 'bell', 'motion']);
-  const NEWEST_WINS = new Set(['bell', 'motion']);
+  const ACTIONS = new Set(['pick', 'openDoc', 'openLink', 'startSession', 'showRepos', 'nav', 'bell', 'awake', 'motion']);
+  const NEWEST_WINS = new Set(['bell', 'awake', 'motion']);
   const GAP_MS = 250;
   const DROPPED_MAX = 20, ERRORS_MAX = 50; // kinds of dropped message, and world errors, written to the console
   // The farm's settings from before worlds: copied once into its own (tracker-world:farm:…).
@@ -101,6 +105,7 @@
       case 'openLink': return short(m.url, 2048) && m.url.startsWith('https://github.com/') ? { kind: 'openLink', url: m.url } : null;
       case 'nav': return NAV.has(m.what) ? { kind: 'nav', what: m.what } : null;
       case 'bell': return typeof m.on === 'boolean' ? { kind: 'bell', on: m.on } : null;
+      case 'awake': return typeof m.on === 'boolean' ? { kind: 'awake', on: m.on } : null;
       case 'motion': return typeof m.still === 'boolean' ? { kind: 'motion', still: m.still } : null;
       case 'store':
         return typeof m.key === 'string' && PREF_NAME.test(m.key) && m.key !== 'migrated' && typeof m.value === 'string' && m.value.length <= PREF_MAX
@@ -120,6 +125,10 @@
         if (m.kind === 'repoTouched' && repos.some(r => r.key === m.repo)) return { kind: 'request', id: m.id, what: 'repoTouched', repo: m.repo };
         return refuse('That is not on the dashboard.');
       }
+      case 'act': // something asked of an animal, in a world the collector moves: which one, which of its actions, who should go (an agent on the dashboard, or whoever is free)
+        return typeof m.animal === 'string' && ANIMAL_ID.test(m.animal) && Number.isInteger(m.act) && m.act >= 0 && m.act <= 7 && typeof m.rid === 'string' && RID.test(m.rid)
+          ? { kind: 'act', animal: m.animal, act: m.act, rid: m.rid, doer: agent(m.doer) ? m.doer : null } : null;
+      case 'touch': return typeof m.animal === 'string' && ANIMAL_ID.test(m.animal) ? { kind: 'touch', animal: m.animal } : null; // a shy visitor, touched
       case 'cast': { // the world's animals, for the helper's lines (kinds from the library, names only)
         if (!Array.isArray(m.animals) || m.animals.length > 12) return null;
         const out = new Map();
@@ -200,10 +209,71 @@
   const dropped = new Set(), errorsSeen = new Set();
   let storeRefused = false;
   let hidden = false; // the world is out of sight (the list view is showing): it can't make the page do anything
+  // A built-in world on the dashboard is moved by the collector, for everyone watching alike; the test page's (made-up data, kept in memory) moves itself.
+  let drawsItself = false; // the frame's world registered with Agentville.raw: there is no engine in it to tell where anyone is
+  const liveFor = key => Boolean(window.TrackerLive) && (LIVE_WORLDS.includes(key) || (OWN_WORLD.test(key) && !drawsItself)) && !opts.memory;
   const settingsNow = () => {
     const nav = opts.navState?.() ?? {};
-    return { still: Boolean(opts.still), theme: nav.theme ?? 'auto', nav, bell: store.get('tracker-bell') === 'on' };
+    return { still: Boolean(opts.still), theme: nav.theme ?? 'auto', nav, bell: store.get('tracker-bell') === 'on', awake: opts.isAwake?.() === true, sim: liveFor(world) };
   };
+  /** Joins the world's room: its states, and what there is to show, go on to the frame; with no room, the frame is told to move its world itself. */
+  function joinLive() {
+    const mine = generation, now = fn => (...args) => { if (mine === generation) fn(...args); };
+    window.TrackerLive.join(world, token ?? '', {
+      on: now(() => post({ type: 'sim', on: true })),
+      off: now(() => post({ type: 'sim', on: false })),
+      state: now(s => { if (!hidden) post({ type: 'sim', s }); }), // out of sight, it draws nothing: it is brought up to date when it shows again (mount)
+      fx: now(fx => { if (!hidden) post({ type: 'sim', fx }); }),
+      re: now(re => post({ type: 'sim', re })),
+      viewers: now((list, me) => { viewers = list; meId = me; drawOnline(); }),
+      // a world from your folder: the collector's stand-ins for names, so this page's private scene numbers everything as the world's own process has it
+      names: now(table => { if (window.AgentvilleScene.useStandIns(table) && loaded) sendScene(); }),
+    });
+    window.TrackerLive.see(!hidden);
+  }
+
+  /** The frame is going: its room is left, and no one is shown watching. */
+  function leaveLive() { window.TrackerLive?.leave(); viewers = []; meId = null; drawOnline(); }
+
+  /* ---------- who is watching: a chip at the world's bottom right, the page's own (no one's name goes into a world's frame) ---------- */
+  let viewers = [], meId = null, onlineEl = null, onlineOpen = false, nameNote = '';
+  const WHY_NOT = { empty: 'A name needs a letter or two.', slow: 'A moment, then try again.', offline: 'Not connected just now.' };
+  /** What the watcher on the collector's own computer is called: by the system the snapshot names (a Mac, unless it says otherwise). */
+  const hostWord = () => ((lastSnap?.machine?.platform ?? 'darwin') === 'darwin' ? 'this Mac' : 'this computer');
+  /** The chip (how many look at this world now) and, open, the list: each watcher's name, which is you, which is this computer's, and a box for your own name. */
+  function drawOnline() {
+    if (!host || !frame || !viewers.length) { onlineEl?.remove(); onlineEl = null; onlineOpen = false; return; }
+    if (!onlineEl) {
+      onlineEl = document.createElement('div');
+      onlineEl.className = 'world-online';
+      onlineEl.innerHTML = `<div class="world-online-panel" hidden><b>Watching now</b><ul></ul>
+        <form><label for="world-online-name">Your name</label><span><input id="world-online-name" name="name" maxlength="24" autocomplete="off" spellcheck="false"><button type="submit" class="act mini">Save</button></span><em role="status"></em></form></div>
+        <button type="button" class="world-online-chip" data-online aria-expanded="false"><i></i><span></span></button>`;
+      onlineEl.addEventListener('click', e => { if (e.target.closest?.('[data-online]')) { onlineOpen = !onlineOpen; nameNote = ''; drawOnline(); if (onlineOpen) onlineEl.querySelector('input')?.select?.(); } });
+      onlineEl.addEventListener('keydown', e => { if (e.key === 'Escape' && onlineOpen) { onlineOpen = false; drawOnline(); onlineEl.querySelector('[data-online]')?.focus?.(); } });
+      onlineEl.addEventListener('submit', e => {
+        e.preventDefault();
+        const input = onlineEl.querySelector('input');
+        void window.TrackerLive.rename(input.value).then(r => {
+          if (!onlineEl) return;
+          nameNote = r.ok ? (r.name.toLowerCase() === noBidi(input.value).replace(/\s+/g, ' ').trim().toLowerCase() ? 'Saved.' : `Someone has that name: you are ${r.name}.`) : WHY_NOT[r.why] ?? 'That did not work.';
+          if (r.ok) input.value = r.name;
+          drawOnline();
+        });
+      });
+    }
+    if (onlineEl.parentNode !== host) host.append(onlineEl);
+    const looking = viewers.filter(v => v.on).length, me = viewers.find(v => v.id === meId), input = onlineEl.querySelector('input');
+    onlineEl.querySelector('.world-online-chip span').textContent = `${looking} online`;
+    const chip = onlineEl.querySelector('[data-online]');
+    chip.title = `${looking === 1 ? 'One browser looks' : `${looking} browsers look`} at this world just now: click to see who`;
+    chip.setAttribute('aria-expanded', String(onlineOpen));
+    onlineEl.querySelector('.world-online-panel').hidden = !onlineOpen;
+    onlineEl.querySelector('ul').innerHTML = [...viewers].sort((a, b) => (b.id === meId) - (a.id === meId) || a.since - b.since)
+      .map(v => `<li class="${v.on ? '' : 'away'}"><i></i><span>${esc(noBidi(v.name))}</span>${v.id === meId ? '<small>you</small>' : ''}${v.host ? `<small>${hostWord()}</small>` : ''}${v.on ? '' : '<small>away</small>'}</li>`).join('');
+    if (me && document.activeElement !== input && !nameNote) input.value = me.name; // not while you type
+    onlineEl.querySelector('em').textContent = nameNote;
+  }
   // Every message after `start` goes over the port (scene, settings, select, reply). `start` itself is
   // posted to the frame with the port transferred alongside it (see handle('loaded')); nothing else uses
   // the window. A world that navigates its frame away takes the port's realm with it, so the page posts
@@ -278,6 +348,7 @@
     switch (act.kind) {
       case 'loaded': {
         loaded = true;
+        drawsItself = act.raw === true;
         generation++; // replies to an earlier frame's requests are not posted to this one
         sentPaths.clear();
         lastSettings = JSON.stringify(settingsNow());
@@ -290,6 +361,7 @@
         sendScene();
         post({ type: 'select', id: selectedId });
         sendChatter(true);
+        if (liveFor(world)) joinLive();
         // The page decides who gets the way back, not the frame: every world of yours (its HUD, if any, is
         // its own doing), and a built-in one only when it draws itself (the farm's buttons are already there).
         if (world.startsWith('u/') || act.raw) showCorner();
@@ -319,6 +391,7 @@
       case 'showRepos': opts.onShowRepos?.(); break;
       case 'nav': opts.onNav?.(act.what); pushSettings(); break;
       case 'bell': store.set('tracker-bell', act.on ? 'on' : 'off'); opts.onBell?.(act.on); pushSettings(); break;
+      case 'awake': void Promise.resolve(opts.onAwake?.(act.on)).then(() => pushSettings()); break; // the page keeps the screen on, where the browser lets it: its answer is in the settings
       case 'motion': opts.still = act.still; opts.onMotion?.(act.still); pushSettings(); break;
       case 'store': {
         if (SESSION_PREFS.has(act.key)) { sessionPrefs.set(world, { ...sessionPrefs.get(world), [act.key]: act.value }); break; } // memory only, outside the caps
@@ -334,6 +407,8 @@
       }
       case 'diary': showDiary(act.entries); break;
       case 'cast': takeCast(act.animals); break;
+      case 'act': if (!window.TrackerLive?.act({ rid: act.rid, animal: act.animal, act: act.act, doer: act.doer })) post({ type: 'sim', re: { rid: act.rid, animal: act.animal, ok: false, why: 'offline' } }); break;
+      case 'touch': window.TrackerLive?.touch(act.animal); break;
       case 'refuse': post({ type: 'reply', id: act.id, ok: false, status: 403, error: act.error }); break;
       case 'request': {
         const mine = generation;
@@ -357,7 +432,7 @@
   // The world you chose, per browser; the farm when that one has gone or has something wrong.
   const CHOICE = 'tracker-world';
   const FARM = { key: 'farm', builtIn: true, name: 'Farm', icon: '🌾', description: '', nouns: { diary: 'Farm diary' }, preview: null, error: null };
-  let token = null, worldsInfo = [FARM], folder = null, info = FARM, resolvedOnce = false, worldShown = null;
+  let token = null, worldsInfo = [FARM], folder = null, info = FARM, resolvedOnce = false, worldShown = null, framePrefix = '';
   /** The worlds there are (the collector's list), and the one to show. */
   async function resolveWorld() {
     if (opts.world) return { builtIn: !opts.world.key.startsWith('u/'), icon: '🧩', description: '', nouns: {}, preview: null, error: null, name: opts.world.key, ...opts.world }; // the test page: this world, no list, no saved choice
@@ -366,6 +441,7 @@
       const r = await fetch('/api/worlds', { headers: { 'x-tracker-token': token } });
       const body = r.ok ? await r.json() : null;
       if (Array.isArray(body?.worlds) && body.worlds.length) { worldsInfo = body.worlds; folder = body.folder ?? null; listed = true; }
+      framePrefix = typeof body?.frames === 'string' && /^\/f\/[0-9a-f]{32}$/.test(body.frames) ? body.frames : ''; // a guest who gave a password: its frames' addresses carry a pass
     } catch { /* the collector is away: the farm */ }
     const saved = store.get(CHOICE);
     const pick = worldsInfo.find(w => w.key === saved && !w.error) ?? worldsInfo.find(w => w.key === 'farm') ?? FARM;
@@ -399,6 +475,7 @@
     heardLoaded = false;
     cast = null; clearInterval(castTimer); chatterAt = null; castKey = ''; castAt = -Infinity; castNext = null; clearTimeout(castLater); castLater = 0; // a new frame says its animals again
     generation++;
+    leaveLive();
     closePort();
     sent = null; // nothing is given to the new frame until it says `loaded`
     sentPaths.clear();
@@ -412,7 +489,7 @@
     frame.className = 'world-frame';
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.title = info.name;
-    frame.src = `/world/${key}/`;
+    frame.src = `${framePrefix}/world/${key}/`;
     ready = false; lastError = null; loadsLeft = 1; failed = false;
     resetStrip();
     clearTimeout(startTimer);
@@ -431,6 +508,7 @@
     clearTimeout(startTimer);
     resetStrip();
     generation++; // its replies and messages are not heard any more
+    leaveLive();
     loaded = false;
     closePort();
     frame = null;
@@ -517,6 +595,8 @@
       pushSettings();
       renderDiary(opts.diary, diary);
       void postCast(); // shown again: its animals are on screen once more
+      window.TrackerLive?.see(true);
+      window.TrackerLive?.resync(); // and where everyone is by now
       return Promise.resolve();
     }
     unmount();
@@ -537,7 +617,7 @@
     });
   }
   /** Puts the world out of sight (the list view): its frame stays, but it can't act on the page. */
-  function hide() { hidden = true; }
+  function hide() { hidden = true; window.TrackerLive?.see(false); }
 
   const $ = id => document.getElementById(id);
   let listWired = false;
@@ -576,16 +656,35 @@
     if (!dlg.open) lockSee();
     renderList();
     if (!dlg.open) dlg.showModal();
+    // How many look at each world is asked again every few seconds while the list is open (only the counts are redrawn).
+    clearInterval(countsTimer);
+    countsTimer = setInterval(() => { if (dlg.open) void refreshCounts(); else clearInterval(countsTimer); }, 3000);
+  }
+  let countsTimer = 0;
+  const countText = n => (n > 0 ? `${n} online` : '');
+  async function refreshCounts() {
+    try {
+      const r = await fetch('/api/worlds', { headers: { 'x-tracker-token': token } });
+      const body = r.ok ? await r.json() : null;
+      if (!Array.isArray(body?.worlds)) return;
+      for (const w of worldsInfo) w.online = body.worlds.find(x => x.key === w.key)?.online ?? 0;
+      for (const el of $('worlds-list')?.querySelectorAll?.('[data-count]') ?? []) {
+        const n = worldsInfo.find(w => w.key === el.dataset.count)?.online ?? 0;
+        el.textContent = countText(n);
+        el.hidden = !n;
+      }
+    } catch { /* the collector is away: the counts stay as they were */ }
   }
   function renderList() {
     const list = $('worlds-list');
     if (!list) return;
     list.innerHTML = worldsInfo.map(w => `<li><button type="button" class="world-pick" ${w.key && !w.error ? `data-world="${esc(w.key)}"` : 'disabled'} aria-pressed="${w.key === world}">
         ${typeof w.preview === 'string' && w.preview.startsWith('/world/') ? `<img class="world-preview" src="${esc(w.preview)}" alt="">` : `<span class="world-icon">${words(w.icon)}</span>`}
-        <span class="world-text"><span><b>${words(w.name)}</b> <span class="chip">${w.builtIn ? 'Built in' : 'Your folder'}</span></span>${w.description ? `<span class="muted">${words(w.description)}</span>` : ''}${w.error ? `<span class="warnline">${words(w.error)}</span>` : ''}</span>
+        <span class="world-text"><span><b>${words(w.name)}</b> <span class="chip">${w.builtIn ? 'Built in' : 'Your folder'}</span>${w.key ? ` <span class="world-count" data-count="${esc(w.key)}" title="Viewers right now"${w.online > 0 ? '' : ' hidden'}>${countText(w.online)}</span>` : ''}</span>${w.description ? `<span class="muted">${words(w.description)}</span>` : ''}${w.error ? `<span class="warnline">${words(w.error)}</span>` : ''}</span>
       </button>${!w.builtIn && w.key ? `<label class="world-see" title="${SEE_TIP}"><input type="checkbox" data-see="${esc(w.key)}"${isPrivate(w.key) ? '' : ' checked'}${seeLocked ? ' disabled' : ''}> Can see what agents say</label>` : ''}</li>`).join('');
-    const where = $('worlds-where');
+    const where = $('worlds-where'), open = $('worlds-folder');
     if (where) where.textContent = folder ? `Your worlds go in ${noBidi(folder)}` : '';
+    if (open) open.hidden = !token; // a guest has no folder here to open
   }
   function onListClick(e) {
     const pick = e.target.closest?.('[data-world]');
@@ -641,7 +740,8 @@
   /** The newest scene to the world: the whole of it, or (one of your worlds, not allowed) without words and paths. */
   function sendScene() {
     if (!scene) return;
-    sent = isPrivate(world) ? window.AgentvilleScene.privateScene(scene) : scene;
+    // (a world of yours that may see names, and is moved by the collector: what the collector calls each repo and project there, to tell its own things by)
+    sent = isPrivate(world) ? window.AgentvilleScene.privateScene(scene) : OWN_WORLD.test(world) && liveFor(world) ? { ...scene, standIns: Object.fromEntries(window.AgentvilleScene.standIns()) } : scene;
     post({ type: 'scene', scene: sent });
   }
   /** Whether one of your worlds may see what agents say; the world starts again with the scene it may now see. */
@@ -676,6 +776,7 @@
     failed = false;
     sentPaths.clear();
     generation++;
+    leaveLive();
   }
 
   /** A world's files changed: reload it if it is the one showing (or the SDK changed); refresh the list if it is open. */

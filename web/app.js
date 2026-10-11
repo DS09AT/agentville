@@ -175,7 +175,7 @@ function setView(next, { remember = true } = {}) {
     $('fs-body')?.appendChild?.($('explorer'));
     reader = null;
     window.TrackerFarm.mount($('farm'), {
-      token: TOKEN, diary: $('farm-diary'), onPickAgent: pickFromFarm, onOpenDoc: openDocFromFarm, onShowRepos: showReposFromFarm, onStartSession: () => { window.TrackerFarm?.armClickGuard?.(); void openSessions(); }, onBell: bellSwitched,
+      token: TOKEN, diary: $('farm-diary'), onPickAgent: pickFromFarm, onOpenDoc: openDocFromFarm, onShowRepos: showReposFromFarm, onStartSession: () => { window.TrackerFarm?.armClickGuard?.(); void openSessions(); }, onBell: bellSwitched, onAwake: awakeSwitched, isAwake: () => awakeWanted(),
       // the top bar's buttons, on the farm
       onWorld: showWorld, onNotice: notice,
       // A world pressing a button that raises a view or dialog arms the click guard, so it can't steer a
@@ -983,6 +983,36 @@ async function sendAnswer(agentId, toolUseId) {
   if (r.ok) drafts.delete(toolUseId);
   notice(r.ok ? `Answer sent to ${agent.name}.` : `Could not send: ${r.error}`);
 }
+
+/* ---------- the screen kept on: for a kiosk or a second screen that should never go dark ---------- */
+// The Screen Wake Lock API: the browser keeps the screen on while this page shows. It exists only where the page
+// is trusted (https, or this computer's own localhost), is let go whenever the page is out of sight, and is asked
+// for again when it shows. Each browser's own choice (the world's Menu: Screen), kept there; a kiosk's address can
+// carry it (?kiosk=1), so nothing has to be tapped on the device.
+let awakeLock = null;
+const awakeCan = () => 'wakeLock' in navigator;
+const awakeWanted = () => { try { return localStorage.getItem('tracker-awake') === 'on' && awakeCan(); } catch { return false; } };
+async function awakeHold() {
+  if (!awakeWanted() || awakeLock || document.visibilityState !== 'visible') return;
+  try {
+    awakeLock = await navigator.wakeLock.request('screen');
+    awakeLock.addEventListener('release', () => { awakeLock = null; });
+  } catch { /* not now (the battery is low, the page is not in front): asked again when it shows, or at the next touch */ }
+}
+/** The Menu's Screen switch. Where the browser has no such thing, it stays off and the page says why. */
+async function awakeSwitched(on) {
+  if (on && !awakeCan()) {
+    notice(window.isSecureContext ? 'This browser cannot keep the screen on.' : 'Keeping the screen on needs HTTPS. Turn it on in Settings › Network.');
+    on = false;
+  }
+  try { localStorage.setItem('tracker-awake', on ? 'on' : 'off'); } catch { /* this page only */ }
+  if (on) await awakeHold();
+  else { const lock = awakeLock; awakeLock = null; await lock?.release?.().catch(() => {}); }
+}
+try { if (new URLSearchParams(location.search).get('kiosk') === '1') localStorage.setItem('tracker-awake', 'on'); } catch { /* this page only */ }
+document.addEventListener('visibilitychange', () => void awakeHold());
+document.addEventListener('pointerdown', () => void awakeHold(), { passive: true }); // (some browsers give it only after a touch)
+void awakeHold();
 
 /* ---------- the bell: a chime and a desktop notice when an agent starts waiting on you ---------- */
 // Switched on from the farm's Bell button; it rings in either view.

@@ -12,10 +12,24 @@
   "memoryAlertGb": 2,
   "cpuAlertPct": 90,
   "cpuAlertSustainSec": 120,
-  "notify": { "waiting": true, "collision": true, "yourTurn": true, "memory": true, "cpu": true },
+  "notifications": true,
+  "notify": {
+    "waiting": true,
+    "collision": true,
+    "yourTurn": true,
+    "memory": true,
+    "cpu": true
+  },
   "modToasts": true,
   "deployRepos": {},
   "worldsDir": null,
-  "terminal": "Terminal",
-  "accounts": {}
+  "terminal": "auto",
+  "accounts": {},
+  "lan": false,
+  "claudeBin": null,
+  "mod": true,
+  "https": false,
+  "guestPassword": null,
+  "guestAllow": [],
+  "guestBlock": []
 }

@@ -450,8 +450,8 @@
     slot: (cx, rowTop) => ({ lane: rowTop + 44, x0: cx - 36, y0: rowTop + 12 }),
     fence: rows => ({ x0: 128, x1: 396, y0: 96, y1: 104 + rows * ROWH }), height: fence => fence.y1 + 28,
   });
-  const layoutFor = (fields, beds = null, now = Date.now()) => ({ ...FARM_GRID.layoutFor(fields, beds, now), PORCH_Y, LANE });
-  const packedLayout = (fields, beds, now = Date.now()) => ({ ...FARM_GRID.packedLayout(fields, beds, now), PORCH_Y, LANE });
+  const layoutFor = (fields, beds = null, now = PXG.now()) => ({ ...FARM_GRID.layoutFor(fields, beds, now), PORCH_Y, LANE });
+  const packedLayout = (fields, beds, now = PXG.now()) => ({ ...FARM_GRID.packedLayout(fields, beds, now), PORCH_Y, LANE });
 
   /* ---------- the farm theme: sprites, ground, weather, labels ---------- */
 
@@ -986,7 +986,7 @@
     return { x: Math.round(280 + t * 150), dir: out ? 1 : -1 };
   }
   /** How long until a time, in short: 12m, 2h. */
-  const until = at => { const m = Math.max(0, (at - Date.now()) / 60_000); return m < 1 ? 'a moment' : m < 60 ? `${Math.round(m)}m` : `${Math.round(m / 60)}h`; };
+  const until = at => { const m = Math.max(0, (at - PXG.now()) / 60_000); return m < 1 ? 'a moment' : m < 60 ? `${Math.round(m)}m` : `${Math.round(m / 60)}h`; };
 
   /** For tests and the legend: paints one tool (held by a farmer when `look` is given) or one plant on a 2D context. */
   function paint(ctx, { prop, flag, crop, stage = 0, T = 0, look, face = 'down', legs = 's', land, rows = 1, season }) {
@@ -1149,7 +1149,9 @@
     // The season to draw: the engine's (the Season switch may hold one), else the live one. What is drawn or emitted by season reads this.
     const shown = () => PXG.season ?? season;
     // The porch (porch life, above): as it is just now, the album of what was seen there, and what is new in it since the last scene.
-    let night = false, keep = null, cheerUntil = 0, porchAt = 0, porch = porchNow([], 0);
+    // night: it is night on the farm (who naps where, what happens on the porch go by it); dark: the sky as this browser draws it
+    // (the Sky switch may hold day or night: a lamp is lit by it, nothing else). told: the collector moves this farm (tick, adopt).
+    let night = false, dark = false, told = false, keep = null, cheerUntil = 0, porchAt = 0, porch = porchNow([], 0);
     // Someone in the doorway (the door stands open), someone walking up to the door or over its mat (the cat makes way): when, by the frame clock.
     let doorAt = -9;
     // Comings and goings (the farm adds them to the scene it is given: stage(), below).
@@ -1168,7 +1170,7 @@
     const cat = { x: CAT.mat[0], y: CAT.mat[1], where: 'ground', goal: null, legs: [], jump: null, face: -1, at: 0, plan: { spot: 'mat', act: 'nap' }, placed: false };
     const walkers = []; // where farmers walked in the last frame: [x, y]
     const album = new Set(), found = [];
-    const porchOf = () => { const now = Date.now(); if (now - porchAt > 250) { porch = porchNow(scene.farmers.filter(f => !jobOf(f.id)), now, { night }); porchAt = now; } return porch; };
+    const porchOf = () => { const now = PXG.now(); if (now - porchAt > 250) { porch = porchNow(scene.farmers.filter(f => !jobOf(f.id)), now, { night }); porchAt = now; } return porch; };
     const RARE = new Set([...SURPRISES.map(s => s[0]), 'cheers']);
     /** Something on the porch was drawn: the first time, it goes in the album (kept in this browser); a surprise also, with the next scene, in the diary (the everyday things would fill it). */
     const saw = key => { if (!ALBUM[key] || album.has(key)) return; album.add(key); keep?.set('album', [...album].join(',')); if (RARE.has(key)) found.push(key); };
@@ -1199,7 +1201,7 @@
     /** A field's record (tallyOf), kept for the scene it is of. */
     const tallies = new Map();
     const fieldTally = key => { if (!tallies.has(key)) tallies.set(key, tallyOf(scene.farmers.filter(a => a.field === key && a.state !== 'leaving'))); return tallies.get(key); };
-    /** A tool as a picture of its own (drawProp's, at rest): for the tool rack at a bed, and for a working farmer's name tag. */
+    /** A tool as a picture of its own (drawProp's, at rest): for a working farmer's name tag. */
     const propPics = new Map();
     function propPic(prop) {
       if (typeof document === 'undefined') return null;
@@ -1230,7 +1232,7 @@
      * A field's record, on and about its bed: the slate in its corner (how many steps so far, in chalk, and under it their mix: a band
      * in the groups' colours; an hourglass while a turn runs), the last half hour along its front board (a tick a step, in its
      * group's colour, red when it failed: now is at the right), a pennant at its front left for the last test run (green, red; amber
-     * and waving while tests run), thistles for steps failing in a row, and at its right the tools most used, leant on the frame.
+     * and waving while tests run), thistles for steps failing in a row.
      */
     function drawRecord(s, tally, now, T) {
       const { x0, y0 } = s;
@@ -1247,8 +1249,6 @@
       if (scene.farmers.some(a => a.field === s.key && a.state === 'working')) { const up = Math.floor(T * 1.5) % 2; px(sx + 2, sy + 2, 3, 1, '#e9c46a'); px(sx + 2, sy + 6, 3, 1, '#e9c46a'); px(sx + 3, sy + 4, 1, 1, '#e9c46a'); px(sx + 2, sy + 3, 3, 1, up ? '#f4d58d' : '#27332f'); px(sx + 2, sy + 5, 3, 1, up ? '#27332f' : '#f4d58d'); } // an hourglass: the turn runs
       let bx = sx + 1;
       for (const g of tally.groups) { const w = Math.round((g.n / tally.total) * 15); if (w) { px(bx, sy + 8, Math.min(w, sx + 16 - bx), 3, g.color); bx += w; } }
-      const used = Object.entries(tally.steps).filter(([k]) => ACTIONS[k] && ACTIONS[k].prop !== 'can').sort((a, b) => b[1] - a[1]).slice(0, 2);
-      used.forEach(([k], j) => { const pic = propPic(ACTIONS[k].prop); if (pic && PXG.ctx.drawImage) PXG.ctx.drawImage(pic, x0 + 72, y0 + 6 + j * 13, 16 * SC, 20 * SC); }); // the tool rack
     }
 
     function plotState(f) {
@@ -1266,7 +1266,7 @@
         return;
       }
       bed(px, s, f.worktree ? '#9aa4ad' : f.fence ?? '#c98d4f', f.soil ?? '#7a5230', shown() === 'winter' && st.kind !== 'grow');
-      const tally = fieldTally(s.key), now = Date.now();
+      const tally = fieldTally(s.key), now = PXG.now();
       drawFresh(s, tally, now);
       // what was made and cleared here: a staked seedling for each new file (six at most), a stump for each deletion (four at most)
       const marks = new Map([...cellsOf(s, 200, Math.min(6, tally.steps.write ?? 0)).map(c => [c[2], 'stake']), ...cellsOf(s, 300, Math.min(4, tally.steps.delete ?? 0)).map(c => [c[2], 'stump'])]);
@@ -1338,7 +1338,7 @@
      * out for what is there when the page opens, nor with motion off.
      */
     function stage(next) {
-      const now = Date.now();
+      const now = PXG.now();
       if (given && !frozen) {
         const had = new Map(given.farmers.map(f => [f.id, f])), has = new Map(next.farmers.map(f => [f.id, f]));
         const hadField = new Map(given.fields.map(f => [f.key, f])), hasField = new Set(next.fields.map(f => f.key));
@@ -1415,7 +1415,7 @@
      */
     function henPlace(h, i, posOf, T) {
       const f = farmerOf(h.by), b = f && f.state !== 'leaving' ? posOf(h.by) : null;
-      if (!b || i >= HENS_LED) return { want: 'run', at: runSpot(h.k) };
+      if (!b || i >= HENS_LED || b.y < LANE - 3) return { want: 'run', at: runSpot(h.k) }; // a farmer on the porch or among the scarecrows: its hens wait in the run, not up there
       const s = h.bg && f.field && standing(f.field) && !works.has(f.field) ? stOf(f.field) : null;
       if (s) return { want: `field:${f.field}`, at: [s.x0 + 9 + ((h.k * 3 + i * 2) % 8) * 8, s.y0 + 30 - (i % 2) * 8] };
       const at = [b.x + (i % 2 ? 1 : -1) * (11 + (i > 1 ? 7 : 0)), b.y + 2 - (i > 1 ? 5 : 0)];
@@ -1493,7 +1493,6 @@
       px(1, 132, 19, 3, '#c9a24a'); px(1, 132, 19, 1, '#e9c46a'); px(0, 130, 1, 5, '#a8703c'); px(20, 130, 1, 5, '#a8703c'); // the nest
       eggs.forEach((s, i) => (s.type === 'Explore' ? drawEgg(px, NEST.bone(i), 137, true) : drawEgg(px, NEST.egg(i), 128, false)));
       const all = [...hens.values()].sort((a, b) => a.y - b.y);
-      if (all.some(h => (h.path.length || h.phase === 'home') && Math.abs(h.x - COOP.door[0]) < 5 && h.y < COOP.foot[1])) coopAt = T;
       if (T - coopAt < 0.7) { px(20, 114, 8, 2, '#6b4320'); px(20, 115, 8, 1, '#8b5a2b'); } // the hatch, swung up
       else { px(20, 117, 8, 12, '#8b5a2b'); px(20, 117, 8, 1, '#c98d4f'); px(23, 117, 1, 12, '#6b4320'); px(26, 123, 1, 1, '#e9c46a'); } // shut
       for (const h of all) {
@@ -1512,7 +1511,7 @@
     const isSat = p => p?.zone === 'turn' && p.stage !== 'stand';
     const ARMS_UP = { stretch: 2, tip: 2, cheers: 1 }, HOLDS_DRINK = new Set(['sip', 'spill', 'cheers']);
     /** What a seated farmer is at just now: its part in a surprise, a toast to a merge, or its own pastime. */
-    const doingOnPorch = (f, p) => (porch.surprise?.who.includes(f.id) ? porch.surprise.key : Date.now() < cheerUntil ? 'cheers' : p.pastime);
+    const doingOnPorch = (f, p) => (porch.surprise?.who.includes(f.id) ? porch.surprise.key : PXG.now() < cheerUntil ? 'cheers' : p.pastime);
     /** How far a seat rocks sideways just now (px): a rocker and the swing, under whoever sits there; all in time in a 'sync'; a rocker tipping back. */
     function swayOf(seat) {
       const sitter = [...porch.who].find(([, p]) => isSat(p) && p.seat === seat)?.[0], sur = porch.surprise, kind = porch.seating[seat];
@@ -1534,7 +1533,7 @@
      * runner; the door swung in against its left post. By night the lamp is lit and its light falls out onto the porch.
      */
     function openDoor() {
-      const { x0, y0, x1, y1 } = HOUSE_DOOR, w = x1 - x0, lit = night, fy = y0 + 21; // fy: where the floor begins
+      const { x0, y0, x1, y1 } = HOUSE_DOOR, w = x1 - x0, lit = dark, fy = y0 + 21; // fy: where the floor begins
       px(x0, y0, w, fy - y0, lit ? '#f4d58d' : '#d9c9a0'); for (let x = x0 + 3; x < x1; x += 3) px(x, y0, 1, fy - y0, lit ? '#e9c46a' : '#cbb98a'); // the wall, its paper in stripes
       px(x0, fy - 4, w, 4, lit ? '#b98a4a' : '#9c7a4a'); px(x0, fy - 4, w, 1, '#6b4320'); // the wainscot
       px(x0 + 10, y0 + 4, 5, 5, '#6b4320'); px(x0 + 11, y0 + 5, 3, 3, '#5ab4ff'); px(x0 + 11, y0 + 7, 3, 1, '#6cc04a'); // a picture
@@ -1555,7 +1554,7 @@
      * indoors, or elsewhere). When the page opens it is where it belongs at once.
      */
     function stepCat(T) {
-      const dt = Math.max(0, Math.min(0.1, T - cat.at)), now = Date.now();
+      const dt = Math.max(0, Math.min(0.1, T - cat.at)), now = PXG.now();
       cat.at = T;
       cat.plan = catPlan(now, { night });
       if (!cat.placed) { // the page opens: there at once
@@ -1594,7 +1593,7 @@
     /** The porch cat, where it is: curled up on its mat (unless a lap has it), or at whatever it is at. Nothing lights it at night but the porch lamp, and its eyes shine. */
     function drawCat(T, onLap) {
       if (cat.where === 'in' && !cat.legs.length) return; // indoors
-      const walking = !cat.jump && cat.legs.length > 0, hiding = Date.now() < (cat.stayUntil ?? 0), eye = night ? '#ffd43b' : '#1b1420';
+      const walking = !cat.jump && cat.legs.length > 0, hiding = PXG.now() < (cat.stayUntil ?? 0), eye = dark ? '#ffd43b' : '#1b1420';
       if (catOnMat()) { if (!onLap) porchCat(CAT.mat[0] - 4, CAT.mat[1] - 3, blink(0.7), true); return; }
       const there = cat.goal === cat.plan.spot && !hiding; // where the clock has it: at what the clock has it do
       const act = cat.jump ? cat.pose ?? 'crouch' : walking ? (cat.run && cat.where === 'ground' ? 'run' : 'walk') : !there ? 'watch' : cat.where === 'roof' ? (cat.plan.act === 'nap' ? 'loaf' : cat.plan.act ?? 'watch') : cat.plan.act === 'nap' ? 'sit' : cat.plan.act ?? 'sit';
@@ -1650,14 +1649,13 @@
         SEATS[kind](X[i] - 8, X[pair ? i + 1 : i] + 8, y, swayOf(i) || (pair ? swayOf(i + 1) : 0));
       }
       if (T - doorAt < 0.8) openDoor(); // someone is coming out: it closes behind them
-      stepCat(T);
       if (typeof CREATURES === 'object') drawCat(T, sur?.key === 'lapcat'); // on its mat unless a lap has it
-      const seasonal = seasonalOf(Date.now());
+      const seasonal = seasonalOf(PXG.now());
       if (seasonal === 'pumpkin') { // on the steps in October; lit on the 31st
         const px0 = 203, py = y + 5;
         saw('pumpkin');
         px(px0, py - 5, 6, 5, '#f08a24'); px(px0, py - 5, 6, 1, '#ffb347'); px(px0 + 2, py - 6, 1, 1, '#3f9b3a'); px(px0 + 2, py - 4, 1, 4, '#c8681a');
-        if (new Date().getDate() === 31) { px(px0 + 1, py - 3, 1, 1, '#ffd43b'); px(px0 + 4, py - 3, 1, 1, '#ffd43b'); px(px0 + 1, py - 1, 4, 1, '#ffd43b'); }
+        if (new Date(PXG.now()).getDate() === 31) { px(px0 + 1, py - 3, 1, 1, '#ffd43b'); px(px0 + 4, py - 3, 1, 1, '#ffd43b'); px(px0 + 1, py - 1, 4, 1, '#ffd43b'); }
       }
       if (seasonal === 'lights') { saw('lights'); eaveBulbs(132, 10, 136).forEach(([bx, by], i) => px(bx, by, 2, 2, ['#e04a3a', '#ffd43b', '#6cc04a', '#5ab4ff'][(i + blink(1.5, 4)) % 4])); } // in December the eave's string of lights is in colours
       if (sur?.key === 'peek' && typeof CREATURES === 'object') { // your front door opens and the unicorn looks out (the door: name tags never cover it)
@@ -1699,7 +1697,7 @@
       } else if (blink(1.5)) px(36, 206, 2, 1, '#ffffff'); // ice glints
       if (PXG.animals) { // the animals' things in the yard: a trough and its bucket, a woodpile and a rock to climb
         px(TROUGH.x - 6, TROUGH.y - 3, 12, 3, '#8b5a2b'); px(TROUGH.x - 5, TROUGH.y - 3, 10, 1, shown() === 'winter' ? '#d8eef8' : '#5ab4ff');
-        if (!PXG.taken?.has('bucket')) { px(TROUGH.x + 8, TROUGH.y - 4, 3, 4, '#8a93a0'); px(TROUGH.x + 8, TROUGH.y - 4, 3, 1, '#c3cbd2'); } // unless the ostrich is wearing it
+        if (!PXG.taken?.has('bucket')) { px(TROUGH.x + 8, TROUGH.y - 4, 3, 4, '#8a93a0'); px(TROUGH.x + 8, TROUGH.y - 4, 3, 1, '#c3cbd2'); } // unless the goose is wearing it
         for (let i = 0; i < 3; i++) px(WOODPILE.x - 6 + i * 1, WOODPILE.y - 2 - i * 2, 12 - i * 3, 2, i % 2 ? '#a8703c' : '#8b5a2b');
         const rock = rockAt(); px(rock.x - 4, rock.y - 3, 8, 3, '#8c96a0'); px(rock.x - 3, rock.y - 4, 6, 1, '#aab3bb');
         // the cats' basket: wicker round a red cushion, wide enough for two
@@ -1760,10 +1758,11 @@
       px(pony - 3 + step, y - 1, 1, 2, '#6b4320'); px(pony + 1 - step, y - 1, 1, 2, '#6b4320'); px(pony - dir * 4, y - 4, 1, 2, '#4e3626');
     }
     const FIREFLIES = [[20, 150], [60, 160], [92, 176], [30, 232], [74, 196], [50, 252], [100, 250], [14, 262], [88, 140], [96, 214], [240, 92], [330, 70]];
-    // The farm's animals (sdk/animals.js): just for fun, never data. They walk the whole farm, but never
-    // on a crop bed (its crops, hay, crates and mailbox are the repo's state), into a building, onto the carts' row (MCP),
-    // the hammocks or the henhouse. No chickens (subagents), and the dog is a sheepdog (the Explore dog is
-    // data). The ducks keep to the pond and its bank.
+    // The farm's animals (sdk/animals.js): just for fun, never data. What lives on a farm: cows, goats, sheep, a pig, a
+    // horse, a goose, a sheepdog, ducks, cats and mice (and a unicorn that only visits). They keep to the pasture (the yard and
+    // the meadow below the fields: roam()), never on a bed, in use or fallow (its crops, hay, crates and mailbox are the repo's
+    // state), into a building, the hammocks or the henhouse. No chickens (subagents), and the dog is a sheepdog (the Explore dog
+    // is data). The ducks keep to the pond and its bank.
     const POND = { x: 12, y: 199, w: 60, h: 22 }; // the water (the pond's oval, a little inside its bank)
     const TROUGH = { x: 92, y: 158 }, WOODPILE = { x: 14, y: 186 }; // the yard's things to drink at and climb on (animals on only)
     const rockAt = () => ({ x: 94, y: L.GRID.y1 - 42 }); // by the shade tree, clear of its crown (it moves down with more rows)
@@ -1785,16 +1784,19 @@
           nibble: ['nom', 'just a taste'], faint: ['*faints* (it is a goat thing)', 'I am fine. this is normal'], deployFailed: ['BAA!'], deployOk: ['baa! 🌈'], harvest: ['snacks?'] } },
       { kind: 'sheepdog', name: 'Sheepdog', habits: ['fetch', 'roll', 'laps'], reacts: { merged: 'run', arrive: 'run' }, actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Throw a stick', pose: 'run', run: true, fx: 'dust', line: 'stick' }, { label: 'Belly rub', pose: 'sleep', fx: 'hearts', line: 'rub' }],
         lines: { idle: ['woof.', 'I herd things', 'is that a squirrel', 'woof?'], petted: ['woof ♥'], stick: ['STICK!'], rub: ['best day ever'],
-          merged: ['WOOF! shipped!'], arrive: ['woof! hi!', 'a new friend!'], herd: ['herding cats. how hard can it be'], gaveup: ['…impossible. as they said'], deployFailed: ['woof woof!'], deployOk: ['good deploy! good!'], harvest: ['herding the harvest'] } },
-      { kind: 'ostrich', name: 'Ostrich', habits: ['circles', 'hide'], actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Race it', pose: 'run', run: true, fx: 'dust', line: 'race' }, { label: 'Ride', pose: 'run', run: true, line: 'ride' }],
-        lines: { idle: ['not my fault', 'I run, therefore I am', 'honk?'], petted: ['…fine.'], race: ['too slow!'], ride: ['hold on to your hat'],
-          deployFailed: ['not my fault'], deployOk: ['I knew it'], bucket: ['new hat. thoughts?', 'it suits me'] } },
-      { kind: 'lion', name: 'Lion', habits: ['yawn', 'stretch'], actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Give a fish', pose: 'eat', fx: 'crumbs', line: 'fish' }, { label: 'Boop the nose', pose: 'happy', line: 'boop' }],
-        lines: { idle: ['*yawn*', 'I am the king of this yard', 'nap time'], petted: ['purr…'], fish: ['FISH. yes.'], boop: ['…boop.'],
-          startled: ['EEK! a chicken!', 'I was not scared'], nap: ['zzz… purr', 'five more minutes'], mouse: ['EEK! a mouse!', 'it is HUGE'], fits: ['if I fits, I sits', 'this is my size'], deployFailed: ['*roar* (worried)'], harvest: ['…food?'] } },
-      { kind: 'tiger', name: 'Tiger', habits: ['chaseTail', 'pounce'], actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Give a fish', pose: 'eat', fx: 'crumbs', line: 'fish' }, { label: 'Boop the nose', pose: 'happy', line: 'boop' }],
-        lines: { idle: ['where is my tail', 'butterfly!', 'rawr (friendly)'], petted: ['purr ♥'], fish: ['mine now'], boop: ['boop back'],
-          tag: ['tag! you’re it', 'gotcha'], boo: ['boo!'], oops: ['…oops', 'I only said boo'], deployFailed: ['rawr?!'], deployOk: ['rawr 🌈'] } },
+          merged: ['WOOF! shipped!'], arrive: ['woof! hi!', 'a new friend!'], herd: ['herding cats. how hard can it be'], flock: ['this is what I was bred for', 'sheep! proper work!'], gaveup: ['…impossible. as they said'], deployFailed: ['woof woof!'], deployOk: ['good deploy! good!'], harvest: ['herding the harvest'] } },
+      { kind: 'goose', name: 'Goose', habits: ['circles'], actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Shoo it', pose: 'run', run: true, fx: 'dust', line: 'shoo' }, { label: 'Feed corn', pose: 'eat', fx: 'crumbs', line: 'fed' }],
+        lines: { idle: ['honk.', 'not my fault', 'I run, therefore I am', 'honk?'], petted: ['…fine.'], shoo: ['HONK! rude'], fed: ['corn. acceptable'],
+          honk: ['HONK!', 'boo. I mean honk'], oops: ['…oops', 'I only honked'], deployFailed: ['not my fault'], deployOk: ['I knew it'], bucket: ['new hat. thoughts?', 'it suits me'] } },
+      { kind: 'pig', name: 'Pig', habits: ['roll'], actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Give an apple', pose: 'eat', fx: 'crumbs', line: 'fed' }, { label: 'Scratch its back', pose: 'happy', line: 'scratch' }],
+        lines: { idle: ['oink.', 'mud is just soil with commitment', 'I am not a pig. I am a senior engineer', 'nap time'], petted: ['oink ♥'], fed: ['OINK! more'], scratch: ['…left. no, the other left'],
+          startled: ['OINK?! a chicken!', 'I was not scared'], nap: ['zzz… oink', 'five more minutes'], fits: ['if I fits, I sits', 'this is my size'], deployFailed: ['oink?!'], deployOk: ['oink 🌈'], harvest: ['…food?'] } },
+      { kind: 'horse', name: 'Horse', habits: ['roll', 'stretch', 'circles'], actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Give an apple', pose: 'eat', fx: 'crumbs', line: 'fed' }, { label: 'Gallop', pose: 'run', run: true, fx: 'dust', line: 'gallop' }],
+        lines: { idle: ['neigh.', 'I have a long face. it is the build', 'hay is for horses', 'trot, trot, merge'], petted: ['whinny ♥'], fed: ['NEIGH! apple!'], gallop: ['hold on to your hat'],
+          tag: ['tag! you’re it', 'gotcha'], mouse: ['neigh?! a mouse!', 'I am not scared. I am cautious'], deployFailed: ['neigh?!'], deployOk: ['neigh 🌈'], harvest: ['hay day'] } },
+      { kind: 'sheep', count: 2, name: 'Sheep', habits: ['roll'], actions: [{ label: 'Pet', fx: 'hearts', line: 'petted' }, { label: 'Feed', fx: 'crumbs', pose: 'eat', line: 'fed' }],
+        lines: { idle: ['baa.', 'counting myself to sleep', 'wool you merge it?', 'baaa?'], petted: ['baa ♥'], fed: ['BAA! more'], follow: ['baa. fine.', 'I go where they go'],
+          deployFailed: ['baa?!'], deployOk: ['baa 🌈'], harvest: ['snacks?'] } },
       { kind: 'duck', count: 5, looks: ['drake', 'hen', 'duckling', 'duckling', 'duckling'], name: 'Ducks', home: POND, bank: [[42, 194], [42, 226], [78, 210]],
         actions: [{ label: 'Feed bread', fx: 'crumbs', gather: true, steal: true, line: 'fed' }, { label: 'Quack back', line: 'quack' }],
         lines: { idle: ['quack.', 'QUACK', 'any bread?', 'peep'], fed: ['BREAD!', 'bread bread bread'], quack: ['quack quack!'], bread: ['mine!', 'MINE'],
@@ -1816,26 +1818,27 @@
     const FARM_GAGS = [
       { id: 'hat', needs: { goat: 1, farmer: 'idle' }, steps: [{ go: 'goat', to: 'farmer' }, { wear: 'goat', what: 'hat', on: true }, { say: 'goat', line: 'hat' }, { go: 'goat', to: 'away', run: true, ms: 3000 }, { chase: 'farmer', after: 'goat', ms: 3000 }, { wear: 'goat', what: 'hat', on: false }] },
       { id: 'nibble', needs: { goat: 1, farmer: 'busy' }, steps: [{ go: 'goat', to: 'farmer', ms: 6000 }, { wear: 'goat', what: 'hat', on: true }, { say: 'goat', line: 'nibble' }, { wait: 3000 }, { wear: 'goat', what: 'hat', on: false }, { go: 'goat', to: 'away' }] }, // it keeps working, hatless 3 s
-      { id: 'bucket', needs: { ostrich: 1, farmer: 'idle', spot: 'bucket' }, steps: [{ go: 'ostrich', to: 'spot:bucket' }, { wear: 'ostrich', what: 'bucket', on: true }, { go: 'ostrich', to: 'away', run: true, ms: 3000 }, { chase: 'farmer', after: 'ostrich', ms: 3000 }, { say: 'ostrich', line: 'bucket' }, { wear: 'ostrich', what: 'bucket', on: false }] },
-      { id: 'startled', needs: { lion: 1, chicken: true }, steps: [{ pose: 'lion', is: 'startled', ms: 800 }, { say: 'lion', line: 'startled' }] },
+      { id: 'bucket', needs: { goose: 1, farmer: 'idle', spot: 'bucket' }, steps: [{ go: 'goose', to: 'spot:bucket' }, { wear: 'goose', what: 'bucket', on: true }, { go: 'goose', to: 'away', run: true, ms: 3000 }, { chase: 'farmer', after: 'goose', ms: 3000 }, { say: 'goose', line: 'bucket' }, { wear: 'goose', what: 'bucket', on: false }] },
+      { id: 'startled', needs: { pig: 1, chicken: true }, steps: [{ pose: 'pig', is: 'startled', ms: 800 }, { say: 'pig', line: 'startled' }] },
       { id: 'hammock', needs: { cow: 1, spot: 'hammock' }, steps: [{ go: 'cow', to: 'spot:hammock' }, { say: 'cow', line: 'hammock' }, { stay: 'cow', is: 'sleep', ms: 20000, while: 'spot:hammock' }, { go: 'cow', to: 'back' }] },
-      { id: 'tag', needs: { tiger: 1, sheepdog: 1 }, steps: [{ go: 'tiger', to: 'sheepdog', run: true }, { say: 'tiger', line: 'tag' }, { go: 'sheepdog', to: 'away', run: true, ms: 2500 }, { go: 'tiger', to: 'sheepdog', run: true, ms: 2500 }] },
+      { id: 'tag', needs: { horse: 1, sheepdog: 1 }, steps: [{ go: 'horse', to: 'sheepdog', run: true }, { say: 'horse', line: 'tag' }, { go: 'sheepdog', to: 'away', run: true, ms: 2500 }, { go: 'horse', to: 'sheepdog', run: true, ms: 2500 }] },
       // a cat hunts a mouse (the mouse is faster); now and then it is the other way round
       { id: 'mouse', needs: { cat: 1, mouse: 1 }, steps: [{ go: 'cat', to: 'mouse', run: true }, { say: 'mouse', line: 'eek' }, { go: 'mouse', to: 'away', run: true, ms: 2500 }, { go: 'cat', to: 'mouse', run: true, ms: 3000 },
         { go: 'mouse', to: 'away', run: true, ms: 2500 }, { go: 'cat', to: 'mouse', run: true, ms: 3000 }, { go: 'mouse', to: 'away', run: true, ms: 2000 }, { say: 'cat', line: 'missed' }] },
       { id: 'tables', needs: { mouse: 1, cat: 1 }, steps: [{ go: 'mouse', to: 'cat', run: true }, { say: 'mouse', line: 'brave' }, { pose: 'cat', is: 'startled', ms: 700 }, { go: 'cat', to: 'away', run: true, ms: 2500 }, { go: 'mouse', to: 'cat', run: true, ms: 3000 }, { say: 'cat', line: 'shame' }] },
       { id: 'herding', needs: { sheepdog: 1, cat: 2 }, steps: [{ go: 'sheepdog', to: 'cat', run: true }, { say: 'sheepdog', line: 'herd' }, { go: 'cat', to: 'away', ms: 3000 }, { go: 'cat2', to: 'away', ms: 3000 }, { say: 'cat', line: 'no' }, { pose: 'sheepdog', is: 'roll', ms: 2500 }, { say: 'sheepdog', line: 'gaveup' }] },
+      { id: 'flock', needs: { sheepdog: 1, sheep: 2 }, steps: [{ go: 'sheepdog', to: 'sheep', run: true }, { say: 'sheepdog', line: 'flock' }, { go: 'sheep', to: 'away', ms: 3000 }, { go: 'sheep2', to: 'away', ms: 3000 }, { say: 'sheep', line: 'follow' }, { pose: 'sheepdog', is: 'happy', ms: 2000 }] }, // what it was bred for
       { id: 'gravity', needs: { cat: 1, spot: 'bucket' }, steps: [{ go: 'cat', to: 'spot:bucket' }, { pose: 'cat', is: 'stand', ms: 1200 }, { wear: 'cat', what: 'bucket', on: true }, { say: 'cat', line: 'gravity' }, { wait: 3500 }, { wear: 'cat', what: 'bucket', on: false }, { go: 'cat', to: 'back' }] }, // it pushes the bucket over
-      { id: 'mouseking', needs: { lion: 1, mouse: 1 }, steps: [{ go: 'mouse', to: 'lion', run: true }, { pose: 'lion', is: 'startled', ms: 800 }, { say: 'lion', line: 'mouse' }, { go: 'lion', to: 'away', run: true, ms: 3000 }, { say: 'mouse', line: 'king' }] },
-      { id: 'fits', needs: { lion: 1, spot: 'basket' }, steps: [{ go: 'lion', to: 'spot:basket' }, { say: 'lion', line: 'fits' }, { stay: 'lion', is: 'sleep', ms: 12000 }, { go: 'lion', to: 'back' }] }, // the big cat in the cats' basket, while they are out
-      { id: 'faint', needs: { goat: 1, tiger: 1 }, steps: [{ go: 'tiger', to: 'goat', run: true }, { say: 'tiger', line: 'boo' }, { pose: 'goat', is: 'roll', ms: 3000 }, { say: 'goat', line: 'faint' }, { pose: 'tiger', is: 'startled', ms: 600 }, { say: 'tiger', line: 'oops' }] },
+      { id: 'mouseking', needs: { horse: 1, mouse: 1 }, steps: [{ go: 'mouse', to: 'horse', run: true }, { pose: 'horse', is: 'startled', ms: 800 }, { say: 'horse', line: 'mouse' }, { go: 'horse', to: 'away', run: true, ms: 3000 }, { say: 'mouse', line: 'king' }] },
+      { id: 'fits', needs: { pig: 1, spot: 'basket' }, steps: [{ go: 'pig', to: 'spot:basket' }, { say: 'pig', line: 'fits' }, { stay: 'pig', is: 'sleep', ms: 12000 }, { go: 'pig', to: 'back' }] }, // the big cat in the cats' basket, while they are out
+      { id: 'faint', needs: { goat: 1, goose: 1 }, steps: [{ go: 'goose', to: 'goat', run: true }, { say: 'goose', line: 'honk' }, { pose: 'goat', is: 'roll', ms: 3000 }, { say: 'goat', line: 'faint' }, { pose: 'goose', is: 'startled', ms: 600 }, { say: 'goose', line: 'oops' }] },
       { id: 'gossip', needs: { cow: 2 }, steps: [{ go: 'cow2', to: 'cow' }, { say: 'cow', line: 'gossip' }, { wait: 3000 }, { say: 'cow2', line: 'gossip2' }, { wait: 2500 }] },
     ];
     // A farmer idle three minutes or more sometimes plays with one (two at most); work, or you, call it back.
     const FARM_PLAY = [
       { id: 'stick', needs: { farmer: 'idle', sheepdog: 1 }, steps: [{ go: 'farmer', to: 'sheepdog' }, { go: 'sheepdog', to: 'away', run: true, ms: 3000 }, { go: 'sheepdog', to: 'farmer', run: true }, { say: 'sheepdog', line: 'stick' }] },
       { id: 'pet', needs: { farmer: 'idle', goat: 1 }, steps: [{ go: 'farmer', to: 'goat' }, { fx: 'hearts', at: 'goat' }, { say: 'goat', line: 'petted' }, { wait: 2000 }] },
-      { id: 'nap', needs: { farmer: 'idle', lion: 1 }, steps: [{ go: 'farmer', to: 'lion' }, { pose: 'lion', is: 'sleep', ms: 8000 }, { say: 'lion', line: 'nap' }] },
+      { id: 'nap', needs: { farmer: 'idle', pig: 1 }, steps: [{ go: 'farmer', to: 'pig' }, { pose: 'pig', is: 'sleep', ms: 8000 }, { say: 'pig', line: 'nap' }] },
       { id: 'laser', needs: { farmer: 'idle', cat: 1 }, steps: [{ go: 'farmer', to: 'cat' }, { say: 'cat', line: 'laser' }, { go: 'cat', to: 'away', run: true, ms: 2000 }, { go: 'cat', to: 'back', run: true, ms: 2000 }, { go: 'cat', to: 'away', run: true, ms: 2000 }, { fx: 'dust', at: 'cat' }] },
     ];
 
@@ -1848,7 +1851,7 @@
         if (seenCompactions) for (const f of next.farmers) if (seenCompactions.has(f.id) && comp.get(f.id) > seenCompactions.get(f.id)) events.push({ id: f.id, kind: 'harvest', text: 'Harvest!', cls: 'good', log: 'brings in the harvest: its conversation was compacted, and it sows again' });
         seenCompactions = comp;
         const merged = next.fields.flatMap(fl => (fl.prs?.merged ?? []).map(m => ({ ...m, repo: fl.name, key: `${fl.key}#${m.number}` })));
-        if (seenMerged) for (const m of merged) if (!seenMerged.has(m.key) && (m.at ?? 0) > Date.now() - 30 * 60_000) events.push({ at: [STALL.x + 14, STALL.y + 8], kind: 'merged', text: `Sold! #${m.number}`, cls: 'good', log: `${m.repo}: pull request #${m.number} merged (${clip(m.title ?? '', 50)})` });
+        if (seenMerged) for (const m of merged) if (!seenMerged.has(m.key) && (m.at ?? 0) > PXG.now() - 30 * 60_000) events.push({ at: [STALL.x + 14, STALL.y + 8], kind: 'merged', text: `Sold! #${m.number}`, cls: 'good', log: `${m.repo}: pull request #${m.number} merged (${clip(m.title ?? '', 50)})` });
         seenMerged = new Set(merged.map(m => m.key));
         const weather = new Map(next.fields.map(fl => [fl.key, fl.weather ?? null]));
         if (seenWeather) for (const [key, w] of weather) { // a deploy just failed (rain) or went through (a rainbow): for the animals, no words
@@ -1861,8 +1864,8 @@
         events.push(...callHens(next));
         season = seasonOf(next.plan);
         porchAt = 0; // who is on the porch may have changed
-        if (events.some(e => e.kind === 'merged')) cheerUntil = Date.now() + 6000;
-        for (const key of found.splice(0)) events.push({ at: [PORCH_SPOTS.turn[1], PORCH_Y - 34], text: 'New!', cls: 'good', who: 'The porch', log: `${ALBUM[key]}: seen for the first time (${album.size} of ${Object.keys(ALBUM).length} in the album)` });
+        if (events.some(e => e.kind === 'merged')) cheerUntil = PXG.now() + 6000;
+        for (const key of found.splice(0)) events.push({ at: [PORCH_SPOTS.turn[1], PORCH_Y - 34], text: 'New!', cls: 'good', own: true, who: 'The porch', log: `${ALBUM[key]}: seen for the first time (${album.size} of ${Object.keys(ALBUM).length} in the album)` });
         return events;
       },
       /** The engine's handles: this world's own settings, kept in the browser (the album). */
@@ -1886,12 +1889,35 @@
         if (f.state === 'working') return { group: 'meadow', cap: MEADOW.length, at: i => MEADOW[i], zone: 'meadow' };
         if (f.nap) return { group: 'nap', cap: NAPS.length, at: i => NAPS[i], zone: 'nap' }; // it wakes up by itself: a hammock, not your porch
         // the porch: 3 waiting on its left end (one waiting a long while paces), 3 with their turn in its seats on the right, each in the one it likes
-        if (f.state === 'waiting') return { group: 'desk', cap: 3, at: i => [PORCH_SPOTS.desk[i] + (porchOf().who.get(f.id)?.stage === 'pace' && Math.floor(Date.now() / 5000) % 2 ? 3 : 0), PORCH_Y], zone: 'desk' };
+        if (f.state === 'waiting') return { group: 'desk', cap: 3, at: i => [PORCH_SPOTS.desk[i] + (porchOf().who.get(f.id)?.stage === 'pace' && Math.floor(PXG.now() / 5000) % 2 ? 3 : 0), PORCH_Y], zone: 'desk' };
         if (f.state === 'turn') return { group: 'turn', cap: 3, at: i => [PORCH_SPOTS.turn[porchOf().who.get(f.id)?.seat ?? i], PORCH_Y], zone: 'turn' };
-        if (f.state === 'stale') return { group: 'storage', cap: 4, at: i => [328 + 20 * i, PORCH_Y], zone: 'storage' };
+        // the scarecrows' row: four stand in it; the rest are behind it (the "+N stale" sign), and one of those steps out between two of the row when a job calls it (extra)
+        if (f.state === 'stale') return { group: 'storage', cap: 4, at: i => [328 + 20 * i, PORCH_Y], extra: k => [338 + 20 * (k % 3), PORCH_Y - 7], zone: 'storage' };
         const y = L.GRID.y1 - 6;
         return { group: 'charge', cap: 4, at: i => [[64, y], [40, y + 2], [88, y + 2], [16, y + 4]][i], zone: 'charge' }; // under the shade tree
       },
+      /**
+       * A way the corridors don't know: the porch and the scarecrows' row lie above the lane, with the house, the notice board and the
+       * stall in between. From or to either, a farmer steps down to the lane, walks along it and goes up again at its place: never along
+       * the deck from one side to the other, over the porch to the scarecrows, or through the board or the stall.
+       */
+      route(b, tx, ty) {
+        const up = y => y < LANE - 3, band = x => (x < 270 ? 0 : x >= 316 ? 2 : 1);
+        if (!up(b.y) && !up(ty)) return null; // on the ground: the engine's own way, by the paths
+        if (up(b.y) && up(ty) && band(b.x) === band(tx) && band(b.x) !== 1) return null; // along the same deck, or the same row
+        const corr = (x0, x1) => CORR.reduce((best, c) => (Math.abs(x0 - c) + Math.abs(x1 - c) < Math.abs(x0 - best) + Math.abs(x1 - best) ? c : best));
+        const out = [];
+        let x = b.x, y = b.y;
+        if (up(y)) { out.push([x, LANE]); y = LANE; } // down off the deck, or out of the row, straight ahead
+        if (up(ty)) {
+          if (Math.abs(y - LANE) > 3) { const c = corr(x, tx); out.push([c, y], [c, LANE]); } // from the ground up to the lane by a path
+          out.push([tx, LANE], [tx, ty]);
+        } else if (Math.abs(y - ty) < 0.5) out.push([tx, ty]);
+        else { const c = corr(x, tx); out.push([c, y], [c, ty], [tx, ty]); }
+        return out;
+      },
+      /** Where one waits whose job can't set off yet (five are out at the animals already): in a line along the lane, from the scarecrows' gate past the stall. */
+      waitSpot: k => [Math.max(20, 310 - 13 * k), LANE],
       /** A new farmer comes out of the farmhouse: from its front door, across the porch and down the steps onto the lane; then its own way. */
       spawn: () => [HOUSE_DOOR.x, HOUSE_DOOR.y1, [[HOUSE_DOOR.x, LANE]]], // it starts in the doorway, on the sill
       follow: (b, k, T, kid) => (kid?.dog
@@ -1961,10 +1987,10 @@
       dens: () => [[BASKET.x, BASKET.y - 1], [mossAt().x, mossAt().y]],
       /** Is a gag's spot free now: a hammock is taken while anyone naps (the nappers have the hammocks). */
       spotFree: name => (name === 'hammock' ? !scene.farmers.some(f => f.nap) : true),
-      /** Where the animals may walk: the whole farm (its crop beds and buildings are kept off by fieldAt and buildingAt). */
-      roam: () => [{ x: 4, y: 14, w: W - 8, h: L.H - 18 }],
-      /** What they keep off besides: the pond (the ducks' own), the hammocks, the henhouse and its run, the shade tree's trunk, the row where the tool carts park, the cats' basket, the trees and moss at the wood's edge. */
-      avoid: () => [{ x: 8, y: 194, w: 70, h: 32 }, { x: 84, y: 196, w: 24, h: 34 }, { x: 0, y: 95, w: 106, h: 44 }, { x: 60, y: L.GRID.y1 - 26, w: 14, h: 12 }, { x: 300, y: 78, w: 98, h: 16 }, { x: BASKET.x - 10, y: BASKET.y - 6, w: 20, h: 9 }, woodAt()], // the run's hens are subagents; the carts are MCP servers
+      /** Where the animals may walk: the pasture, under the buildings and outside the crop fence: the yard down the left, and the meadow below the fields. Never behind the house, the barn or the silos, on the porch, among the scarecrows or between the beds. */
+      roam: () => [{ x: 4, y: LANE + 8, w: L.GRID.x0 - 4, h: L.H - LANE - 14 }, { x: L.GRID.x0 - 4, y: L.GRID.y1 + 3, w: W - L.GRID.x0, h: Math.max(8, L.H - L.GRID.y1 - 8) }],
+      /** What they keep off besides: the pond (the ducks' own), the hammocks, the henhouse and its run, the shade tree's trunk, the cats' basket, the trees and moss at the wood's edge, and every bed, in use or fallow (an empty bed is ground to look at, not to cross). */
+      avoid: () => [{ x: 8, y: 194, w: 70, h: 32 }, { x: 84, y: 196, w: 24, h: 34 }, { x: 0, y: 95, w: 106, h: 44 }, { x: 60, y: L.GRID.y1 - 26, w: 14, h: 12 }, { x: 300, y: 78, w: 98, h: 16 }, { x: BASKET.x - 10, y: BASKET.y - 6, w: 20, h: 9 }, woodAt(), ...L.slots.map(s => ({ x: s.cx - 41, y: s.rowTop - 1, w: 82, h: 58 }))], // the run's hens are subagents; the carts are MCP servers; a bed's box is fieldAt's, a pixel wider (the rects here are open, and an animal is drawn at its rounded place)
       /** Particles a farmer gives off: dust when walking; splashes, clods, sparks, chips from its tool. */
       emit(f, b, dt, add) {
         const tend = tending(f), dir = tend?.dir ?? 1, ox = dir > 0 ? b.x - 7 * SC : b.x + 7 * SC - 34 * SC, oy = b.y - 16 * SC, T = PXG.T; // ox: so that ox + 17 is where the tool meets the soil, either way it faces
@@ -2022,7 +2048,7 @@
       },
       /** A field's record for its close-up: what was done there in all, and the last half hour stretch by stretch, newest first. Plain HTML. */
       fieldNotes(key) {
-        const farmers = scene.farmers.filter(a => a.field === key && a.state !== 'leaving'), tally = fieldTally(key), now = Date.now();
+        const farmers = scene.farmers.filter(a => a.field === key && a.state !== 'leaving'), tally = fieldTally(key), now = PXG.now();
         if (!tally.total) return '';
         const runs = [];
         for (const ev of tally.timeline) { const g = groupOf(ev.step), last = runs.at(-1); if (last?.key === g[0]) { last.n++; last.failed += ev.ok ? 0 : 1; } else runs.push({ key: g[0], color: g[1], words: g[3], at: ev.at, n: 1, failed: ev.ok ? 0 : 1 }); }
@@ -2031,11 +2057,70 @@
       },
       /** Where the subagents' animals are (the engine's own followers are not drawn here): for the animals that notice them. */
       chickens: () => [...hens.values()].filter(h => !h.fresh || h.path.length).map(h => ({ x: h.x, y: h.y, id: h.id, phase: h.phase, want: h.want })),
+      /**
+       * What everyone watching sees alike of the farm's own goings-on (the collector moves them, each browser is told: adopt):
+       * the fields being built or packed up, the rounds at the beds, who is on the way in at the door, the hens and the carts.
+       * Each under its own key, as plain data that changes only when something moves.
+       */
+      share() {
+        const r = v => Math.round(v * 8) / 8, c2 = v => Math.round(v * 100) / 100;
+        return {
+          works: [...works].map(([k, w]) => [k, { ...w, t: Math.round(w.t * 50) / 50 }]),
+          rounds: [...rounds],
+          // who is on the way back into the farmhouse (for a browser that came after they set off), then how far each has come
+          left: [...leavers.values()].map(({ inside, gone, hold, packed, toldOf, ...who }) => who),
+          leavers: [...leavers.values()].map(f => [f.id, f.inside ? 1 : 0, f.gone ? 1 : 0, f.hold ? 1 : 0, f.packed ? 1 : 0]),
+          ghosts: [...ghosts.values()].map(({ toldOf, ...field }) => field), // the fields being packed up
+          hens: [...hens.values()].map(h => ({ id: h.id, by: h.by, dog: h.dog, codex: h.codex, bg: h.bg, x: r(h.x), y: r(h.y), p: h.path.length, phase: h.phase, want: h.want, k: h.k, failed: h.failed, lays: h.lays, fresh: Boolean(h.fresh), moving: Boolean(h.moving), face: h.face ?? 1, wait: h.wait > 0 ? 1 : 0 })),
+          carts: [...carts].map(([k, c]) => [k, r(c.x), r(c.y), c.dir, c.moving ? 1 : 0, c.goal ? 1 : 0]),
+          // the porch cat: where it is, what it is at, where it is going
+          cat: { x: r(cat.x), y: r(cat.y), where: cat.where, goal: cat.goal, face: cat.face, run: Boolean(cat.run), pose: cat.pose ?? null, jump: cat.jump ? 1 : 0, legs: cat.legs.length, plan: cat.plan, stayUntil: cat.stayUntil ?? 0 },
+          // night on the farm; until when the porch drinks to a merge; when the front door and the henhouse's hatch were last passed; who whistled for a hen just now
+          porch: [night ? 1 : 0, cheerUntil, c2(doorAt), c2(coopAt)],
+          whistled: [...whistled].filter(([, at]) => PXG.T - at < 3).map(([id, at]) => [id, c2(at)]),
+        };
+      },
+      /** The other end of share(): what the collector says of each (only the keys that changed), taken as it is. */
+      adopt(got) {
+        if (got.works) { works.clear(); for (const [k, w] of got.works) works.set(k, w); }
+        if (got.rounds) { rounds.clear(); for (const [k, r] of got.rounds) rounds.set(k, r); }
+        for (const who of got.left ?? []) if (!leavers.has(who.id)) leavers.set(who.id, { ...who, state: 'leaving' }); // one that set off before this browser looked
+        if (got.leavers) { // the collector's word on who is leaving: those it names are drawn (at once, not with the next scene), one it named and names no more is in
+          const named = new Set(got.leavers.map(l => l[0]));
+          for (const [id, inside, gone, hold, packed] of got.leavers) {
+            const f = leavers.get(id);
+            if (!f) continue;
+            Object.assign(f, { inside: Boolean(inside), gone: Boolean(gone), hold: hold ? f.hold || PXG.now() + 1500 : 0, packed: Boolean(packed), toldOf: true });
+            if (!f.gone && !scene.farmers.includes(f) && !scene.farmers.some(x => x.id === id)) scene.farmers.push(f);
+          }
+          for (const [id, f] of [...leavers]) if (f.toldOf && !named.has(id)) { leavers.delete(id); const i = scene.farmers.indexOf(f); if (i >= 0) scene.farmers.splice(i, 1); }
+        }
+        if (got.ghosts) { // a field packed up after this browser's last scene is laid out with its next one
+          const keys = new Set(got.ghosts.map(g => g.key));
+          for (const g of got.ghosts) { if (!ghosts.has(g.key)) ghosts.set(g.key, g); ghosts.get(g.key).toldOf = true; }
+          for (const [k, g] of [...ghosts]) if (g.toldOf && !keys.has(k)) ghosts.delete(k);
+        }
+        if (got.hens) {
+          const ids = new Set(got.hens.map(h => h.id));
+          for (const h of got.hens) hens.set(h.id, { delay: 0, ...hens.get(h.id), ...h, path: Array.from({ length: h.p }, () => [h.x, h.y]), tx: h.x, ty: h.y, instant: false });
+          for (const id of [...hens.keys()]) if (!ids.has(id)) hens.delete(id);
+          henNews = true;
+        }
+        for (const [k, x, y, dir, moving, goal] of got.carts ?? []) carts.set(k, { path: [], to: [x, y], ...carts.get(k), x, y, dir, moving: Boolean(moving), goal: goal ? [x, y] : null });
+        if (got.cat) { // drawn from this; its way (legs, a leap) is the collector's to walk: only whether it has one is kept
+          const c = got.cat;
+          Object.assign(cat, { x: c.x, y: c.y, where: c.where, goal: c.goal, face: c.face, run: c.run, pose: c.pose, plan: c.plan, stayUntil: c.stayUntil, placed: true, at: PXG.T,
+            legs: Array.from({ length: c.legs }, () => ({ to: [c.x, c.y] })), jump: c.jump ? { from: [c.x, c.y], to: [c.x, c.y], where: c.where, t0: PXG.T, s: 0.05 } : null });
+        }
+        if (got.porch) { [night, cheerUntil, doorAt, coopAt] = [Boolean(got.porch[0]), got.porch[1], got.porch[2], got.porch[3]]; porchAt = 0; }
+        if (got.whistled) { whistled.clear(); for (const [id, at] of got.whistled) whistled.set(id, at); }
+      },
       /** What the henhouse's labels say, besides the fields': how many are out, and which eggs lie in the nest. */
       labelKey: () => `${hens.size}|${eggsOf().map(s => s.id).join(',')}|${[...works.keys(), ...ghosts.keys()].join()}|${L.ST.map(s => { const t = fieldTally(s.key); return `${t.total}.${t.failed}.${t.lastTest?.at ?? 0}`; }).join()}`,
       /** By day, butterflies and birds, and cloud shadows drift over the farm; at night, fireflies over the yard. */
       weather(sky) {
-        night = sky.phase === 'night';
+        dark = sky.phase === 'night';
+        if (!told && !PXG.sky) night = dark; // (the engine says what time it is before each tick: PXG.sky; drawn by hand, the sky drawn is the time)
         const T = PXG.T, e = PXG.ext ?? { x0: 0, x1: W, y0: 0, y1: L.H }, EW = e.x1 - e.x0 + 160, seen = shown(); // the season you see, held or live
         if (sky.light > 0.5 && (seen === 'spring' || seen === 'summer')) [[40, 160, '#ffffff'], [80, 150, '#ffd43b'], [60, 186, '#f08a24']].forEach(([bx, by, c], i) => {
           const x = Math.round(bx + Math.sin(T * 0.5 + i * 2.1) * 22 + Math.sin(T * 1.7 + i) * 4), y = Math.round(by + Math.sin(T * 0.8 + i * 1.3) * 10 + Math.sin(T * 3 + i) * 2), open = blink(6 + i);
@@ -2101,19 +2186,44 @@
       boardSessions: () => [...new Map(scene.farmers.filter(f => f.kind !== 'codex' && f.cwd).map(f => [f.cwd, f])).values()].slice(0, 8),
       /** The MCP carts, sorted with the farmers by how far down they stand. */
       items() {
-        return placeCarts().map(c => {
+        const town = []; // carts to town and back, one for each web call going on: on the lane, by their feet like the rest
+        for (const f of scene.farmers) {
+          const c = cartOf(f);
+          if (!c) continue;
+          const { x, dir } = c, y = LANE + 4, step = blink(6), pony = x + dir * 7;
+          town.push([y, () => {
+            px(x - 4, y + 2, 9, 1, '#3f7d3a'); // its shadow on the road
+            px(x - 4, y - 4, 8, 4, '#a8703c'); px(x - 4, y - 4, 8, 1, '#c98d4f'); px(x - 2, y - 7, 4, 3, f.step === 'web' ? '#f4ecd8' : '#c9a46a'); px(x - 2, y - 7, 4, 1, f.step === 'web' ? '#ffffff' : '#e2b07a');
+            px(x - 3, y, 2, 2, '#4e3626'); px(x + 2, y, 2, 2, '#4e3626');
+            px(pony - 3, y - 4, 6, 3, '#8b5a2b'); px(pony + dir * 3 - (dir < 0 ? 1 : 0), y - 6, 2, 3, '#8b5a2b'); px(pony + dir * 4 - (dir < 0 ? 0 : 1), y - 5, 1, 1, '#1b1420');
+            px(pony - 3 + step, y - 1, 1, 2, '#6b4320'); px(pony + 1 - step, y - 1, 1, 2, '#6b4320'); px(pony - dir * 4, y - 4, 1, 2, '#4e3626');
+          }]);
+        }
+        return [...town, ...placeCarts().map(c => {
           const s = carts.get(c.server), [hx, hy] = RANK[rankOf.get(c.server)];
           const x = Math.round(s?.x ?? hx), y = Math.round(s?.y ?? hy);
           return [y, () => drawCart(x, y, s?.dir ?? -1, s?.moving, CRATES[hashOf(c.server) % CRATES.length])];
-        });
+        })];
       },
       /** Each frame, after the farmers have moved: each cart drives towards where cartGoal sends it (or is put there, when the farm stands still). */
-      tick(dt, posOf, snap = false) {
-        const now = Date.now();
+      tick(dt, posOf, snap = false, isTold = false) {
+        const now = PXG.now();
         let moved = false;
         frozen = snap;
+        told = isTold;
+        if (!told) { // what the collector does for everyone, when it moves this farm: the time of day, the door, the cat
+          if (PXG.sky) night = PXG.sky.phase === 'night';
+          walkers.length = 0;
+          for (const f of scene.farmers) {
+            const b = posOf(f.id);
+            if (!b?.walk) continue;
+            walkers.push([b.x, b.y]); // the porch cat makes way for whoever walks up to it
+            if (Math.abs(b.x - HOUSE_DOOR.x) < 3 && b.y >= HOUSE_DOOR.y1 && b.y < PORCH_Y) doorAt = PXG.T; // in the doorway, or crossing the boards from it
+          }
+          stepCat(PXG.T);
+        }
         if (snap) { works.clear(); for (const f of leavers.values()) f.gone = true; } // motion off: fields just stand or are gone, leavers are in
-        else {
+        else if (!told) {
           for (const [key, w] of [...works]) {
             const b = posOf(w.by);
             if (!b || now - w.at > WORK_MAX_MS) { works.delete(key); moved = true; } // its farmer is not out on the farm (the resting ones hidden), or it has gone on too long: done at once
@@ -2124,9 +2234,11 @@
         for (const f of leavers.values()) if (f.gone && scene.farmers.includes(f)) { scene.farmers.splice(scene.farmers.indexOf(f), 1); moved = true; } // in: off the farm, and out of its counts
         onMap.clear();
         for (const f of scene.farmers) { const b = posOf(f.id); if (b) { onMap.add(f.id); seenAt.set(f.id, [b.x, b.y]); } }
-        for (const f of leavers.values()) if (f.hold && now >= f.hold) { f.hold = 0; moved = true; } // its hens are off home: now it goes
         for (const id of seenAt.keys()) if (!onMap.has(id)) seenAt.delete(id);
+        if (told) { const news = henNews; henNews = false; return news; } // the collector moves the rest (adopt): only the henhouse's news, for its labels
+        for (const f of leavers.values()) if (f.hold && now >= f.hold) { f.hold = 0; moved = true; } // its hens are off home: now it goes
         if (stepHens(dt, posOf, snap)) moved = true;
+        if ([...hens.values()].some(h => (h.path.length || h.phase === 'home') && Math.abs(h.x - COOP.door[0]) < 5 && h.y < COOP.foot[1])) coopAt = PXG.T; // a hen in the henhouse's doorway: its hatch swings up
         for (const [id, r] of rounds) { // a round goes on: at its point, the farmer turns to the next
           const f = farmerOf(id), b = posOf(id), s = stOf(r.key);
           if (!f || f.state !== 'working' || !s) { rounds.delete(id); moved = true; continue; }
@@ -2170,8 +2282,6 @@
           for (let i = 3; i <= 21; i++) { const sag = Math.round(Math.sin((i / 24) * Math.PI) * 4); px(cx - 12 + i, y - 9 + sag, 1, 2, '#d55181'); px(cx - 12 + i, y - 7 + sag, 1, 1, '#8a5fc0'); }
           return;
         }
-        if (b.walk) walkers.push([b.x, b.y]); // the porch cat makes way for whoever walks up to it
-        if (b.walk && Math.abs(b.x - HOUSE_DOOR.x) < 3 && b.y >= HOUSE_DOOR.y1 && b.y < PORCH_Y) doorAt = PXG.T; // in the doorway, or crossing the boards from it
         const scare = isScare(f), tend = tending(f), p = b.walk ? null : porchOf().who.get(f.id), sat = isSat(p);
         const [ox0, oy0] = tend ? tendOrigin(f, b) : pixelOrigin(b, 16), ox = ox0 + (sat ? swayOf(p.seat) : 0), oy = oy0 - (sat ? SEAT_UP : 0), rp = rpAt(ox, oy);
         if (scare) { rp(0, 10, 14, 1, '#6b4320'); rp(-1, 9, 2, 3, '#d8c48a'); rp(13, 9, 2, 3, '#d8c48a'); }
@@ -2278,16 +2388,6 @@
       top() {
         const T = PXG.T, sur = porchOf().surprise;
         if (sur?.key === 'star') { const x = Math.round(70 + sur.t * 220), y = Math.round(3 + sur.t * 12); saw('star'); px(x, y, 2, 1, '#ffffff'); PXG.ctx.globalAlpha = 0.5; px(x - 5, y - 1, 5, 1, '#fff3a6'); PXG.ctx.globalAlpha = 1; }
-        for (const f of scene.farmers) { // carts to town and back, one for each web call going on
-          const c = cartOf(f);
-          if (!c) continue;
-          const { x, dir } = c, y = LANE + 4, step = blink(6), pony = x + dir * 7;
-          px(x - 4, y + 2, 9, 1, '#3f7d3a'); // its shadow on the road
-          px(x - 4, y - 4, 8, 4, '#a8703c'); px(x - 4, y - 4, 8, 1, '#c98d4f'); px(x - 2, y - 7, 4, 3, f.step === 'web' ? '#f4ecd8' : '#c9a46a'); px(x - 2, y - 7, 4, 1, f.step === 'web' ? '#ffffff' : '#e2b07a');
-          px(x - 3, y, 2, 2, '#4e3626'); px(x + 2, y, 2, 2, '#4e3626');
-          px(pony - 3, y - 4, 6, 3, '#8b5a2b'); px(pony + dir * 3 - (dir < 0 ? 1 : 0), y - 6, 2, 3, '#8b5a2b'); px(pony + dir * 4 - (dir < 0 ? 0 : 1), y - 5, 1, 1, '#1b1420');
-          px(pony - 3 + step, y - 1, 1, 2, '#6b4320'); px(pony + 1 - step, y - 1, 1, 2, '#6b4320'); px(pony - dir * 4, y - 4, 1, 2, '#4e3626');
-        }
         for (const s of L.ST) {
           const weather = fieldByKey(s.key).weather;
           if (weather === 'rainbow') { // deploy passed: a rainbow across the field
@@ -2324,7 +2424,7 @@
           lab(s.cx, s.rowTop + 49, `<button type="button" class="px-field" data-farm-field="${esc(f.key)}" title="${esc(tip)}"><span class="px-fl">${pxt(cutMid(f.name, 16), f.collision ? '#ffd166' : '#e6eef5')}${branch}</span>${second ? `<span class="px-fl">${second}</span>` : ''}</button>`, f.collision ? 'bad' : '');
           const tally = fieldTally(s.key);
           if (tally.total) { // the slate's own words, on hover: what was done here, group by group; a click opens the field
-            const lines = tallyLines(tally, scene.farmers.filter(a => a.field === s.key && a.state !== 'leaving'), Date.now());
+            const lines = tallyLines(tally, scene.farmers.filter(a => a.field === s.key && a.state !== 'leaving'), PXG.now());
             lab(s.x0 + 63, s.y0 + 13, `<button type="button" class="px-spot" data-farm-field="${esc(f.key)}" aria-label="${esc(lines.map(l => l.text).join('. '))}"><span>${lines.map(l => `<i>${l.color ? `<u class="px-chip" style="background:${l.color}"></u>` : ''}${pxt(clip(l.text, 64), '#5a3a1a', null)}</i>`).join('')}</span></button>`, 'spot', lines.map(l => l.text).join('\n'));
           }
           if (f.behind > 0) lab(s.cx - 40, s.rowTop - 8, cnt(`↓${f.behind}`), 'cnt', `${f.behind} commit${f.behind === 1 ? '' : 's'} behind the remote`);
@@ -2376,7 +2476,7 @@
       <b>Above a field</b><span>hay = uncommitted files, crates = unpushed commits, mailbox = behind the remote</span>
       <b>Weather</b><span>the repo's last deploy, from GitHub Actions or a deploy an agent ran itself (a deploy script over ssh, rsync, vercel…), whichever is newer: rainbow = deployed, rain = deploy failed (hover its sign for why; the close-up links to the run), windmill = deploying. A run GitHub never started (billing, spending limit) brings no weather: ⏸ Actions didn't run. Rope = two agents writing one repo</span>
       <b>Hearts, crops</b><span>hearts = context left. Crops grow as the context fills: seeds, sprouts, young plants, in flower, ripening, then ripe with a sparkle (golden wheat, red tomatoes, sunflowers in bloom…) when it is nearly full. When the conversation is compacted, that's the harvest: the field starts again from seed. Hens = subagents (a brown hen: one of Codex's), the dog = an Explore subagent; each wears a kerchief in its farmer's colour</span>
-      <b>Animals</b><span>cows, goats, a sheepdog (with a red bandana), an ostrich, a lion, a tiger, two cats (a grey one and a black one), two mice and the ducks on the pond live here just for fun: they never stand for anything. Click one, or the pond, to pet or feed it: the nearest farmer that isn't waiting on you walks over and does it. Now and then they get up to something: a goat steals a hat, the ostrich runs off with the bucket, the cow naps in an empty hammock, a cat hunts a mouse (or the mouse the cat). The cats sleep long in their basket or on the moss at the wood's edge, sometimes curled up together. And once in a while, for a few seconds, there is a unicorn. It is shy: don't touch it. They react to deploys, harvests and merges. Farmers idle for a while sometimes play with them. In winter they huddle, and the goats wear scarves. The Animals switch hides them</span>
+      <b>Animals</b><span>cows, goats, sheep, a pig, a horse, a goose, a sheepdog (with a red bandana), two cats (a grey one and a black one), two mice and the ducks on the pond live here just for fun: they never stand for anything. They keep to the pasture: the yard and the meadow below the fields, never the fields, the porch or what lies behind the buildings. Click one, or the pond, to pet or feed it: the nearest farmer that isn't waiting on you walks over and does it. Everyone who has the dashboard open sees the same farm, and may ask too: what is asked is done in turn, five scarecrows out at most. Now and then they get up to something: a goat steals a hat, the goose runs off with the bucket, the dog herds the sheep, the cow naps in an empty hammock, a cat hunts a mouse (or the mouse the cat). The cats sleep long in their basket or on the moss at the wood's edge, sometimes curled up together. And once in a while, for a few seconds, there is a unicorn. It is shy: don't touch it. They react to deploys, harvests and merges. Farmers idle for a while sometimes play with them. In winter they huddle, and the goats wear scarves. The Animals switch hides them</span>
       <b>Shade tree, scarecrows</b><span>idle agents nap under the tree (bottom left); stale ones stand as scarecrows (top right); the meadow by the henhouse is for agents outside any repo</span>
       <b>Silo</b><span>its grain is your plan's weekly limit used (the % under it; when it resets on hover); its lamp turns amber from 70% and blinks red from 90%. With two Claude accounts, each has a silo (the second left of the barn), its name on the tag at its foot</span>
       <b>Seasons</b><span>follow your plan's 5-hour limit: spring while it is fresh (blossom), then summer, autumn (falling leaves), and winter (snow) when it is nearly used up; a new window brings spring back. The Season switch holds one instead (each click moves it on, then back to live): the panel then shows the season with a 📌 and your real 5-hour use, and the animals follow the season you see</span>

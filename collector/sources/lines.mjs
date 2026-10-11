@@ -5,7 +5,7 @@ import { modAtLeast } from './pending.mjs';
 // step word, counts, events; never a path, a command, a branch or anyone's words), which session runs a
 // call, when a batch is due, and which reply rows are kept (docs/worlds.md, README "✨ Helper").
 export const SITUATIONS = ['idle', 'deployFailed', 'deployOk', 'harvest', 'merged', 'arrive'];
-export const CREATURE_KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'robodog', 'vacuum']; // creatures.js (a test fails when they drift)
+export const CREATURE_KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'pig', 'sheep', 'horse', 'goose', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'robodog', 'vacuum']; // creatures.js (a test fails when they drift)
 export const SILENT_KINDS = ['unicorn']; // creatures with nothing to say: they get no lines (the farm's unicorn only visits)
 // The mod that first knew a kind (its LINE_KINDS); the rest, 0.9.0. An older mod drops a kind it doesn't know from
 // the cast, so that animal gets no lines, and a cast of only such kinds comes back as an error, counted as a call.

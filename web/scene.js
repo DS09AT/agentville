@@ -99,7 +99,7 @@
   // catch-all one like ~/code holds unrelated repos, so it is none. The farm's bed grid groups by it.
   const CATCH_ALL = new Set(['code', 'projects', 'repos', 'src', 'dev', 'work', 'tools', 'github', 'git', 'documents', 'desktop', 'downloads', 'workspace', 'workspaces', 'sites', 'apps', 'clients', 'tmp']);
   function projectOf(path) {
-    const parts = String(path).split('/').filter(Boolean).slice(0, -1);
+    const parts = String(path).split(/[\\/]/).filter(Boolean).slice(0, -1);
     return parts.length >= 3 && !CATCH_ALL.has(parts.at(-1).toLowerCase()) ? `/${parts.join('/')}` : null;
   }
 
@@ -163,7 +163,7 @@
           collision: (snap.collisions ?? []).find(c => c.repo === r.path)?.severity ?? null,
           worktree: r.worktree === true, main: r.main ?? null,
           bed: Number.isInteger(r.bed) ? r.bed : null, // its place on the grid, from the collector: the same for everyone looking
-          project, projectName: project ? project.split('/').pop() : null,
+          project, projectName: project ? project.split(/[\\/]/).pop() : null,
           prs: r.prs ?? null,
         };
       }),
@@ -200,6 +200,21 @@
     if (!standIns.has(k)) standIns.set(k, `${prefix}${++counts[prefix]}`);
     return standIns.get(k);
   };
+  /** The stand-ins given so far, as [[what, stand-in]] ('r:<repo key>' → 'r1'…): the collector's, for the worlds it moves, go out to every page. */
+  const standInsNow = () => [...standIns];
+  /**
+   * Takes another's stand-ins as its own (the collector's, for a world it moves: then this page's private scene numbers
+   * everything as the world's own process has it). True when any of them was new here, or differed.
+   */
+  function useStandIns(entries) {
+    let changed = false;
+    for (const e of Array.isArray(entries) ? entries.slice(0, 2000) : []) {
+      if (!Array.isArray(e) || typeof e[0] !== 'string' || typeof e[1] !== 'string' || !/^[rpa]:/.test(e[0]) || !/^[rpa]\d{1,6}$/.test(e[1]) || e[0][0] !== e[1][0]) continue;
+      if (standIns.get(e[0]) !== e[1]) { standIns.set(e[0], e[1]); changed = true; }
+      counts[e[1][0]] = Math.max(counts[e[1][0]], Number(e[1].slice(1))); // the next one given here is past them all
+    }
+    return changed;
+  }
   /**
    * The scene for a world that may not see what agents say: no words (questions, replies, summaries,
    * task, message and subagent text, pull requests' titles, deploys' words, branches, where calls go),
@@ -239,5 +254,5 @@
     };
   }
 
-  window.AgentvilleScene = { VERSION, toScene, privateScene, colorOf, fieldOf, contextPct, askText, mailOf, cartsOf, deployOf, projectOf };
+  window.AgentvilleScene = { VERSION, toScene, privateScene, standIns: standInsNow, useStandIns, colorOf, fieldOf, contextPct, askText, mailOf, cartsOf, deployOf, projectOf };
 })();
