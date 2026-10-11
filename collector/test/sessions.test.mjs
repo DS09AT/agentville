@@ -141,9 +141,9 @@ test('the terminal script gets the command as an argument, never inside the scri
   const cmd = "cd '/code/app' && claude";
   for (const app of ['iTerm', 'Terminal']) {
     const args = terminalScript(app, cmd);
-    assert.equal(args.at(-1), cmd);
-    const script = args.slice(0, -1).filter((_, i) => i % 2 === 1).join('\n');
-    assert.ok(args.slice(0, -1).every((a, i) => (i % 2 === 0 ? a === '-e' : true)));
+    assert.deepEqual(args.slice(-2), ['--', cmd], 'after --, so it is never read as an option');
+    const script = args.slice(0, -2).filter((_, i) => i % 2 === 1).join('\n');
+    assert.ok(args.slice(0, -2).every((a, i) => (i % 2 === 0 ? a === '-e' : true)));
     assert.ok(!script.includes('claude'));
     assert.match(script, new RegExp(`tell application "${app}"`));
   }

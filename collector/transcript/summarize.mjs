@@ -7,7 +7,7 @@ export function firstLine(text, max = 200) {
   return clip(String(text ?? '').split('\n').find(line => line.trim()) ?? '', max);
 }
 
-const lastTwo = path => String(path ?? '').split('/').filter(Boolean).slice(-2).join('/');
+const lastTwo = path => String(path ?? '').split(/[\\/]/).filter(Boolean).slice(-2).join('/');
 
 /** One short line describing a tool call, for tickers and feeds. */
 export function summarizeTool(name, input = {}) {

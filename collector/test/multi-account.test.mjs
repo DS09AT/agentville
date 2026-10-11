@@ -61,7 +61,7 @@ exit 0
 
 async function start(f, extra = {}) {
   const launched = [];
-  const handle = await startCollector({ root: f.root, claudeDir: f.claudeDir, home: f.top, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; }, ...extra });
+  const handle = await startCollector({ platform: 'darwin', root: f.root, claudeDir: f.claudeDir, home: f.top, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; }, ...extra });
   return { handle, launched, snap: () => handle.getSnapshot() };
 }
 const remembered = f => JSON.parse(readFileSync(join(f.root, 'state', 'session-accounts.json'), 'utf8'));

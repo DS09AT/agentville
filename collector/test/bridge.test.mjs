@@ -146,15 +146,18 @@ test("what an engine world does becomes the page's messages", async () => {
   opts.onStartSession();
   opts.onNav('list');
   opts.onBell(true);
+  opts.onAwake(true);
+  assert.equal(prefs.get('awake'), 'on', 'the screen kept on is the page\'s own setting too: read here, never stored by a world');
   opts.onMotion(true);
   prefs.set('zoom', 2);
   prefs.set('bell', 'on');
+  prefs.set('awake', 'off');
   opts.onDiary([{ at: 1, state: 'working', who: 'a', text: 'b', extra: 1 }]);
   opts.onDiary([{ at: 1, state: 'working', who: 'a', text: 'b' }]);
   const asked = opts.request('repoTouched', { repo: '/code/x' });
   assert.deepEqual(f.sent.slice(1), [
     { type: 'pick', agentId: 'a1', from: 'say' }, { type: 'pick', agentId: 'a2' }, { type: 'openDoc', agentId: 'a1', path: '/code/x.md' },
-    { type: 'showRepos' }, { type: 'startSession' }, { type: 'nav', what: 'list' }, { type: 'bell', on: true }, { type: 'motion', still: true },
+    { type: 'showRepos' }, { type: 'startSession' }, { type: 'nav', what: 'list' }, { type: 'bell', on: true }, { type: 'awake', on: true }, { type: 'motion', still: true },
     { type: 'store', key: 'zoom', value: '2' }, { type: 'diary', entries: [{ at: 1, state: 'working', who: 'a', text: 'b' }] },
     { type: 'request', id: 1, kind: 'repoTouched', repo: '/code/x' },
   ], 'the same diary twice is sent once; bell is the page\'s own setting');
@@ -260,4 +263,41 @@ test('the bridge carries the world’s cast to the page, and the page’s chatte
   assert.deepEqual(got, [[{ kind: 'cow', when: 'idle', text: 'moo' }]]);
   f.fromPage({ type: 'chatter', lines: [] });
   assert.deepEqual(got.at(-1), []);
+});
+
+test('a world the collector moves: its start says so (opts.remote); what the page says of its room reaches the world, held until it is live', () => {
+  const f = frame(), got = [];
+  let remote = null;
+  f.A.raw({ start({ opts }) { remote = opts.remote; }, scene() {}, remote: m => got.push(m) }, { engine: true });
+  f.fromPage({ type: 'start', world: 'farm', prefs: {}, settings: { sim: true } });
+  assert.equal(remote, true);
+  f.fromPage({ type: 'sim', on: true });
+  f.fromPage({ type: 'sim', s: { t: 1, b: [], a: [] } });
+  assert.deepEqual(got, [], 'not live yet: held');
+  f.draw(); f.draw();
+  assert.deepEqual(JSON.parse(JSON.stringify(got)), [{ type: 'sim', on: true }, { type: 'sim', s: { t: 1, b: [], a: [] } }], 'in the order they came');
+  f.fromPage({ type: 'sim', fx: { fx: 'hearts', at: [3, 4] } });
+  assert.deepEqual(JSON.parse(JSON.stringify(got.at(-1))), { type: 'sim', fx: { fx: 'hearts', at: [3, 4] } });
+  const own = frame();
+  let mine = null;
+  own.A.raw({ start({ opts }) { mine = opts.remote; }, scene() {} }, { engine: true });
+  own.fromPage({ type: 'start', world: 'u/space', prefs: {}, settings: {} });
+  assert.equal(mine, false, 'a world that moves itself');
+  own.draw(); own.draw();
+  assert.doesNotThrow(() => own.fromPage({ type: 'sim', on: true }), 'a world with no remote() ignores it');
+});
+
+test('what is asked of an animal goes to the page with an id of its own each time, so asked twice by a retry it is done once', () => {
+  const f = frame({ crypto: { getRandomValues: b => { for (let i = 0; i < b.length; i++) b[i] = (i * 37 + f.sent.length * 11) % 256; return b; } } });
+  let opts = null;
+  f.A.raw({ start(o) { opts = o.opts; }, scene() {} }, { engine: true });
+  f.fromPage({ type: 'start', world: 'farm', prefs: {}, settings: { sim: true } });
+  opts.onAct({ animal: 'cow-0', act: 1, doer: 'a1' });
+  opts.onAct({ animal: 'cow-0', act: 1 });
+  opts.onTouch('cat-1');
+  const acts = f.sent.filter(m => m.type === 'act');
+  assert.deepEqual(acts.map(({ rid, ...rest }) => rest), [{ type: 'act', animal: 'cow-0', act: 1, doer: 'a1' }, { type: 'act', animal: 'cow-0', act: 1 }]);
+  assert.ok(acts.every(a => /^[0-9a-f]{24}$/.test(a.rid)), `ids the page accepts (${acts.map(a => a.rid)})`);
+  assert.notEqual(acts[0].rid, acts[1].rid);
+  assert.deepEqual(f.sent.find(m => m.type === 'touch'), { type: 'touch', animal: 'cat-1' });
 });

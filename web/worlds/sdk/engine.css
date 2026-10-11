@@ -230,3 +230,9 @@ a.pile { text-decoration: none; color: inherit; }
 .fv-rec ul, .fv-rec ol { list-style: none; margin: 0; padding: 0; }
 .fv-rec em { font-style: normal; color: var(--crit, #e04a3a); }
 .fv-chip { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; }
+
+/* A sign, a count or a speech bubble a farmer walks behind goes faint while it passes (whole again under the pointer). */
+.px-lab.px-seethru, .px-mover.px-seethru { opacity: .12; }
+.px-say.px-seethru, .px-animal-say.px-seethru { opacity: .25; }
+.px-say.px-seethru:hover, .px-animal-say.px-seethru:hover { opacity: 1; }
+.px-lab, .px-mover, .px-say, .px-animal-say { transition: opacity .12s; }

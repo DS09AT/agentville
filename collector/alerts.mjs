@@ -56,7 +56,7 @@ export class AlertEngine {
       }
     }
     for (const c of snapshot.collisions) {
-      want.push({ key: `collision:${c.repo}:${c.agentIds.join(',')}`, family: 'collision', title: `Collision in ${c.repo.split('/').pop()}`, message: c.reason });
+      want.push({ key: `collision:${c.repo}:${c.agentIds.join(',')}`, family: 'collision', title: `Collision in ${c.repo.split(/[\\/]/).pop()}`, message: c.reason });
     }
 
     const isWarm = now - this.startedAt >= this.warmupMs;
@@ -65,7 +65,7 @@ export class AlertEngine {
       holding.add(w.key);
       if (this.fired.has(w.key)) continue;
       this.fired.set(w.key, { family: w.family, at: now });
-      if (!isWarm || cfg.notify[w.family] === false) continue;
+      if (!isWarm || cfg.notifications === false || cfg.notify[w.family] === false) continue; // all off, or this kind off (it still counts as told: switching back on brings no old ones)
       raised.push(w);
       this.notify(w.title, w.message);
     }

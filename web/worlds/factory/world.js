@@ -1280,7 +1280,7 @@
   /** A time of day, short: 14:05. */
   const clock = at => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   /** How long until a time, in short: 12m, 2h. */
-  const until = at => { const m = Math.max(0, (at - Date.now()) / 60_000); return m < 1 ? 'a moment' : m < 60 ? `${Math.round(m)}m` : `${Math.round(m / 60)}h`; };
+  const until = at => { const m = Math.max(0, (at - PXG.now()) / 60_000); return m < 1 ? 'a moment' : m < 60 ? `${Math.round(m)}m` : `${Math.round(m / 60)}h`; };
 
   /* ---------- the panel and buttons: the engine's panelHud, in the factory's words ---------- */
 
@@ -1379,7 +1379,7 @@
     const besideOf = b => { const x = Number.isFinite(b.tx) ? b.tx : b.x, y = Number.isFinite(b.ty) ? b.ty : b.y; return [Math.round(x + (x > 360 ? -13 : 13)), Math.round(y)]; };
     /** Each frame: each AGV drives towards where agvGoal sends it (or is put there, drawn still). */
     function moveAgvs(dt, posOf, snap) {
-      const now = Date.now();
+      const now = PXG.now();
       for (const c of placeAgvs()) {
         const home = RANK[rankOf.get(c.server)];
         let s = agvs.get(c.server);
@@ -1513,7 +1513,7 @@
         }
         seenCompactions = comp;
         const merged = next.fields.flatMap(fl => (fl.prs?.merged ?? []).map(m => ({ ...m, repo: fl.name, key: `${fl.key}#${m.number}` })));
-        if (seenMerged) for (const m of merged) if (!seenMerged.has(m.key) && (m.at ?? 0) > Date.now() - 30 * 60_000) {
+        if (seenMerged) for (const m of merged) if (!seenMerged.has(m.key) && (m.at ?? 0) > PXG.now() - 30 * 60_000) {
           events.push({ at: DOCK_DOOR, kind: 'merged', text: `Shipped! #${m.number}`, cls: 'good', who: 'The loading dock', log: `${m.repo}: pull request #${m.number} merged${m.title ? ` (${clip(m.title, 50)})` : ''}` });
           if (leaving.length < 4) leaving.push({ t: 0 });
         }
@@ -1628,17 +1628,35 @@
         return [y, () => drawAgv(x, y, s?.dir ?? 1, s?.moving, AGV_CRATES[hashOf(c.server) % AGV_CRATES.length])];
       })],
       /**
+       * What everyone watching sees alike of the factory's own goings-on (the collector moves them; each browser is told: adopt):
+       * where the AGVs are, the finished robots rolling off and the crates leaving the dock (how far each has come), and the
+       * fabricator's door, lit while a robot rolls out.
+       */
+      share: () => ({
+        agvs: [...agvs].map(([k, c]) => [k, Math.round(c.x * 8) / 8, Math.round(c.y * 8) / 8, c.dir, c.moving ? 1 : 0, c.goal ? 1 : 0]),
+        rolling: rolling.map(r => ({ ...r, t: Math.round(r.t * 20) / 20 })),
+        leaving: leaving.map(c => Math.round(c.t * 20) / 20),
+        glow: Math.round(fabGlow * 20) / 20,
+      }),
+      adopt(got) {
+        for (const [k, x, y, dir, moving, goal] of got.agvs ?? []) agvs.set(k, { path: [], to: [x, y], ...agvs.get(k), x, y, dir, moving: Boolean(moving), goal: goal ? [x, y] : null });
+        if (got.rolling) rolling.splice(0, rolling.length, ...got.rolling);
+        if (got.leaving) leaving.splice(0, leaving.length, ...got.leaving.map(t => ({ t })));
+        if (got.glow !== undefined) fabGlow = got.glow;
+      },
+      /**
        * Each frame: the AGVs drive on. Is a robot rolling out of the fabricator (walking near its door)? Its door
        * glows, and fades after. Finished robots roll on, and crates leave the dock, until they're gone. Still,
        * nothing moves (an AGV stands where it is going). Where the robots are is kept, for the welders' sparks at
        * night (lights) and the delivery drones (top).
        */
-      tick(dt, posOf, snap = false) {
+      tick(dt, posOf, snap = false, told = false) {
         where = posOf;
+        if (snap) { fabGlow = 0; rolling.length = 0; leaving.length = 0; if (!told) moveAgvs(dt, posOf, snap); return; }
+        if (told) return; // the collector drives the AGVs and moves the rest on, for everyone watching (share, adopt)
         moveAgvs(dt, posOf, snap);
-        const out = !snap && scene.farmers.some(f => { const b = posOf(f.id); return b?.walk && Math.abs(b.x - FAB_DOOR[0]) < 30 && Math.abs(b.y - FAB_DOOR[1]) < 4; });
-        fabGlow = snap ? 0 : out ? 1 : Math.max(0, fabGlow - dt * 1.5);
-        if (snap) { rolling.length = 0; leaving.length = 0; return; }
+        const out = scene.farmers.some(f => { const b = posOf(f.id); return b?.walk && Math.abs(b.x - FAB_DOOR[0]) < 30 && Math.abs(b.y - FAB_DOOR[1]) < 4; });
+        fabGlow = out ? 1 : Math.max(0, fabGlow - dt * 1.5);
         const cy = L.GRID.y1 + 12, edge = (PXG.ext?.x1 ?? W) + 10;
         for (const r of [...rolling, ...leaving]) r.t += dt;
         keep(rolling, r => { const s = stOf(r.key); return Boolean(s) && rollAt(s, cy, r.t).x < edge; });
@@ -1835,7 +1853,7 @@
       <b>Power-cell bank</b><span>its lit cells are what is left of your plan's weekly limit: they drain as the week is used (the % on hover, and when it resets); its lamp turns amber from 70% and blinks red from 90%. With two Claude accounts, each has a power-cell bank (the second on the back wall, left of the fabricator), its name and week on the tag at its foot; the floor heat follows the first account's 5-hour limit</span>
       <b>Floor heat</b><span>follows your plan's 5-hour limit, on the thermometer by your desk and in the floor vents between the bays: cool while it is fresh (blue, the vents' fans turning slowly), then warm (the fans faster), hot (the fans racing, a shimmer over the vents), and steaming (steam from the vents, sparks off the machines) when it is nearly used up; a new window cools it again. The Heat switch holds one instead (each click moves it on, then back to live): the panel then shows the heat with a 📌 and your real 5-hour use</span>
       <b>Capsules</b><span>one agent messaging another (Claude Code's SendMessage between sessions): a capsule shoots through the pneumatic tubes overhead from one robot to the other, and the floor log says what it said; the agents' conversations show it too</span>
-      <b>Animals</b><span>a robot dog, a robot vacuum and a cat that naps on the conveyor live here just for fun: they never stand for anything. Click one (or the belt, for the cat) to pet it, oil the dog, empty the vacuum or feed the cat: the nearest robot that isn't waiting on you rolls over and does it. Now and then the vacuum chases the cat and wedges itself in a corner until a robot frees it; the dog runs to meet a new robot and to the loading dock when a pull request ships. The Animals switch hides them</span>
+      <b>Animals</b><span>a robot dog, a robot vacuum and a cat that naps on the conveyor live here just for fun: they never stand for anything. Click one (or the belt, for the cat) to pet it, oil the dog, empty the vacuum or feed the cat: the nearest robot that isn't waiting on you rolls over and does it. Everyone who has the dashboard open sees the same factory, and may ask too: what is asked is done in turn. Now and then the vacuum chases the cat and wedges itself in a corner until a robot frees it; the dog runs to meet a new robot and to the loading dock when a pull request ships. The Animals switch hides them</span>
       <b>Day and night</b><span>the windows show the sky by your clock; at night the lights dim, and desk lamps, screens, stack lights and welding sparks glow. The Sky switch holds it at day or night</span>
       <b>Click</b><span>a robot to answer or message it in the sidebar; a bay's sign for the files robots touched there</span>
       <b>Zoom</b><span>+ / − (or ⌘/Ctrl + scroll, or pinch) zooms the factory inside its frame; drag or scroll to move around (the map in the corner shows where you are; click it to go somewhere); the % button shows the whole factory again</span>

@@ -335,6 +335,26 @@ test('a world moves its agents itself: tick’s true asks slots() again, a direc
   assert.equal(w.errors(), 0);
 });
 
+test('a farmer on its way is drawn last of all, its details with it: nothing a seated farmer holds (its drawFx) covers it', () => {
+  const log = [];
+  const world = fourHooks({
+    slots: f => (f.id === 's' ? { group: 's', cap: 1, at: () => [100, 95], zone: 's' } : f.state === 'working' ? { group: 'w', cap: 1, at: () => [20, 40], zone: 'w' } : { group: 'p', cap: 1, at: () => [100, 40], zone: 'p' }),
+    drawChar: (f, b) => log.push(`${f.id}${b.walk ? '~' : ''}:char`),
+    drawFx: f => log.push(`${f.id}:fx`),
+  });
+  const w = live(world, [someone('s'), someone('w')]);
+  w.run(3);
+  w.update([someone('s'), someone('w', { state: 'working' })]);
+  log.length = 0;
+  w.run(8);
+  assert.equal(w.errors(), 0);
+  assert.ok(log.includes('w~:char'), 'it was walking');
+  const frames = log.join(' ').split('s:char').slice(1); // each frame starts with the seated one
+  const walked = frames.filter(fr => fr.includes('w~:char'));
+  assert.ok(walked.length > 2);
+  for (const fr of walked) assert.deepEqual(fr.trim().split(' ').slice(-3), ['s:fx', 'w~:char', 'w:fx'].slice(-3), `the sitter's details, then the walker and its own: ${fr}`);
+});
+
 test('fields the collector gave beds stand in those beds, gaps and all; without them the engine places them itself', () => {
   const { sdk } = load();
   const laid = [], field = (key, bed) => ({ key, name: key, bed });
@@ -467,7 +487,7 @@ test('a season name holding HTML is escaped in the default HUD', () => {
 
 // panelHud: the farm's panel and buttons, for any world, in its words. The engine's clicks find the buttons by these.
 const PANEL_ATTRS = ['data-farm-panel', 'data-farm-state="waiting"', 'data-farm-state="working"', 'data-farm-need', 'data-farm-menu', 'data-farm-nav="list"', 'data-farm-nav="worlds"', 'data-farm-nav="session"', 'data-farm-nav="setup"', 'data-farm-nav="side"', 'data-farm-nav="broadcast"', 'data-farm-nav="theme"',
-  'data-farm-follow', 'data-farm-resting', 'data-farm-bubbles', 'data-farm-animals', 'data-farm-sky', 'data-farm-season', 'data-farm-motion', 'data-farm-bell', 'data-farm-help', 'data-farm-zoom="-1"', 'data-farm-zoom="0"', 'data-farm-zoom="1"'];
+  'data-farm-follow', 'data-farm-resting', 'data-farm-bubbles', 'data-farm-animals', 'data-farm-sky', 'data-farm-season', 'data-farm-motion', 'data-farm-bell', 'data-farm-awake', 'data-farm-help', 'data-farm-zoom="-1"', 'data-farm-zoom="0"', 'data-farm-zoom="1"'];
 const panelOf = (sdk, seasonMode, words) => sdk.panelHud({
   seasonMode, seasons: true, animals: true, seasonNames: { switch: 'Heat', spring: 'cool', summer: 'warm', autumn: 'hot', winter: 'steaming' },
   scene: { plan: { windows: [{ kind: 'five_hour', percentUsed: 30 }] }, chrome: { counts: { waiting: 1, working: 1 } }, farmers: [{ id: 'a', state: 'waiting', cost: 2, compactions: 3 }, { id: 'b', state: 'working' }] },

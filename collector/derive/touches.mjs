@@ -1,12 +1,13 @@
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
+import { mayLookAt } from '../platform/tools.mjs';
 
 const GIT_MUTATING = /\bgit\b(?:\s+-C\s+\S+|\s+-c\s+\S+)*\s+(commit|checkout|switch|stash|reset|rebase|merge|push|pull)\b/;
 const WRITE_CMD = /(^|[\s;&|(])(tee|rm|mv|cp|mkdir|touch)\s|\bsed\s+-i\b/;
 
 export function expandHome(path, home = homedir()) {
   if (path === '~') return home;
-  return path.startsWith('~/') ? home + path.slice(1) : path;
+  return /^~[\\/]/.test(path) ? home + path.slice(1) : path;
 }
 
 /** Folders/files a shell command works on, as absolute paths. */
@@ -15,13 +16,14 @@ export function bashTargets(command, cwd, home = homedir()) {
   const add = raw => {
     const clean = raw.replace(/^['"]|['"]$/g, '');
     if (!clean) return;
-    const expanded = expandHome(clean, home);
-    if (isAbsolute(expanded)) found.add(expanded);
-    else if (cwd) found.add(resolve(cwd, expanded));
+    let expanded = expandHome(clean, home);
+    if (process.platform === 'win32') expanded = expanded.replace(/^\/([a-zA-Z])\//, (_, drive) => `${drive.toUpperCase()}:\\`); // Git Bash's /c/Users/… is C:\Users\…
+    const path = isAbsolute(expanded) ? expanded : cwd ? resolve(cwd, expanded) : null;
+    if (path && mayLookAt(path, cwd)) found.add(path); // never another machine's (Windows): the collector looks at each of these
   };
   for (const m of command.matchAll(/\bgit\s+-C\s+("[^"]+"|'[^']+'|\S+)/g)) add(m[1]);
   for (const m of command.matchAll(/(?:^|[;&|(]\s*|\s)cd\s+("[^"]+"|'[^']+'|[^\s;&|)]+)/g)) add(m[1]);
-  for (const m of command.matchAll(/(?:^|[\s'"=:(])((?:~|\/Users|\/private|\/tmp|\/Volumes|\/opt)\/[^\s'";|&)<>]*)/g)) add(m[1]);
+  for (const m of command.matchAll(/(?:^|[\s'"=:(])((?:~|\/Users|\/private|\/tmp|\/Volumes|\/opt|\/home|\/root|\/mnt|\/media|\/srv|\/workspaces?|\/[a-zA-Z](?=\/Users\/)|[A-Za-z]:)[\\/][^\s'";|&)<>]*)/g)) add(m[1]);
   if (found.size === 0 && cwd) found.add(cwd);
   return [...found];
 }
@@ -35,7 +37,11 @@ export function bashMode(command) {
   return 'read';
 }
 
+/** What a tool call works on: [{ path, mode }]. A path on another machine than the session's own is left out (mayLookAt). */
 export function touchesFromCall(call, home = homedir()) {
+  return namedBy(call, home).filter(t => mayLookAt(t.path, call.cwd));
+}
+function namedBy(call, home) {
   const input = call.input ?? {};
   switch (call.name) {
     case 'Edit':

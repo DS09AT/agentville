@@ -15,7 +15,7 @@ const sessView = { q: '', folder: '', model: '', branch: '', account: '', live: 
 let sessLoading = 0; // the newest read asked for: an older one that comes back after it is dropped
 
 const sessName = s => s.title || s.firstPrompt || '';
-const sessFolder = cwd => cwd?.split('/').filter(Boolean).pop() ?? '';
+const sessFolder = cwd => cwd?.split(/[\\/]/).filter(Boolean).pop() ?? '';
 const sessFamily = model => ['opus', 'sonnet', 'haiku', 'fable'].find(f => String(model ?? '').includes(f)) ?? '';
 const byText = (x, y) => x.localeCompare(y, undefined, { sensitivity: 'base' });
 const SESS_ORDER = {
@@ -147,7 +147,7 @@ function renderSessions() {
     return `<div class="sess-row" data-sess-id="${esc(s.id)}"><div class="sess-main"><b>${esc(sessName(s))}</b>
       <span class="faint">${esc(about)}</span>
       <span class="faint">${esc(when)}${s.lastPrompt ? ` · “${esc(s.lastPrompt)}”` : ''}</span></div>
-      ${acct}${s.notes ? `<span class="chip c-plain" data-tip="${s.notes} note${s.notes === 1 ? '' : 's'} you haven’t used yet: they show under its message box once you resume it">📝 ${s.notes}</span>` : ''}${s.live ? `<span class="chip c-working live-dot" data-tip="${esc(running)}">running</span>` : `<button type="button" class="act mini" data-sess-resume="${esc(s.id)}"${blocked ? ` disabled data-tip="${esc(`Its history isn't shared with ${accountName(sessView.pick)} (see Several Claude accounts in the README)`)}"` : ''}>Resume</button>`}</div>`;
+      ${acct}${s.notes ? `<span class="chip c-plain" data-tip="${s.notes} note${s.notes === 1 ? '' : 's'} you haven’t used yet: they show under its message box once you resume it">📝 ${s.notes}</span>` : ''}${s.live ? `<span class="chip c-working live-dot" data-tip="${esc(running)}">running</span>` : `<button type="button" class="act mini" data-sess-resume="${esc(s.id)}"${blocked ? ` disabled data-tip="${esc(`Its history isn't shared with ${accountName(sessView.pick)} (see Several Claude accounts in docs/guide.md)`)}"` : ''}>Resume</button>`}</div>`;
   };
   $('sess-body').innerHTML = `<div class="sec" style="margin-top:4px">Or a folder you worked in</div>${projects.map(projectRow).join('') || '<div class="empty">No folders match.</div>'}${more}
     <div class="sec">Resume</div>${sessions.map(sessionRow).join('') || '<div class="empty">No sessions match.</div>'}`;
@@ -156,7 +156,7 @@ function renderSessions() {
 /* ---------- a new session in any folder: typed, browsed or made ---------- */
 
 const sessDir = { typed: '', data: null, shown: false, asked: 0, waiting: 0 };
-const tildeOf = (path, home) => (home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path);
+const tildeOf = (path, home) => (home && (path === home || path.startsWith(`${home}/`) || path.startsWith(`${home}\\`)) ? `~${path.slice(home.length)}` : path);
 
 function resetDirPicker() {
   Object.assign(sessDir, { typed: '', data: null, shown: false });
@@ -206,13 +206,13 @@ function renderDirs() {
     return;
   }
   const at = path => tildeOf(path, d.home);
-  const inDir = name => `${at(d.dir).replace(/\/$/, '')}/${name}/`;
-  const rows = (d.up ? [`<button type="button" class="dir-row" data-dir-go="${esc(`${at(d.up).replace(/\/$/, '')}/`)}">↰ ..</button>`] : [])
+  const inDir = name => `${at(d.dir).replace(/[\\/]$/, '')}/${name}/`;
+  const rows = (d.up ? [`<button type="button" class="dir-row" data-dir-go="${esc(`${at(d.up).replace(/[\\/]$/, '')}/`)}">↰ ..</button>`] : [])
     .concat(d.dirs.map(name => `<button type="button" class="dir-row" data-dir-go="${esc(inDir(name))}"><span aria-hidden="true">📁</span> ${esc(name)}</button>`));
   list.innerHTML = rows.join('') + (d.truncated ? '<div class="empty" style="padding:4px 10px">More folders: type the start of a name.</div>' : '');
   list.hidden = !sessDir.shown || !rows.length;
   if (d.isFile) note.textContent = `${at(d.path)} is a file, not a folder.`;
-  else if (d.exists) note.textContent = `＋ New starts Claude Code in ${at(d.path)}.${d.unreadable ? ' (Its folders could not be listed: macOS may ask to allow access.)' : ''}`;
+  else if (d.exists) note.textContent = `＋ New starts Claude Code in ${at(d.path)}.${d.unreadable ? ` (Its folders could not be listed${hostPlatform() === 'darwin' ? ': macOS may ask to allow access' : ''}.)` : ''}`;
   else note.innerHTML = `${esc(at(d.path))} doesn't exist yet${d.dirs.length ? ': pick a folder above, or' : '.'} <button type="button" class="act mini" data-dir-make>Create it</button>`;
 }
 
@@ -221,10 +221,10 @@ async function completeDir() {
   const d = sessDir.data;
   if (!d || d.error || !d.dirs.length) return false;
   const typed = sessDir.typed.trim();
-  const part = typed.endsWith('/') ? '' : typed.split('/').pop();
+  const part = /[\\/]$/.test(typed) ? '' : typed.split(/[\\/]/).pop();
   let common = d.dirs[0];
   for (const name of d.dirs) while (!name.startsWith(common)) common = common.slice(0, -1);
-  const base = `${tildeOf(d.dir, d.home).replace(/\/$/, '')}/`;
+  const base = `${tildeOf(d.dir, d.home).replace(/[\\/]$/, '')}/`;
   const next = d.dirs.length === 1 ? `${base}${d.dirs[0]}/` : common.length > part.length ? `${base}${common}` : null;
   if (!next || next === typed) return false;
   await setDir(next);
@@ -236,10 +236,10 @@ async function browseForFolder(button) {
   const d = sessDir.data;
   button.disabled = true;
   $('sess-dir-note').className = 'faint dir-note';
-  $('sess-dir-note').textContent = 'Pick a folder in the Finder window…';
+  $('sess-dir-note').textContent = hostPlatform() === 'darwin' ? 'Pick a folder in the Finder window…' : 'Pick a folder in the window that opened…';
   const r = await post('/api/actions/choose-folder', { start: d?.exists ? d.path : d?.dir, prompt: 'Start a new Claude Code session in:' });
   button.disabled = false;
-  if (r.ok) return setDir(`${tildeOf(r.path, r.home).replace(/\/$/, '')}/`);
+  if (r.ok) return setDir(`${tildeOf(r.path, r.home).replace(/[\\/]$/, '')}/`);
   if (r.cancelled) return renderDirs();
   $('sess-dir-note').className = 'msg-bad dir-note';
   $('sess-dir-note').textContent = r.error ?? 'The folder window could not open.';

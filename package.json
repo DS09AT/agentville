@@ -3,7 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local dashboard of every AI agent working on this Mac",
+  "description": "Local dashboard for Claude Code and Codex sessions",
+  "bin": {
+    "agentville": "bin/agentville.mjs"
+  },
+  "files": [
+    "bin/",
+    "collector/",
+    "!collector/test/",
+    "web/",
+    "mod/.claude-plugin/plugin.json",
+    "mod/hooks/",
+    "mod/types/",
+    "scripts/new-world.mjs",
+    "scripts/check-world.mjs",
+    "scripts/lib/",
+    "config.example.json"
+  ],
   "scripts": {
     "test": "node --test \"collector/test/*.test.mjs\"",
     "test:ui": "node scripts/e2e-ui.mjs",
@@ -14,7 +30,7 @@
     "kit-sheet": "node scripts/kit-sheet.mjs",
     "demo": "node scripts/demo-video.mjs",
     "demo:many": "node scripts/demo-many.mjs",
-    "start": "node collector/index.mjs"
+    "start": "node bin/agentville.mjs run"
   },
   "engines": {
     "node": ">=22"
@@ -22,9 +38,18 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hamsathul/agentville.git"
+    "url": "https://github.com/DS09AT/agentville.git"
   },
-  "os": [
-    "darwin"
-  ]
+  "dependencies": {
+    "@colyseus/core": "^0.18.18",
+    "@colyseus/schema": "^5.0.36",
+    "@colyseus/sdk": "^0.18.5",
+    "@colyseus/ws-transport": "^0.18.4",
+    "@jitl/quickjs-wasmfile-release-sync": "^0.32.0",
+    "quickjs-emscripten-core": "^0.32.0",
+    "selfsigned": "^5.5.0"
+  },
+  "devDependencies": {
+    "ws": "^8.22.0"
+  }
 }
