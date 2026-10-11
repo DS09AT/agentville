@@ -91,6 +91,13 @@ export async function openChrome({ prepare = async () => {} } = {}) {
     js: expression => evaluate(expression, page),
     /** Whether the frame whose address contains `part` runs in a process of its own. */
     ownProcess: part => [...frames.values()].some(f => f.url.includes(part)),
-    close: async () => { ws.close(); chrome.kill(); await sleep(300); rmSync(profile, { recursive: true, force: true }); },
+    close: async () => {
+      ws.close();
+      chrome.kill();
+      await sleep(300);
+      // Chrome may still be writing its profile as it goes: tried again a few times, and a folder left behind in
+      // the temp folder is no reason for a run that passed to fail.
+      try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* left for the system to clear */ }
+    },
   };
 }
