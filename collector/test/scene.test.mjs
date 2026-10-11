@@ -201,3 +201,20 @@ test('accounts in the scene: names and plans, never emails; a private scene has 
   assert.doesNotMatch(JSON.stringify(p), /nco|zeta/);
   assert.deepEqual(plain(toScene(snapOf([], []))).accounts, [], 'no accounts in the snapshot: none in the scene');
 });
+
+test("a page that takes the collector's stand-ins numbers its private scene as the collector does: the same repo and agent under the same number in every browser", () => {
+  const collector = load(), early = load(), late = load();
+  const snap = ids => snapOf(ids.map(i => agent(i, { cwd: `/code/${i}`, name: `Title ${i}` })), ids.map(i => repo(`/code/${i}`)));
+  const keys = (side, ids) => { const p = plain(side.privateScene(side.toScene(snap(ids)))); return [p.repos.map(r => `${r.key}=${r.name}`), p.agents.map(a => a.name)]; };
+  const there = keys(collector, ['x', 'y', 'z']); // the collector met them in this order
+  assert.deepEqual(there, [['r1=repo 1', 'r2=repo 2', 'r3=repo 3'], ['agent 1', 'agent 2', 'agent 3']]);
+  assert.deepEqual(keys(late, ['z', 'y']), [['r1=repo 1', 'r2=repo 2'], ['agent 1', 'agent 2']], 'a page that opened later met them in another order: by itself it numbers them its own way');
+  const table = plain(collector.standIns());
+  assert.ok(table.some(([what, standIn]) => what === 'r:/code/z' && standIn === 'r3'));
+  assert.equal(late.useStandIns(table), true, 'told the collector\'s, it changes');
+  assert.deepEqual(keys(late, ['z', 'y']), [['r3=repo 3', 'r2=repo 2'], ['agent 3', 'agent 2']], 'now as the collector has them');
+  assert.equal(late.useStandIns(table), false, 'the same table again changes nothing');
+  assert.equal(early.useStandIns(table), true);
+  assert.deepEqual(keys(early, ['x', 'y', 'z', 'new']).map(l => l.at(-1)), ['r4=repo 4', 'agent 4'], 'one the collector has not met yet gets the next number, past them all');
+  for (const junk of [null, 'x', [['r:/a', 'p1']], [['q:/a', 'q1']], [['r:/a', 'r0x']], [[1, 2]], [['r:/a']]]) assert.equal(load().useStandIns(junk), false, `what is not a table of stand-ins is not taken (${JSON.stringify(junk)})`);
+});

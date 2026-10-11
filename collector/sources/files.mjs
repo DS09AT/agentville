@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { run } from '../lib/exec.mjs';
-import { GIT_ENV } from './git.mjs';
+import { GIT_ENV, nativePath } from './git.mjs';
 
 // The dashboard's file explorer: an agent's working folder, read-only. In a git folder it lists
 // what git tracks plus new files git doesn't ignore; elsewhere it walks the folder, skipping
@@ -35,7 +35,7 @@ async function listRepo(dir, runner) {
   const git = args => runner('git', ['-C', dir, ...args], { env: GIT_ENV, timeoutMs: 10_000 });
   const inRepo = await git(['rev-parse', '--show-toplevel', '--show-prefix']);
   if (inRepo.code !== 0) return null;
-  const [top, prefix = ''] = inRepo.stdout.split('\n');
+  const [gitTop, prefix = ''] = inRepo.stdout.split('\n'), top = nativePath(gitTop.trim());
   const listed = await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
   if (listed.code !== 0) return { error: `git could not list this folder (${listed.stderr.trim().slice(0, 200)}).` };
   const files = [...new Set(listed.stdout.split('\0').filter(Boolean))].filter(p => !SECRET_FILE.test(p)).sort();
@@ -91,7 +91,7 @@ async function walk(cwd, max, runner) {
 
 /** The files under `cwd`, relative to it, with git status where there is one. */
 export async function listFolder(cwd, { home = homedir(), runner = run, max = MAX_FILES } = {}) {
-  if (!cwd || cwd === '/' || cwd === home) {
+  if (!cwd || dirname(cwd) === cwd || cwd === home) {
     return { error: 'This agent works in your home folder (or the disk root), so the explorer stays off here.' };
   }
   const repo = await listRepo(cwd, runner);

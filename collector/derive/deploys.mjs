@@ -18,7 +18,7 @@ export function repoOfCall(call, { lookup, known, folder }) {
   const inside = base ? known.filter(path => path.startsWith(base)) : [];
   const candidates = [...new Set([...inside, ...(own ? [own] : [])])];
   const command = String(call.input?.command ?? '');
-  const named = candidates.filter(path => new RegExp(`(?:^|[^\\w.])${escapeRe(path.split('/').pop())}(?![\\w-])`).test(command));
+  const named = candidates.filter(path => new RegExp(`(?:^|[^\\w.])${escapeRe(path.split(/[\\/]/).pop())}(?![\\w-])`).test(command));
   if (named.length === 1) return named[0];
   if (named.length > 1) return null;
   return own ?? (inside.length === 1 ? inside[0] : null);

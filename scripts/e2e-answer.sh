@@ -9,9 +9,12 @@
 # sessions. Needs the collector running.
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PORT="$(/usr/bin/plutil -extract port raw "$ROOT/config.json" 2>/dev/null || echo 7777)"
-BASE="http://127.0.0.1:$PORT"
-TOKEN="$(cat "$ROOT/state/token")"
+DATA="${AGENTVILLE_HOME:-$HOME/.agentville}" # the collector's data folder: its settings, its token, the mod sessions load
+PORT="$(node -e 'try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1] + "/config.json", "utf8")).port || 7777)) } catch { process.stdout.write("7777") }' "$DATA")"
+SCHEME="$(node -e 'try { process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1] + "/config.json", "utf8")).https ? "https" : "http") } catch { process.stdout.write("http") }' "$DATA")"
+BASE="$SCHEME://127.0.0.1:$PORT"
+curl() { command curl -k "$@"; } # with HTTPS on, the certificate is the collector's own
+TOKEN="$(cat "$DATA/state/token")"
 WORK="$(mktemp -d)"
 # Claude Code runs mkdir in temp folders without asking, so the permission test uses a home folder.
 PERMIT_DIR="$HOME/.agent-tracker-e2e-$$"
@@ -34,12 +37,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-curl -fsS -o /dev/null "$BASE/api/state" || fail "collector not answering on $BASE (agent-tracker start)"
+curl -fsS -o /dev/null "$BASE/api/state" || fail "collector not answering on $BASE (agentville start)"
 
 # Load the mod unless every session already does (CLAUDE_CODE_PLUGIN_DIRS).
 CONFIGURED="${CLAUDE_CODE_PLUGIN_DIRS:-}:$(node -e 'try { process.stdout.write(require(process.env.HOME + "/.claude/settings.json").env.CLAUDE_CODE_PLUGIN_DIRS || "") } catch {}')"
 PLUGIN_ARGS=()
-case ":$CONFIGURED:" in *":$ROOT/mod:"*) ;; *) PLUGIN_ARGS=(--plugin-dir "$ROOT/mod") ;; esac
+case ":$CONFIGURED:" in *":$DATA/mod:"*) ;; *) PLUGIN_ARGS=(--plugin-dir "$DATA/mod") ;; esac
 
 start() { # name prompt [permission mode] → short id
   (cd "$ROOT" && claude --bg "${PLUGIN_ARGS[@]}" --model haiku --permission-mode "${3:-default}" -n "$1" "$2") 2>&1 \
@@ -147,8 +150,8 @@ echo "   ok: README.md is listed and readable, other files are not"
 L="$(curl -s -H "x-tracker-token: $TOKEN" "$BASE/api/agent/$QS/files")"
 echo "$L" | grep -q '"package.json"' || fail "the explorer did not list the session's folder"
 if echo "$L" | grep -q 'state/token'; then fail "the explorer listed the git-ignored token file"; fi
-curl -s -H "x-tracker-token: $TOKEN" "$BASE/api/agent/$QS/file?path=$ROOT/package.json" | grep -q 'agent-tracker' || fail "the explorer could not open package.json"
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H "x-tracker-token: $TOKEN" "$BASE/api/agent/$QS/file?path=$ROOT/state/token")" = 403 ] || fail "the git-ignored token file was served"
+curl -s -H "x-tracker-token: $TOKEN" "$BASE/api/agent/$QS/file?path=$ROOT/package.json" | grep -q 'agentville' || fail "the explorer could not open package.json"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "x-tracker-token: $TOKEN" "$BASE/api/agent/$QS/file?path=$ROOT/node_modules/.package-lock.json")" = 403 ] || fail "a git-ignored file was served"
 echo "   ok: the explorer lists and opens the folder, and never the git-ignored token"
 
 echo "7/12 a screenshot sent with a message is seen by the session"

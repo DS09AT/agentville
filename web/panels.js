@@ -70,7 +70,7 @@ function hstatsHtml() {
   const cpuUsed = snap.agents.reduce((t, a) => t + (a.proc?.cpu ?? 0), 0);
   const cpuRatio = cpuUsed / (cores * 100);
   return `<span class="hstat" data-tip="${esc(`Memory used by agents · ${withMem.map(a => `${a.name} ${gb(a.proc.rssMb)}`).join(' · ') || 'none'}`)}"><span class="ml">Agents RAM</span>${memBar}<b>${gb(usedMb)}</b><span class="faint">of ${gb(totalMb)}</span></span>
-    <span class="hstat"><span class="ml">Agents CPU</span>${meter(cpuRatio, severityOf(cpuRatio, 0.5, 0.8), `${Math.round(cpuUsed)}% of one core · ${cores} cores`)}<b>${Math.round(cpuRatio * 100)}% of this Mac</b></span>
+    <span class="hstat"><span class="ml">Agents CPU</span>${meter(cpuRatio, severityOf(cpuRatio, 0.5, 0.8), `${Math.round(cpuUsed)}% of one core · ${cores} cores`)}<b>${Math.round(cpuRatio * 100)}% of ${hostName()}</b></span>
     ${planHtml()}`;
 }
 
@@ -587,7 +587,7 @@ function heldItemHtml(a, h) {
     return `<li class="held editing"><textarea class="held-edit" data-held-edit-text="${esc(h.id)}" ${ids} rows="3">${esc(edit.text)}</textarea>
       <div class="note-acts"><span class="grow"></span><button type="button" class="act mini" data-held-cancel="${esc(h.id)}" ${ids}>Cancel</button><button type="button" class="act mini primary" data-held-save="${esc(h.id)}" ${ids}>Save</button></div></li>`;
   }
-  const attached = [...(h.files ?? []), ...(h.folders ?? []).map(f => f.split('/').filter(Boolean).pop() ?? f)];
+  const attached = [...(h.files ?? []), ...(h.folders ?? []).map(f => f.split(/[\\/]/).filter(Boolean).pop() ?? f)];
   return `<li class="held"><span class="held-text">${esc(h.text)}</span>${attached.length ? `<span class="faint held-files">📎 ${esc(attached.join(', '))}</span>` : ''}
     <div class="note-acts"><span class="faint">${agoText(h.editedAt ?? h.at)}</span><span class="grow"></span><button type="button" class="act mini" data-held-edit="${esc(h.id)}" ${ids} data-tip="Change it before it goes">Edit</button><button type="button" class="act mini" data-held-now="${esc(h.id)}" ${ids} data-tip="Send it now: it reads it at its next step">⚡ Send now</button><button type="button" class="act mini" data-held-remove="${esc(h.id)}" ${ids} data-tip="Don't send it">✕</button></div></li>`;
 }
@@ -714,7 +714,7 @@ async function attachFolder(agentId, button) {
   button.disabled = false;
   const list = msgFiles.get(agentId) ?? [];
   if (r.ok && list.length >= MAX_FILES) msgStatus.set(agentId, { at: Date.now(), bad: true, text: `At most ${MAX_FILES} attachments per message.` });
-  else if (r.ok && !list.some(f => f.folder === r.path)) msgFiles.set(agentId, [...list, { folder: r.path, name: r.path.split('/').pop() || r.path }]);
+  else if (r.ok && !list.some(f => f.folder === r.path)) msgFiles.set(agentId, [...list, { folder: r.path, name: r.path.split(/[\\/]/).pop() || r.path }]);
   else if (!r.ok && !r.cancelled) msgStatus.set(agentId, { at: Date.now(), bad: true, text: r.error ?? 'The folder window could not open.' });
   render();
 }

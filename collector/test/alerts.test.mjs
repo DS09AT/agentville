@@ -58,6 +58,17 @@ test('stale agents never notify', () => {
   assert.equal(sent.length, 0);
 });
 
+test('system notifications switched off altogether: none is sent, whatever each kind says; switched on again, nothing old comes', () => {
+  const { e, sent } = engine({ ...DEFAULTS, notifications: false, notify: { ...DEFAULTS.notify } });
+  e.process(snap([agent({ state: 'waiting' })]), 20_000);
+  assert.deepEqual(sent, []);
+  e.setConfig({ ...DEFAULTS, notify: { ...DEFAULTS.notify } });
+  e.process(snap([agent({ state: 'waiting' })]), 23_000);
+  assert.deepEqual(sent, [], 'what happened while it was off is not told afterwards');
+  e.process(snap([agent({ state: 'waiting' }), agent({ id: 'b', name: 'second', state: 'waiting', stateSince: 24_000 })]), 26_000);
+  assert.equal(sent.length, 1, 'a new one is told again');
+});
+
 test('a notify toggle silences its family', () => {
   const { e, sent } = engine({ ...DEFAULTS, notify: { ...DEFAULTS.notify, waiting: false } });
   e.process(snap([agent({ state: 'waiting', stateSince: 20_000 })]), 20_000, NONE);

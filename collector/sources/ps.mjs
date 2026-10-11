@@ -33,9 +33,9 @@ export function childrenIndex(procs) {
 
 export function label(command) {
   const [exe, ...rest] = command.split(' ');
-  const base = exe.split('/').pop();
+  const base = exe.split(/[\\/]/).pop();
   const arg = rest.find(a => a && !a.startsWith('-'));
-  return (arg ? `${base} ${arg.split('/').pop()}` : base).slice(0, 40);
+  return (arg ? `${base} ${arg.split(/[\\/]/).pop()}` : base).slice(0, 40);
 }
 
 /** CPU % and RSS of a process plus all its descendants. */
@@ -61,9 +61,10 @@ export function treeStats(procs, rootPid, idx = childrenIndex(procs)) {
   return { cpu: Math.round(cpu * 10) / 10, rssMb: Math.round(rssKb / 1024), childCount: kids.length, children: kids.slice(0, 5).map(k => label(k.command)) };
 }
 
-// The Bash tool runs each command as `zsh -c "source <its shell snapshot> … && eval '<command>' < /dev/null
-// && pwd -P >| <file>"`, a child of the session in a process group of its own (so it can be stopped whole).
-const BASH_TOOL = /^\/bin\/(?:zsh|bash|sh) -c .*\/shell-snapshots\/snapshot-/;
+// The Bash tool runs each command as `<your shell> -c "source <its shell snapshot> … && eval '<command>' < /dev/null
+// && pwd -P >| <file>"`, a child of the session in a process group of its own (so it can be stopped whole). The
+// shell is yours (zsh or bash, wherever it is installed; Git's bash.exe on Windows, its path in quotes).
+const BASH_TOOL = /^(?:"[^"]*[\\/]|\S*[\\/])?(?:zsh|bash|sh)(?:\.exe)?"? (?:-[a-z]+ )*-c .*[\\/]shell-snapshots[\\/]snapshot-/i;
 /** Whether a process is one of a session's shell commands: its Bash tool's, never its MCP servers or the session itself. */
 export const isShellCommand = (p, sessionPid) => Boolean(p) && p.ppid === sessionPid && p.pgid === p.pid && BASH_TOOL.test(p.command);
 
@@ -71,7 +72,7 @@ export const isShellCommand = (p, sessionPid) => Boolean(p) && p.ppid === sessio
 export function typedCommand(line) {
   const text = line.replace(/\\([0-3][0-7]{2})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
   const m = /\beval '([\s\S]*)'(?: < \/dev\/null)? && pwd -P >\| \S+$/.exec(text); // stdin from /dev/null, unless the command reads it already
-  return m ? m[1].replaceAll(`'"'"'`, "'").replaceAll(`'\\''`, "'") : text.replace(/^\S+ -c /, '');
+  return m ? m[1].replaceAll(`'"'"'`, "'").replaceAll(`'\\''`, "'") : text.replace(/^(?:"[^"]*"|\S+) (?:-[a-z]+ )*-c /, '');
 }
 
 /** The shell commands a session runs now (its subagents' too): each command, when it started, and its CPU and memory with all it started. */
@@ -86,7 +87,7 @@ export function shellsOf(procs, sessionPid, now, idx = childrenIndex(procs)) {
   return out.sort((x, y) => x.startedAt - y.startedAt);
 }
 
-const isCodex = p => /(^|\/)codex(\s|$)/.test(p?.command ?? '');
+const isCodex = p => /(^|[\\/"])codex(\.exe)?("|\s|$)/i.test(p?.command ?? '');
 
 export function findCodexRoots(procs) {
   return [...procs.values()].filter(p => isCodex(p) && !isCodex(procs.get(p.ppid)));

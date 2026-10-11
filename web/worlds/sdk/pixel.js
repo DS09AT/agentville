@@ -16,8 +16,8 @@ const cutMid = (s, n) => {
   return `${t.slice(0, head)}…${t.slice(t.length - (n - 1 - head))}`;
 };
 /**
- * A name in at most n characters. One that ends in a short code after a hyphen (shiftaro-1a: a repo and its session)
- * keeps the code and loses the end of the word before it: shift-1a. Any other is cut in the middle (cutMid).
+ * A name in at most n characters. One that ends in a short code after a hyphen (shipyard-1a: a repo and its session)
+ * keeps the code and loses the end of the word before it: shipy-1a. Any other is cut in the middle (cutMid).
  */
 function shortName(s, n) {
   const t = String(s ?? ''), at = t.lastIndexOf('-'), tail = at > 0 ? t.slice(at + 1) : '';
@@ -38,7 +38,13 @@ const ago = ms => {
   const m = Math.max(0, (Date.now() - ms) / 60_000);
   return m < 1 ? 'now' : m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 };
-const PXG = { ctx: null, T: 0, k: 1, lights: null, ext: null, W: 400, season: null }; // ext: the world drawn, past the farm's own edges when the frame has room // the canvas being drawn now, the animation clock, device pixels per world pixel, lights to glow at night // season: the season to draw (the engine's, held by the Season switch or live), null before the first frame
+const PXG = {
+  ctx: null, T: 0, k: 1, lights: null, ext: null, W: 400, season: null,
+  // The time of day everyone draws by (ms): this machine's, or, in a world the collector moves, the collector's for the moment
+  // shown (docs/worlds.md, "One world for everyone"). A world reads now() where it would read Date.now(), so what goes by the clock
+  // (who naps where, what happens on the porch) is the same in every browser.
+  wall: null, now() { return this.wall ?? Date.now(); },
+}; // ext: the world drawn, past the farm's own edges when the frame has room // the canvas being drawn now, the animation clock, device pixels per world pixel, lights to glow at night // season: the season to draw (the engine's, held by the Season switch or live), null before the first frame
 const px = (x, y, w, h, c) => { PXG.ctx.fillStyle = ink(c); PXG.ctx.fillRect(x, y, w, h); };
 const SC = 1; // one sprite pixel = one world pixel, the same pixels as the land
 const blink = (hz, n = 2) => Math.floor(PXG.T * hz) % n;

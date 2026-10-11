@@ -74,6 +74,8 @@ test('the state file is found next to the mod folder, wherever the repo is clone
 
 test('the state folder sits next to the mod folder', () => {
   expect(stateDirFor('/home/me/agent-tracker/mod')).toBe('/home/me/agent-tracker/state')
+  expect(stateDirFor('/home/me/.agentville/mod/')).toBe('/home/me/.agentville/state')
+  expect(stateDirFor('C:\\Users\\me\\.agentville\\mod')).toBe('C:\\Users\\me\\.agentville/state')
 })
 
 const QUESTIONS = [

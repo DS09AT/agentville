@@ -57,13 +57,16 @@
   }, true);
 
   let world = null, started = false, live = false, prefs = {}, latest = null, chatterLatest = null, selected = null, nextId = 1, lastDiary = '';
-  let settings = { still: false, theme: 'auto', nav: {}, bell: false };
+  let simEarly = []; // what the page said of a world the collector moves, before this one was live
+  let settings = { still: false, theme: 'auto', nav: {}, bell: false, awake: false, sim: false };
+  /** An id of its own for something asked (so asked twice, it is done once). */
+  const newId = () => { const b = new Uint8Array(12); (window.crypto ?? window.msCrypto)?.getRandomValues?.(b); return Array.from(b, (v, i) => (v || Math.floor(Math.random() * 256) + i).toString(16).padStart(2, '0').slice(-2)).join(''); };
   const waiting = new Map(); // request id → its resolve
-  // A world's settings, kept by the page (a frame has no storage). The bell is the page's own.
+  // A world's settings, kept by the page (a frame has no storage). The bell and the screen kept on are the page's own.
   const prefsApi = {
-    get: name => (name === 'bell' ? (settings.bell ? 'on' : 'off') : prefs[name] ?? null),
+    get: name => (name === 'bell' ? (settings.bell ? 'on' : 'off') : name === 'awake' ? (settings.awake ? 'on' : 'off') : prefs[name] ?? null),
     set: (name, value) => {
-      if (name === 'bell') return;
+      if (name === 'bell' || name === 'awake') return;
       prefs[name] = String(value);
       send({ type: 'store', key: name, value: String(value) });
     },
@@ -84,6 +87,9 @@
   // What an engine world is handed: every call becomes a message the page checks.
   const opts = {
     get still() { return settings.still; },
+    get remote() { return settings.sim === true; }, // the collector moves this world: the page hands on where everyone is (docs/worlds.md, "One world for everyone")
+    onAct: a => send({ type: 'act', rid: newId(), animal: String(a?.animal ?? ''), act: a?.act, ...(a?.doer ? { doer: String(a.doer) } : {}) }),
+    onTouch: animal => send({ type: 'touch', animal: String(animal ?? '') }),
     navState: () => settings.nav,
     request,
     onPickAgent: (agentId, o) => send({ type: 'pick', agentId, ...(o?.from === 'say' ? { from: 'say' } : {}), ...(o?.tab ? { tab: o.tab } : {}) }),
@@ -92,6 +98,7 @@
     onStartSession: () => send({ type: 'startSession' }),
     onNav: what => send({ type: 'nav', what }),
     onBell: on => { settings.bell = on; send({ type: 'bell', on }); },
+    onAwake: on => { settings.awake = on; send({ type: 'awake', on }); }, // the page keeps the screen on, and says in its settings whether it could
     onMotion: still => { settings.still = still; send({ type: 'motion', still }); },
     onCast: animals => send({ type: 'cast', animals: (Array.isArray(animals) ? animals : []).slice(0, 12).map(a => ({ kind: String(a?.kind ?? ''), name: String(a?.name ?? '') })) }), // the world's animals, for the helper's lines
     onDiary: entries => {
@@ -121,6 +128,7 @@
       if (latest) run(() => world.scene(latest), 'scene');
       if (selected !== null) run(() => world.select?.(selected), 'select');
       if (chatterLatest) run(() => world.chatter?.(chatterLatest), 'chatter');
+      for (const m of simEarly.splice(0)) run(() => world.remote?.(m), 'sim');
     };
     requestAnimationFrame(() => requestAnimationFrame(go));
     setTimeout(go, 500);
@@ -148,6 +156,9 @@
     } else if (m.type === 'chatter') { // the helper's lines for the animals (the page checked them)
       chatterLatest = Array.isArray(m.lines) ? m.lines : [];
       if (live) run(() => world.chatter?.(chatterLatest), 'chatter');
+    } else if (m.type === 'sim') { // a world the collector moves: whether it does, how it stands, what there is to show
+      if (live) run(() => world.remote?.(m), 'sim');
+      else { simEarly.push(m); if (simEarly.length > 4) simEarly.shift(); }
     } else if (m.type === 'reply' && waiting.has(m.id)) {
       const resolve = waiting.get(m.id);
       waiting.delete(m.id);

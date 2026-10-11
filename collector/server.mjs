@@ -1,16 +1,58 @@
 import { createServer } from 'node:http';
+import { createServer as createSecureServer } from 'node:https';
+import { createServer as createNetServer } from 'node:net';
 import { createReadStream, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { hostname, networkInterfaces } from 'node:os';
+import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { FRAME_CSP } from './worlds.mjs';
+import { GUEST_COOKIE, cookieOf, makeAttempts } from './access.mjs';
 
 const BODY_LIMIT = 64 * 1024;
 const MESSAGE_LIMIT = 90 * 1024 * 1024; // up to six 10 MB attached files, base64-encoded
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const GUEST_PATH = /^\/($|[a-z]+\.(js|css)$|world\/|api\/(state|events)$)/;
+const GUEST_PATH = /^\/($|[a-z]+\.(js|css)$|world\/|api\/(state|events|worlds)$)/;
+// A seat in a world's room (live.mjs): the one thing a guest may POST. It moves the world's figures, never an agent.
+const MATCHMAKE = /^\/matchmake\/(joinOrCreate|reconnect)\/([\w-]{1,40})$/;
+const MATCHMAKE_LIMIT = 4096;
+// What a world's frame loads: its page, the SDK, the world's own files, and the two files of the dashboard's it shares.
+// A frame is sealed (an origin of its own) and its scripts are fetched without credentials, so no cookie comes with
+// these. Where guests give a password, their addresses carry a pass in the path instead (/f/<pass>/world/…), which
+// the page is told once it is in (access.mjs, makePasses).
+const FRAME_FILES = /^\/(world\/|base\.css$|brand\.js$)/;
+const FRAME_PASS = /^\/f\/([0-9a-f]{32})(\/.*)$/;
+
+/** The page a guest gets where a password is asked: a form that names nothing (no product, no hint of what is behind it), with no script. */
+const loginPage = note => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Sign in</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#14181d;color:#e6e8ea;font:15px/1.5 system-ui,sans-serif}form{display:grid;gap:10px;width:min(320px,86vw)}
+input,button{font:inherit;padding:9px 11px;border-radius:8px;border:1px solid #3a424b;background:#1d232a;color:inherit}button{background:#3b82f6;border-color:#3b82f6;color:#fff;cursor:pointer}p{margin:0;color:#f0a0a0}</style></head>
+<body><form method="post" action="/login">${note ? `<p>${note}</p>` : ''}<label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" autofocus required><button>Sign in</button></form></body></html>`;
+const LOGIN_HEADERS = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" };
+
+/** The Colyseus browser SDK the page loads to watch a world live (/colyseus.js): the installed package's own build, read once. */
+let sdk;
+function sdkFile() {
+  if (sdk !== undefined) return sdk;
+  try {
+    const code = readFileSync(join(dirname(createRequire(import.meta.url).resolve('@colyseus/sdk/package.json')), 'dist', 'colyseus.js'));
+    sdk = { code, etag: `"${createHash('sha1').update(code).digest('hex').slice(0, 16)}"` };
+  } catch { sdk = null; }
+  return sdk;
+}
 const GUEST_AGENT = ['id', 'kind', 'cliId', 'name', 'startedAt', 'cwd', 'model', 'modelLabel', 'fast', 'contextTokens', 'compactions', 'lastCompactAt', 'wakeAt', 'state', 'stateReason', 'stateSince', 'mode', 'effort', 'turn', 'usage', 'lastActivityAt', 'mcp', 'touching', 'proc', 'activity', 'timeline', 'work', 'account'];
-const stepOnly = now => (now ? { tool: now.tool, step: now.step, startedAt: now.startedAt } : undefined);
+// A step as a guest gets it: the tool and the kind of step, never its words. A connector call keeps its server's name (the tool's own name has it already).
+const stepOnly = now => (now ? { tool: now.tool, step: now.step, startedAt: now.startedAt, ...(String(now.tool ?? '').startsWith('mcp__') && now.service ? { service: now.service } : {}) } : undefined);
+/**
+ * Of a feed, what a guest's world is drawn from, never a word of it: the newest tool step (the tool and the kind of step: what an
+ * agent between two steps holds), and that a message went between two agents (when, and to or from whom: the pigeon that carries it).
+ */
+const lastStep = feed => {
+  const t = (feed ?? []).find(f => f?.kind === 'tool');
+  const mail = (feed ?? []).filter(f => f?.kind === 'peer' && !f.helper).slice(0, 8).map(f => ({ at: f.at, kind: 'peer', dir: f.dir, other: f.other }));
+  return [...(t ? [{ at: t.at, kind: 'tool', tool: t.tool, step: t.step }] : []), ...mail];
+};
 
 /**
  * The snapshot for a visitor from the network: who works where, in what state and with what tool,
@@ -21,11 +63,14 @@ export function guestSnapshot(snapshot) {
     ...snapshot,
     accounts: (snapshot.accounts ?? []).map(a => ({ key: a.key, name: a.name, plan: a.plan })), // their names and limits (the silos' tags): never an email, an organisation or what they cost
     chatter: null, // the helper's lines for the animals: written from what is going on here
+    sources: snapshot.sources && Object.fromEntries(Object.entries(snapshot.sources).map(([k, v]) => [k, v?.ok === false ? { ...v, error: 'failing' } : v])), // which source fails, not its error's words (they carry paths and commands)
+    helper: snapshot.helper && { ...snapshot.helper, lastError: null },
     agents: snapshot.agents.map(a => ({
       ...Object.fromEntries(GUEST_AGENT.filter(k => a[k] !== undefined).map(k => [k, a[k]])),
+      touching: a.touching?.filter(t => t.repo).map(t => ({ ...t, path: t.repo })), // the repo it touched, never which file
       now: stepOnly(a.now),
       tasks: a.tasks ? { done: a.tasks.done, total: a.tasks.total, items: [] } : undefined,
-      feed: [],
+      feed: lastStep(a.feed),
       children: (a.children ?? []).map(c => ({ id: c.id, kind: c.kind, agentType: c.agentType, label: '', state: c.state, startedAt: c.startedAt, background: c.background, now: stepOnly(c.now), steps: c.steps, lastAt: c.lastAt, endedAt: c.endedAt })),
       docs: [],
     })),
@@ -86,15 +131,18 @@ function clampInt(value, min, max, fallback) {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 }
 
-export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed, getConversation, getPrompts, getNotes, getHeld = () => null, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, listDirs, shellOutput, namedFiles, getTranscriptHtml, getDoc, listFiles, readFile, repoTouched, actions, pastSessions, worlds, log = () => {}, lan = process.env.TRACKER_LAN === '1' }) {
+export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed, getConversation, getPrompts, getNotes, getHeld = () => null, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, listDirs, shellOutput, namedFiles, getTranscriptHtml, getDoc, listFiles, readFile, repoTouched, actions, pastSessions, worlds, getSettings = () => null, log = () => {}, lan = false, tls = null, getAccess = () => ({ admits: () => true, passes: null, checkPassword: () => false }) }) {
+  // tls ({ key, cert }): https is served too, on the same port (see the listener, below). getAccess(): which addresses may come
+  // as guests, and the guests' password if one is set (access.mjs), asked afresh each time, so a setting is in force at once.
   const clients = new Set();
-  let server;
-  const actualPort = () => server.address()?.port ?? port;
+  let server, front;
+  const actualPort = () => front.address()?.port ?? port;
 
-  // TRACKER_LAN=1 opens the dashboard to the local network: it binds every interface and also
-  // answers to this Mac's own names and addresses. Any other Host is still refused (DNS rebinding).
-  // A visitor from the network is a guest: it gets the page without the token, a snapshot without
-  // what was said, and nothing else. Only this Mac itself reads conversations and files, or acts.
+  // lan (the "Let others on your network watch" setting) opens the dashboard to the local network: it binds
+  // every interface and also answers to this computer's own names and addresses. Any other Host is still
+  // refused (DNS rebinding). A visitor from the network is a guest: it gets the page without the token, a
+  // snapshot without what was said, and nothing else. Only this computer itself reads conversations and
+  // files, acts, or sees and changes the settings.
   const ownNames = () => {
     if (!lan) return ['localhost', '127.0.0.1'];
     const name = hostname().toLowerCase();
@@ -102,9 +150,32 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
     return ['localhost', '127.0.0.1', name, `${name.split('.')[0]}.local`, ...addresses];
   };
   const isAllowedHost = host => ownNames().some(name => host === `${name}:${actualPort()}`);
-  const isAllowedOrigin = origin => ownNames().some(name => origin === `http://${name}:${actualPort()}`);
+  const isAllowedOrigin = origin => ownNames().some(name => origin === `http://${name}:${actualPort()}` || (tls && origin === `https://${name}:${actualPort()}`));
 
   const isGuest = req => lan && !LOOPBACK.has(req.socket.remoteAddress);
+  /** A guest with nothing more to show: there is no password, or its pass (a cookie) is good. */
+  const guestIn = req => { const { passes } = getAccess(); return !passes || passes.valid(cookieOf(req.headers.cookie, GUEST_COOKIE)); };
+  /** Plain http while https is served: sent on to https, from this computer too. */
+  const mustBeSecure = req => Boolean(tls) && !req.socket.encrypted;
+  const attempts = makeAttempts();
+  /** A guest's password, given in the form: a pass and the dashboard, or the form again. */
+  async function login(req, res) {
+    const address = req.socket.remoteAddress, { passes, checkPassword } = getAccess();
+    if (!passes) { res.writeHead(303, { location: '/' }); return res.end(); }
+    let text = '';
+    try { for await (const chunk of req) { text += chunk; if (text.length > 4096) break; } } catch { /* a form cut short: no password */ }
+    // Counted only now, with nothing awaited from here to the count below: forms sent side by side, each held back until all were let in, would else all be tried.
+    if (!attempts.allowed(address)) { res.writeHead(429, LOGIN_HEADERS); return res.end(loginPage('Too many attempts. Try again in a minute.')); }
+    const given = new URLSearchParams(text.slice(0, 4096)).get('password') ?? '';
+    if (!checkPassword(given)) {
+      attempts.failed(address);
+      res.writeHead(401, LOGIN_HEADERS);
+      return res.end(loginPage('Wrong password.'));
+    }
+    const pass = passes.issue();
+    res.writeHead(303, { location: '/', 'cache-control': 'no-store', 'set-cookie': `${GUEST_COOKIE}=${pass.value}; Path=/; Max-Age=${pass.maxAge}; HttpOnly; SameSite=Strict${req.socket.encrypted ? '; Secure' : ''}` });
+    return res.end();
+  }
   const frame = snapshot => `event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`;
 
   function openStream(req, res) {
@@ -115,13 +186,21 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
     req.on('close', () => clients.delete(res));
   }
 
-  server = createServer(async (req, res) => {
+  const answer = async (req, res) => {
     try {
       if (!isAllowedHost(req.headers.host ?? '')) return send(res, 403, 'text/plain', 'forbidden host');
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${actualPort()}`);
-      const path = url.pathname;
+      let path = url.pathname, framePass = null;
       const guest = isGuest(req);
-      if (guest && !(req.method === 'GET' && GUEST_PATH.test(path))) return send(res, 403, 'text/plain', 'forbidden');
+      if (mustBeSecure(req)) { res.writeHead(308, { location: `https://${req.headers.host}${req.url ?? '/'}`, 'cache-control': 'no-store' }); return res.end(); }
+      if (guest && req.method === 'POST' && path === '/login') return await login(req, res);
+      const framed = guest && req.method === 'GET' ? FRAME_PASS.exec(path) : null;
+      if (framed && FRAME_FILES.test(framed[2]) && getAccess().passes?.validFrame(framed[1])) { framePass = framed[1]; path = framed[2]; } // a frame's file, by the pass in its address
+      if (guest && !framePass && !guestIn(req)) { // a password is asked, and this guest has not given it: the form, and nothing else
+        res.writeHead(401, LOGIN_HEADERS);
+        return res.end(req.method === 'GET' ? loginPage('') : 'unauthorized');
+      }
+      if (guest && !(req.method === 'GET' && GUEST_PATH.test(path)) && !(req.method === 'POST' && MATCHMAKE.test(path))) return send(res, 403, 'text/plain', 'forbidden');
       let m;
       // The dashboard holds the token: it is never shown inside a frame, not even a world's own.
       if (path === '/' || path.startsWith('/api/')) {
@@ -139,6 +218,14 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
 
       if (req.method === 'GET') {
         if (path === '/') return send(res, 200, 'text/html; charset=utf-8', readFileSync(webFile, 'utf8').replace('__TRACKER_TOKEN__', guest ? '' : token));
+        if (path === '/colyseus.js') { // the library the page watches a world live with: checked against what the browser has, so an update is picked up at once
+          const file = sdkFile();
+          if (!file) return send(res, 404, 'text/plain', 'not found');
+          const headers = { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', etag: file.etag, 'x-content-type-options': 'nosniff' };
+          if (req.headers['if-none-match'] === file.etag) { res.writeHead(304, headers); return res.end(); }
+          res.writeHead(200, headers);
+          return res.end(file.code);
+        }
         if ((m = path.match(/^\/([a-z]+)\.js$/))) { // the page's scripts, from web/ by plain name only
           let code;
           try { code = readFileSync(join(dirname(webFile), `${m[1]}.js`), 'utf8'); } catch { return send(res, 404, 'text/plain', 'not found'); }
@@ -150,8 +237,9 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           return send(res, 200, 'text/css; charset=utf-8', css);
         }
         if ((m = path.match(/^\/world\/((?:u\/)?[a-z0-9-]+)\/$/))) { // a world's frame: sandboxed, its own CSP
-          const html = worlds?.frame(m[1]);
+          let html = worlds?.frame(m[1]);
           if (!html) return send(res, 404, 'text/plain', 'not found');
+          if (framePass) html = html.replaceAll('href="/', `href="/f/${framePass}/`).replaceAll('src="/', `src="/f/${framePass}/`); // what it loads carries the pass too
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': FRAME_CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
           return res.end(html);
         }
@@ -236,6 +324,11 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           if (path === '/api/claude/mcp') return sendJson(res, 200, await claudeMcp({ fresh: url.searchParams.get('fresh') === '1' }));
           return sendJson(res, 200, claudeRules());
         }
+        if (path === '/api/config') { // the settings, for the Settings window: token only (a guest never gets here at all)
+          if (req.headers['x-tracker-token'] !== token) return sendJson(res, 403, { error: 'forbidden' });
+          const got = getSettings();
+          return got ? sendJson(res, 200, got) : sendJson(res, 404, { error: 'not found' });
+        }
         if (path === '/api/sessions') { // past sessions' titles and messages: token only, like files
           if (req.headers['x-tracker-token'] !== token) return sendJson(res, 403, { error: 'forbidden' });
           return sendJson(res, 200, await pastSessions({ all: url.searchParams.get('days') === 'all' }));
@@ -254,9 +347,14 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           if (req.headers['x-tracker-token'] !== token) return sendJson(res, 403, { error: 'forbidden' });
           return sendJson(res, 200, await listDirs(url.searchParams.get('path') ?? '~/'));
         }
-        if (path === '/api/worlds') { // the worlds to choose from: token only (your folder's names are yours)
+        if (path === '/api/worlds') { // the worlds to choose from: yours with the token; a guest gets their names to pick one (each is a room of its own to watch), never where your folder is or what is wrong with one
+          const online = live?.online() ?? {}, listed = (worlds?.list() ?? []).map(w => ({ ...w, online: online[w.key] ?? 0 })); // with how many look at each just now (as its chip says)
+          if (guest) { // frames: what a frame's address starts with, where guests give a password (the pass a frame's files are asked by)
+            const { passes } = getAccess();
+            return sendJson(res, 200, { worlds: listed.map(w => ({ ...w, error: w.error ? 'It has something wrong with it.' : null })), folder: null, ...(passes ? { frames: `/f/${passes.frame}` } : {}) });
+          }
           if (req.headers['x-tracker-token'] !== token) return sendJson(res, 403, { error: 'forbidden' });
-          return sendJson(res, 200, { worlds: worlds?.list() ?? [], folder: worlds?.userDir ?? null });
+          return sendJson(res, 200, { worlds: listed, folder: worlds?.userDir ?? null });
         }
         if (path === '/api/repo/touched') {
           if (req.headers['x-tracker-token'] !== token) return sendJson(res, 403, { error: 'forbidden' });
@@ -269,7 +367,18 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
         }
       }
 
-      const isBodyAction = ['/api/actions/rm', '/api/actions/answer', '/api/actions/permit', '/api/actions/always', '/api/actions/plugin', '/api/actions/reload', '/api/actions/mcp', '/api/actions/rule', '/api/actions/message', '/api/actions/start', '/api/actions/fork', '/api/actions/restore', '/api/actions/note', '/api/actions/held', '/api/actions/helper', '/api/actions/name', '/api/actions/animals', '/api/actions/end', '/api/actions/restart', '/api/actions/setting', '/api/actions/aside', '/api/actions/reveal', '/api/actions/reveal-worlds', '/api/actions/mkdir', '/api/actions/choose-folder', '/api/actions/stop-shell'].includes(path);
+      if (req.method === 'POST' && (m = path.match(MATCHMAKE))) { // a seat in a world's room: from one of this dashboard's own pages (a tool sends no origin), a guest's too
+        if (req.headers.origin && !isAllowedOrigin(req.headers.origin)) return sendJson(res, 403, { error: 'forbidden' });
+        if (!seatAllowed(req.socket.remoteAddress)) return sendJson(res, 429, { code: 429, error: 'too many at once' }); // a page asks once, and again every few seconds when it has none
+        let body;
+        try { body = await readBody(req, MATCHMAKE_LIMIT); } catch (err) { if (err.status === 413) return sendJson(res, 413, { error: 'too large' }); throw err; }
+        const rooms = await liveRooms();
+        if (!rooms) return sendJson(res, 503, { code: 503, error: 'live worlds are not installed' }); // the page's world then moves itself
+        const seat = await rooms.matchmake(m[1], m[2], body);
+        return sendJson(res, seat.status, seat.body);
+      }
+
+      const isBodyAction = ['/api/actions/rm', '/api/actions/answer', '/api/actions/permit', '/api/actions/always', '/api/actions/plugin', '/api/actions/reload', '/api/actions/mcp', '/api/actions/rule', '/api/actions/message', '/api/actions/start', '/api/actions/fork', '/api/actions/restore', '/api/actions/note', '/api/actions/held', '/api/actions/helper', '/api/actions/name', '/api/actions/animals', '/api/actions/end', '/api/actions/restart', '/api/actions/setting', '/api/actions/config', '/api/actions/aside', '/api/actions/reveal', '/api/actions/reveal-worlds', '/api/actions/mkdir', '/api/actions/choose-folder', '/api/actions/stop-shell'].includes(path);
       if (req.method === 'POST' && (isBodyAction || /^\/api\/actions\/open\/[\w-]+$/.test(path))) {
         if (req.headers['x-tracker-token'] !== token || !isAllowedOrigin(req.headers.origin ?? '')) {
           return sendJson(res, 403, { error: 'forbidden' });
@@ -299,6 +408,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
         if (path === '/api/actions/name') return sendJson(res, 200, await actions.name(body));
         if (path === '/api/actions/animals') return sendJson(res, 200, await actions.animals(body));
         if (path === '/api/actions/setting') return sendJson(res, 200, await actions.setting(body));
+        if (path === '/api/actions/config') return sendJson(res, 200, await actions.config(body));
         if (path === '/api/actions/aside') return sendJson(res, 200, await actions.aside(body));
         if (path === '/api/actions/reveal') return sendJson(res, 200, await actions.reveal(body));
         if (path === '/api/actions/reveal-worlds') return sendJson(res, 200, await actions.revealWorlds());
@@ -316,7 +426,58 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
       if (!res.headersSent) send(res, 500, 'text/plain', 'internal error');
       else res.end();
     }
+  };
+  // One port for both: the listener looks at a connection's first byte (a TLS handshake starts with 22) and hands it to
+  // the http or the https server, neither of which listens itself. With https on, whoever comes by http is sent on to
+  // https at the same address. A guest's address is checked here, before a byte is read or sent; one that says nothing
+  // for ten seconds is let go.
+  server = createServer(answer);
+  const secure = tls ? createSecureServer({ key: tls.key, cert: tls.cert }, answer) : null;
+  secure?.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head)); // a world's WebSocket, over wss
+  secure?.on('tlsClientError', () => {}); // a browser that turns the certificate down just leaves
+  const sockets = new Set();
+  const admitted = socket => LOOPBACK.has(socket.remoteAddress) || (lan && getAccess().admits(socket.remoteAddress));
+  function route(socket) {
+    const first = socket.read(1);
+    if (first === null) { socket.once('readable', () => route(socket)); return; }
+    socket.setTimeout(0);
+    socket.unshift(first);
+    (first[0] === 22 && secure ? secure : server).emit('connection', socket);
+  }
+  front = createNetServer(socket => {
+    if (!admitted(socket)) { socket.destroy(); return; }
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.on('error', () => {});
+    if (!secure) { server.emit('connection', socket); return; }
+    socket.setTimeout(10_000, () => socket.destroy());
+    route(socket);
   });
+  // Closing it lets go of whoever is still connected (a page's event stream, a browser's idle connection), as an http server's close does of its idle ones.
+  const closeFront = front.close.bind(front);
+  front.close = done => { const closing = closeFront(done); for (const socket of sockets) socket.destroy(); return closing; };
+
+  // Seats asked for, by address: a few in any ten seconds (a seat not taken holds its place for a quarter of a minute).
+  const seatsAsked = new Map();
+  const SEATS = 12, SEATS_MS = 10_000;
+  function seatAllowed(address) {
+    const now = Date.now(), recent = (seatsAsked.get(address) ?? []).filter(at => now - at < SEATS_MS);
+    if (recent.length >= SEATS) { seatsAsked.set(address, recent); return false; }
+    recent.push(now);
+    seatsAsked.set(address, recent);
+    if (seatsAsked.size > 500) for (const [k, v] of seatsAsked) if (!v.some(at => now - at < SEATS_MS)) seatsAsked.delete(k);
+    return true;
+  }
+  // The built-in worlds, moved here for everyone who watches (live.mjs). Nothing of it is loaded until a page asks for a
+  // seat; where its packages are not installed (no `npm install` yet), the dashboard runs as ever and each page moves its own world.
+  let live = null, liveLoading = null;
+  const liveRooms = () => (liveLoading ??= import('./live.mjs').then(m => (live = m.createLive({
+    httpServer: server, token, lan, webDir: dirname(webFile), log,
+    getGuestJson: () => JSON.stringify(guestSnapshot(getSnapshot())),
+    getChatter: () => getSnapshot()?.chatter ?? null,
+    ownFile: key => worlds?.file(key, 'world.js').real ?? null, // a world from your folder: its world.js, really inside its folder
+    allowed: req => isAllowedHost(req.headers.host ?? '') && (!req.headers.origin || isAllowedOrigin(req.headers.origin)) && !mustBeSecure(req) && (!isGuest(req) || guestIn(req)),
+  })), err => { log(`live worlds are off: ${err?.message ?? err} (its packages are missing: install Agentville again)`); return null; }));
 
   const heartbeat = setInterval(() => {
     for (const c of clients) c.write(': ping\n\n');
@@ -324,26 +485,36 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
   heartbeat.unref();
 
   return {
-    server,
+    server: front,
     listen: () => new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(port, lan ? '0.0.0.0' : '127.0.0.1', () => resolve(server.address().port));
+      front.once('error', reject);
+      front.listen(port, lan ? '0.0.0.0' : '127.0.0.1', () => resolve(front.address().port));
     }),
+    /**
+     * Who may come changed: whoever is connected and may no longer be, is let go. With `guestsOut` (the guests'
+     * password changed) every guest is: an open stream or world would outlive the pass it came in with.
+     */
+    recheck({ guestsOut = false } = {}) { for (const socket of sockets) if (!admitted(socket) || (guestsOut && !LOOPBACK.has(socket.remoteAddress))) socket.destroy(); },
     broadcast(snapshot) {
-      let full, redacted;
-      for (const c of clients) c.write(c.guest ? (redacted ??= frame(guestSnapshot(snapshot))) : (full ??= frame(snapshot)));
+      let full, redacted, json;
+      const guestJson = () => (json ??= JSON.stringify(guestSnapshot(snapshot))); // made once: for the guests' pages and for the worlds moved here
+      for (const c of clients) c.write(c.guest ? (redacted ??= `event: snapshot\ndata: ${guestJson()}\n\n`) : (full ??= frame(snapshot)));
+      if (live?.watching()) live.publish(guestJson, snapshot.chatter ?? null);
     },
     /** A world's files changed (or '*': the SDK, or the list): the page reloads it, or its list. */
     broadcastWorlds(change) {
       const data = `event: worlds\ndata: ${JSON.stringify(change)}\n\n`;
       for (const c of clients) c.write(data);
+      live?.reload(change?.key ?? '*'); // its room starts afresh with the new files, as its pages do
     },
-    close: () => new Promise(resolve => {
+    close: async () => {
       clearInterval(heartbeat);
+      await live?.stop();
       for (const c of clients) c.end();
       clients.clear();
-      server.close(() => resolve());
-      server.closeAllConnections();
-    }),
+      await new Promise(resolve => { front.close(() => resolve()); });
+      server.close(() => {}); // neither listened, but each has timers of its own (and what is attached to it: a world's transport) that end with its close
+      secure?.close(() => {});
+    },
   };
 }
