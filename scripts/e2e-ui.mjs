@@ -1327,6 +1327,18 @@ try {
   check(await savedNotifications(true) && await until("document.getElementById('st-notifications')?.checked === true && document.getElementById('st-notify-waiting')?.disabled === false && document.getElementById('st-notify-waiting')?.checked === true"), 'and on again straight after, with each kind as it was');
   await js("document.querySelector('[data-settings-close]').click()");
   check(await until("!document.getElementById('settings').open"), 'its × closes it');
+  // Closed while a save is still on its way: the answer to the save does not open it again.
+  const settingsReady = () => until("document.getElementById('settings').open && !!document.getElementById('st-notifications') && document.getElementById('settings-save').disabled === false");
+  await js("document.getElementById('settings-open').click()");
+  await settingsReady();
+  await js("document.getElementById('st-notifications').click(); document.getElementById('settings-save').click(); document.querySelector('[data-settings-close]').click()");
+  check(await savedNotifications(false) && !(await until("document.getElementById('settings').open", 1500)), 'closed while a save is on its way, it stays closed, and the save is kept');
+  await js("document.getElementById('settings-open').click()");
+  await settingsReady();
+  await js("document.getElementById('st-notifications').click(); document.getElementById('settings-save').click()");
+  check(await savedNotifications(true) && await until("document.getElementById('settings-note').textContent === 'Saved.' && document.getElementById('settings-save').disabled === false"), 'opened again, it saves as before');
+  await js("document.querySelector('[data-settings-close]').click()");
+  await until("!document.getElementById('settings').open");
   console.log('Sessions');
   await js("document.getElementById('sessions-open').click()");
   check(await until("document.getElementById('sessions').open && [...document.querySelectorAll('#sessions [data-sess-resume]')].some(b => b.closest('.sess-row').textContent.includes('Harvest planning'))"), 'the sessions dialog offers to resume a past session by its title');

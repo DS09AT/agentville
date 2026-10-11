@@ -14,6 +14,7 @@ const stId = key => `st-${key.replace(/\W/g, '-')}`;
 /** Opens the window and reads the settings. `keep`: read again behind what shows (after a save), without emptying it first. */
 async function openSettings({ keep = false } = {}) {
   if (!keep) { settingsErrors = {}; settingsNote = null; settingsData = null; }
+  if (keep && !$('settings').open) return; // closed while the save was on its way: it stays closed
   if (!$('settings').open) $('settings').showModal();
   if (!keep) renderSettings();
   const mine = ++settingsRead;
@@ -109,7 +110,7 @@ async function saveSettings() {
   if (!r.ok) {
     settingsErrors = r.errors ?? {};
     settingsNote = { text: r.error ?? 'Not saved. Check the marked fields.', bad: true };
-    for (const f of settingsData.fields) if (Object.hasOwn(values, f.key) && f.kind !== 'secret') f.typed = values[f.key]; // what was typed stays in the window (never a password)
+    for (const f of settingsData?.fields ?? []) if (Object.hasOwn(values, f.key) && f.kind !== 'secret') f.typed = values[f.key]; // what was typed stays in the window (never a password)
     renderSettings();
     return;
   }
@@ -123,7 +124,7 @@ async function saveSettings() {
     return;
   }
   // What was saved is what is in force, at once: a change made straight after is measured against it.
-  for (const f of settingsData.fields) { delete f.typed; if (Object.hasOwn(values, f.key)) f.value = f.kind === 'secret' ? values[f.key] !== null : values[f.key]; }
+  for (const f of settingsData?.fields ?? []) { delete f.typed; if (Object.hasOwn(values, f.key)) f.value = f.kind === 'secret' ? values[f.key] !== null : values[f.key]; } // (none: the window was closed and opened again meanwhile, and reads them below)
   settingsNote = { text: 'Saved.' };
   renderSettings();
   await openSettings({ keep: true }); // and as the collector has it now
