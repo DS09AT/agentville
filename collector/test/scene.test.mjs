@@ -156,3 +156,31 @@ test('a private scene: no words and no paths; names, states, tools and numbers s
   assert.equal(api.onMain, false);
   assert.equal(JSON.parse(JSON.stringify(privateScene(s))).repos[0].key, api.key, 'the same stand-in next time');
 });
+
+test('the scene carries when each agent came into its state, and Codex\u2019s plan beside Claude\u2019s', () => {
+  const { toScene } = load();
+  const week = { windows: [{ kind: 'seven_day', percentUsed: 100, resetsAt: 5 }] };
+  const s = plain(toScene(snapOf([agent('a', { state: 'yourTurn', stateSince: 1234 }), agent('b')], [], { codexPlan: { ...week, planType: 'pro', credits: 9 } })));
+  assert.deepEqual(s.agents.map(a => [a.state, a.since]), [['turn', 1234], ['working', null]]);
+  assert.deepEqual([s.plan, s.codexPlan.weekly, s.codexPlan.fiveHour, s.codexPlan.planType, s.codexPlan.credits], [null, { kind: 'seven_day', pct: 100, resetsAt: 5, reset: false }, null, 'pro', 9]);
+  assert.equal(plain(toScene(snapOf([], []))).codexPlan, null);
+});
+
+test('each subagent says whose it is, how it runs and what came of it; a private scene keeps that but not its words', () => {
+  const { toScene, privateScene } = load();
+  const child = { id: 'c1', kind: 'subagent', agentType: 'ship-reviewer', label: 'security_all · Socrates', state: 'done', startedAt: 5, endedAt: 9, background: true, result: 'No findings.' };
+  const s = toScene({ generatedAt: 10, collisions: [], repos: [], agents: [{ id: 'codex:t', kind: 'codex', name: 'Fix the cart', state: 'working', touching: [], children: [child] }, { id: 's1', kind: 'interactive', name: 'web', state: 'working', touching: [], children: [{ ...child, id: 'c2', background: undefined, result: undefined, endedAt: undefined, state: 'running' }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(s.subagents)), [
+    { id: 'c1', label: 'security_all · Socrates', type: 'ship-reviewer', state: 'done', parent: 'Fix the cart', by: 'codex:t', startedAt: 5, endedAt: 9, background: true, codex: true, result: 'No findings.' },
+    { id: 'c2', label: 'security_all · Socrates', type: 'ship-reviewer', state: 'running', parent: 'web', by: 's1', startedAt: 5, endedAt: null, background: false, codex: false, result: '' },
+  ]);
+  assert.deepEqual(privateScene(s).subagents.map(x => [x.by, x.background, x.codex, x.label, x.result]), [['codex:t', true, true, '', ''], ['s1', false, false, '', '']]);
+});
+
+test('each agent carries its record: its steps by kind, its last half hour (the kind of each step and whether it failed), and since when it runs', () => {
+  const { toScene } = load();
+  const work = { steps: { edit: 3, test: 1 }, failed: 1, streak: 1, lastTest: { ok: false, at: 8 } };
+  const s = toScene({ generatedAt: 10, collisions: [], repos: [], agents: [{ id: 's1', kind: 'interactive', name: 'web', state: 'working', touching: [], startedAt: 2, work, timeline: [{ at: 5, tool: 'Edit', step: 'edit' }, { at: 8, tool: 'Bash', step: 'test', ok: false }, { at: 9, tool: 'Old' }] }, { id: 's2', kind: 'interactive', name: 'idle', state: 'idle', touching: [] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify([s.agents[0].work, s.agents[0].timeline, s.agents[0].startedAt])), [work, [{ at: 5, step: 'edit', ok: true }, { at: 8, step: 'test', ok: false }], 2], 'a tool call no step is known for is left out');
+  assert.deepEqual(JSON.parse(JSON.stringify([s.agents[1].work, s.agents[1].timeline, s.agents[1].startedAt])), [null, [], null]);
+});

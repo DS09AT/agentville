@@ -366,7 +366,7 @@ function subCardHtml(a, c) {
     : `${esc(c.state)}${steps}`;
   const now = running && c.now ? `<div class="sub-now mono">🔧 <b>${esc(c.now.tool)}</b> ${esc(c.now.summary)} · <span data-lasted="${c.now.startedAt}">${lasted(c.now.startedAt)}</span></div>` : '';
   const said = !running && c.result ? `<div class="sub-said">Result: “${esc(c.result)}”</div>` : c.lastSaid ? `<div class="sub-said">“${esc(c.lastSaid)}”</div>` : '';
-  return `<div class="sub-card ${running ? 'running' : esc(c.state)}"><div class="sub-head"><button type="button" class="act mini" data-child="${esc(c.id)}" data-agent="${esc(a.id)}" aria-expanded="${Boolean(open)}" data-tip="${open ? 'Close' : 'What it was asked, its steps and words (followed while it works), and its result'}">${open ? '▾' : '▸'}</button><b>${esc(c.agentType ?? 'subagent')}</b><span class="sub-task">${esc(c.label)}</span><span class="grow"></span><button type="button" class="act mini" data-convo="${esc(`${a.id}:${c.id}`)}" data-tip="Its whole transcript, with search: the prompt, everything it said, its result">⤢ Read</button></div>
+  return `<div class="sub-card ${running ? 'running' : esc(c.state)}"><div class="sub-head"><button type="button" class="act mini" data-child="${esc(c.id)}" data-agent="${esc(a.id)}" aria-expanded="${Boolean(open)}" data-tip="${open ? 'Close' : 'What it was asked, its steps and words (followed while it works), and its result'}">${open ? '▾' : '▸'}</button><b>${esc(c.agentType ?? 'subagent')}</b><span class="sub-task">${esc(c.label)}</span><span class="grow"></span>${a.kind === 'codex' ? '' : `<button type="button" class="act mini" data-convo="${esc(`${a.id}:${c.id}`)}" data-tip="Its whole transcript, with search: the prompt, everything it said, its result">⤢ Read</button>`}</div>
     <div class="sub-how faint">${how}</div>${now}${said}${open ? subDetailHtml(open) : ''}</div>`;
 }
 
@@ -375,6 +375,7 @@ function subDetailHtml(open) {
   const d = open.data;
   if (!d) return '<div class="loading"><span class="spinner"></span>Reading it…</div>';
   if (d.error) return `<div class="empty">${esc(d.error)}</div>`;
+  if (d.codex) return `<div class="sub-detail">${d.result ? `<div class="sub-label">Its last answer</div><div class="bub-md sub-result">${renderMarkdown(d.result)}</div>` : '<div class="empty">No answer yet.</div>'}<div class="faint">Codex keeps what a subagent was asked encrypted, and its steps aren't read.</div></div>`;
   const steps = (d.feed ?? []).filter(f => f.kind !== 'prompt'); // its prompt is shown whole above
   return `<div class="sub-detail">${d.prompt ? `<div class="sub-label">What it was asked</div><div class="sub-prompt">${esc(d.prompt)}</div>` : ''}
     <div class="sub-label">Its steps and words, newest first</div><div class="feed">${steps.map(feedRow).join('') || '<div class="empty">Nothing yet.</div>'}</div>

@@ -243,7 +243,15 @@ The page is laid out like an editor, in three columns:
   in how long, how many steps, its step now (`🔧 Grep createOrder in src/`), and what it last said
   or its result. **▸** opens it to what it was asked, its steps and words (followed while it
   works) and its result; **⤢ Read** opens its whole transcript in the conversation dialog. A
-  subagent that runs in the background stays *running* until Claude Code's notice says it finished.
+  subagent that runs in the background stays *running* until Claude Code's notice says it finished
+  (a quick one's notice can be written before the call that launched it: it counts all the same).
+  After the collector restarts, the subagents a session launched earlier are found again in its
+  transcript, so those still at work, or done in the last hour, stay.
+  A **Codex** thread's subagents have cards too: the agent type (its role), its task name and the
+  nickname Codex gave it, running while a turn of its is open and done between turns (a Codex
+  subagent stays, for more tasks), or failed when its turn was cut short. **▸** opens its last
+  answer. Codex keeps what a subagent was asked encrypted and its steps aren't read, so a Codex
+  card shows neither, and has no **⤢ Read**.
 - **Right: the explorer.** The agent's folder with git status letters (M, U, D) and a dot on files
   it edited or read, its **Scratchpad** and its **Memory**.
 
@@ -587,13 +595,137 @@ game's.
 ![The farm at night](docs/farm-night.png)
 
 **The layout.** Along the top are the barn, the silo and your farmhouse, with **your porch** in
-front of it. Below them are the fields, one raised bed per repo, in a fenced grid that grows to 18
-beds. While you look, a field keeps its bed: a new repo takes a free one (a worktree right after
+front of it (see "Porch life" below). Below them are the fields, one raised bed per repo, in a fenced grid that grows to 18
+beds. A field keeps its bed: a new repo takes a free one (a worktree right after
 its repo, a project's repo beside the others), and nothing else moves. A repo that goes away
 leaves its bed empty, held for it for a day. An empty bed is fallow ground, a patch of darker
-grass, so the fields in use stand out. When the page opens, the fields move up into free beds in
-the order they had, so empty rows close up. The yard down the left holds the henhouse, the meadow,
+grass, so the fields in use stand out. The collector decides which bed each repo has and keeps it
+in `state/beds.json`, so every browser that looks at the farm sees the same fields in the same
+places, gaps and all; nothing is moved up when a page opens. The yard down the left holds the henhouse, the meadow,
 the pond and the shade tree, and a forest surrounds the farm.
+
+**Porch life.** The porch has two ends, the front door between them, each under its sign.
+- **Waiting on you**, on the left, on a red runner: up to three agents that need you, on their
+  feet. The longer one waits, the more it lets you know: it waves; after a minute it taps its
+  foot; after five it rings a hand bell; after fifteen it paces the boards. Its red **!** and the
+  ring at its feet stay as they were.
+- **Your turn**, on the right, on a straw rug: up to three agents whose turn has ended. One just
+  come stands with its basket; after a minute it sits down, in the seat it likes best if that is
+  free; after ten it has a drink (a steaming mug, lemonade in summer); after an hour it mostly
+  dozes, its hat over its eyes; after three it has a blanket over its knees (in winter, at once).
+  Its basket stays beside it; its tick, or a **?** when it asked you something, is at the corner of
+  its name tag.
+- **Coming in.** A new agent comes out of the farmhouse: the front door opens, it steps out across
+  the porch and down the steps, and the door closes behind it. With the door open you see the
+  hall behind it: striped paper, a picture, a straw hat on its hook, floorboards and a runner. By
+  night the hall lamp is lit and its light falls out onto the porch.
+- **The porch cat** lives on the door mat, but is often elsewhere. It stays in one place for 40
+  seconds to 4 minutes, then moves on: a nap curled up on the mat, a wash or a stretch there, a
+  seat on the porch steps to watch the farm, a stroll on the lane before either end of the porch
+  (where it sits, grooms, stretches or hops about after something only it can see), a sunbath up
+  on the roof above the door, or indoors (the door opens for it; then it is not about). It is
+  indoors about one time in four, and one ten minutes in four it is away altogether, sometimes
+  several in a row. What it does changes every few seconds. By night it is on its mat, under the
+  porch lamp, or indoors: nothing else lights it, and its eyes shine.
+  It goes by the clock, so everyone looking sees the same cat in the same place. It walks by the
+  steps and the lane, in front of whoever sits or stands on the porch, never through them, and
+  it gets onto the roof from outside the house: along the lane to the market stall, a leap onto
+  the stall's awning, another over to the roof's edge, then along the shingles. For a leap it
+  crouches, goes up stretched, and lands low. When a farmer walks up to it, it runs: by day up to
+  the roof that way, or to the far end of the lane when the farmer is in its way or it is dark.
+  It stays there for 20 to 80 seconds, and for 2 to 6 minutes more it keeps off the mat and the
+  steps.
+- **Going home.** An agent whose session has ended walks back to the farmhouse, up the steps and
+  in at the front door, its name tag dimmed on the way. It no longer vanishes where it stood.
+- **Building a field.** A repo's first agent builds its field before anything else: it comes with
+  the field in a sack on its back, hammers the frame together plank by plank, right round the bed,
+  then hoes one row after another. The bed shows exactly as much as is built, and the sack empties
+  as it goes. Then the agent goes where its state puts it. An agent that waits on you doesn't
+  build: its field stands at once, and it comes to the porch.
+- **Packing up.** When a field's last agent leaves, it goes to the field first and takes it down
+  in the reverse order (the rows, then the frame), puts it in its sack and carries it into the
+  farmhouse. A field whose only agent has gone stale is packed up by the scarecrow itself, which
+  then stands where scarecrows stand. The bed stays the field's until it is packed; if the repo is
+  needed again meanwhile, the same farmer turns round and builds it back up from where it had come.
+- Nothing of this is acted out for what is already there when the page opens, with **Motion** off,
+  or for resting agents you have hidden: then a field stands, or is gone, at once.
+- **Seats.** Three, furnished differently each day: a rocking chair, a bench or a porch swing for
+  two, a hay bale, an apple crate. The rocker and the swing sway under whoever sits there.
+- **Pastimes.** A seated agent changes what it does every 25 or 50 seconds: the paper, whittling,
+  knitting, a harmonica, a stretch, its pocket watch, a sip, or just sitting. Each has two it likes
+  best. At most two are busy at once, so the porch stays calm.
+- **Surprises.** Every few minutes: a bluebird lands on a hat, the porch cat (it lives on the door
+  mat) climbs onto a lap, or everyone rocks in time. About once an hour: a duet, a spilt drink, a
+  mouse off with the knitter's yarn, a rocker tipped too far. Rarely: your front door opens and
+  the unicorn looks out; at night, a shooting star. A merged pull request gets a toast from
+  everyone seated. In October there is a pumpkin on the steps (lit on the 31st), in December
+  fairy lights along the eaves.
+- **The album.** The farmhouse's dialog says how much of all this you have seen (of 30), by name;
+  the first sighting of a surprise is also a line in the farm diary. It is kept in this browser.
+- None of it is random: who does what goes by the agent and the clock, so everyone looking sees
+  the same, and a reload changes nothing. With **Motion** off each agent holds its pose.
+
+**At work on a bed.** A working agent does its work in the bed, and the bed keeps a record of it.
+- **The farmer moves.** For a step that changes or tends files it walks the rows, facing along the
+  row, at a working pace: hoeing for an edit, sowing from a seed bag for a new file, raking for
+  lint and format, a sickle through the weeds for a deletion, watering for other commands. For a
+  search it walks round the bed's frame with a spyglass, for reading with its almanac open. Tests
+  (a magnifying glass), builds (a post hammered in), commits, pushes and the rest are done standing
+  at the bed's front, as before.
+- **The tools** are drawn large and outlined, in four beats to the stroke (raised, coming down, the
+  stroke, drawn back), and held: the farmer's arm reaches to the handle, and it dips on the stroke.
+  A working farmer's name tag carries its tool as a small picture.
+- **The slate** in the bed's far right corner says, in chalk, how many steps the bed's agents have
+  taken in all, and under the number their mix as a band of colours: green for changing files,
+  blue for reading and searching, yellow for tests, lint and builds, orange for git and deploys,
+  purple for planning and subagents, grey for other commands. An hourglass turns on it while a
+  turn runs. Hover the slate for the record in words: each group with its kinds (`30 edits, 4 new
+  files`), how the last test run went and when, steps that failed, who did how much when several
+  share the bed, and how long the session and its turn have run. A click opens the field.
+- **The last half hour** runs along the bed's front board: a tick for each step in its group's
+  colour, red when it failed, now at the right end.
+- **Traces.** Where files were changed in the last four minutes the soil is dark and fresh, fading
+  as it dries. Each new file leaves a staked seedling (six at most), each deletion a stump (four at
+  most). A pennant at the bed's front left is green or red for the last test run, and amber and
+  waving while tests run. Steps failing one after the other grow thistles along the front, which
+  go when a step succeeds again. The two tools used most lean on the frame at the bed's right.
+- **The close-up** (click a field) opens with what was done there: the same record, and the last
+  half hour stretch by stretch, newest first (`3 min ago: changing files × 5`).
+- The counts are the collector's: every tool call of the session by its kind of step, also from
+  before a collector restart. A **Codex** thread is counted the same way from its rollout (a patch
+  is an edit; a command is read as Claude Code's are), from the moment the dashboard first read it,
+  so a Codex farmer now holds its tool too. A guest sees the counts and colours, never file or
+  command names.
+
+**The henhouse.** Subagents live in the henhouse, Claude Code's and Codex's alike.
+- **Called out.** When a session starts a subagent its farmer whistles, the henhouse's hatch swings
+  up and a hen comes down the ramp, out below the run's fence and along the paths to its farmer.
+  Several started together come one after the other. An Explore subagent is the dog; a Codex
+  subagent is a brown hen. Each wears a kerchief in its farmer's shirt colour.
+- **At work.** A subagent the session waits for keeps beside its farmer, wherever that goes. One
+  that runs in the background scratches on its farmer's field by itself, so the farmer can sit on
+  the porch with its turn ended while its hens are still out. A Codex subagent always runs beside
+  its thread, so it works on the field.
+- **Home.** When a subagent is done its hen walks home, pecks in the run for a moment, goes in at
+  the hatch and lays an egg in the nest (the dog leaves a bone by the ramp). One that failed
+  flutters straight home, losing feathers, and lays nothing. A hen called again on its way home
+  turns round. When a session ends, its hens set off first and the farmer follows.
+- **The run** holds the hens that can't be with their farmer: the fifth and further of one farmer,
+  and those of a farmer that is not out on the farm.
+- **Reading it.** The sign over the run counts the hens out and the eggs in the nest. Hover a hen
+  for its type and task, click it for its farmer's subagents; hover an egg for whose it was and
+  what came of it. The henhouse's windows are lit at night while hens are out. The diary says when
+  a farmer whistles for a hen and when one heads home. On a guest's dashboard the tasks and
+  results are left out.
+- As with the farmers, nothing is acted out when the page opens or with **Motion** off. A hen
+  walks its way to the end, so a very short subagent is seen a few seconds longer than it ran.
+
+**Name tags.** Every tag is the same quiet dark plate; a line under it says its state (red: waiting
+on you; amber: your turn). On the porch each tag is made to fit its place, so they stand in one row
+and leave the windows and signs alone: all in one size (the smaller one unless a place holds eight
+characters of the full one), each with as many characters as its place holds. A name that ends in a
+short code keeps the code: `shiftaro-1a` becomes `shift-1a`. Point at a tag, or pick its agent, for
+the whole name. A sign counts those the porch has no place for: `YOUR TURN +1`.
 
 **Names and bubbles.** On the porch a farmer's tag is just its name, and neighbouring tags sit at
 two heights so none covers another. A name that is too long is shortened in the middle
@@ -659,8 +791,8 @@ can hold.
 
 | You see | It means |
 |---|---|
-| A farmer on the porch waving a red **!** | It is waiting on you (a scroll: a plan to approve) |
-| A farmer on the porch with a basket | Its turn ended (a **?** bubble: it asked you something) |
+| A farmer on the porch's left end, on its feet, waving a red **!** | It is waiting on you (a scroll: a plan to approve). Tapping its foot, ringing a bell, pacing: it has waited 1, 5, 15 minutes |
+| A farmer on the porch's right end with a basket, seated | Its turn ended (a **?** bubble: it asked you something). A drink, dozing, a blanket: 10 minutes, an hour, three hours ago |
 | A farmer in a field, holding a tool | It is working in that repo. The tool is its step: almanac = reading, spyglass = searching, hoe = editing, magnifier = tests, hammer = build, crate = commit, cart = push (with a flag: deploy)… |
 | A thought cloud | It is thinking between steps |
 | A chore board beside it | Its task list, ticked as items are done (its name says e.g. 3/7) |
@@ -669,7 +801,7 @@ can hold.
 | A pin on its hat | Its model: purple Opus, blue Sonnet, green Haiku, orange Fable |
 | Speed lines / a red-and-white scarf / a blueprint | Fast mode / bypass permissions / plan mode |
 | A purse | What it has cost (gold from $50) |
-| Chickens, a dog | Its subagents (the dog: an Explore subagent) |
+| Hens, a dog, each with a kerchief in its farmer's colour | Its subagents at work: a white hen (a brown one: a Codex subagent), the dog for an Explore subagent. Beside the farmer, or on its field by itself when it runs in the background |
 | A pump by a bed | A background command still running |
 | A farmer in a hammock | It will wake up by itself (`/loop`), with when |
 | Under the shade tree / a scarecrow | Idle / stale |
@@ -683,7 +815,9 @@ can hold.
 | Stones round some beds, with a sign | One project's repos, side by side |
 | The market stall | Open pull requests as crates, tagged by their checks. **Sold!** means one was merged |
 | The silo's grain / the season | Your plan's weekly usage / its 5-hour limit (winter when nearly used up). The tag at the silo's foot gives the week's figure, amber from 70% and red from 90% |
-| Eggs, hens in the run | Subagents that finished lately / more running than farmers can lead |
+| A second silo, left of the barn, under a slate dome | Codex's weekly usage, when both Claude Code and Codex have a reading (Claude's is under the red dome). With only one of them, it has the silo by the barn, under its own dome. Click a silo for both plans, their reset times, and Codex's plan and credits |
+| Eggs in the nest, a bone by the ramp | Subagents done within the hour, once their hen (or the dog) is home. Hover one for its result |
+| Hens in the run | Subagents whose farmer leads four already or is not out on the farm; and hens just back, pecking a moment before they go in |
 
 **Controls.**
 - **Top left, the panel.** The money spent and harvests, then waiting on you, working, your turn
@@ -706,10 +840,11 @@ dialog over the farm, with Quote and the reply box as in the list. Click a build
 
 | Building | Opens |
 |---|---|
-| Barn | Start or resume a session (the new farmer walks out of its door) |
-| Farmhouse | Who is on your porch, with a button to open each |
+| Barn | Start or resume a session (the new farmer comes out of the farmhouse) |
+| Farmhouse | Who is on your porch, with a button to open each, and the porch album |
 | Silo | Your plan's usage and when each limit resets |
 | Henhouse | The subagents and how each is going |
+| A hen, the dog | Its farmer's sidebar, on the Subagents tab (hover: its type and task) |
 | Notice board | Each project's CLAUDE.md and memory |
 | Market stall | The pull requests, with links |
 
@@ -783,8 +918,12 @@ The **collector** (`collector/`) is a Node program run by launchd. Every few sec
 - Codex's rollouts under `~/.codex/sessions/` (only the new bytes of each) and the thread names in
   `~/.codex/session_index.jsonl`, while a Codex process runs. Codex runs its threads in one shared
   process, so a Codex agent is a thread written to in the last `staleAfterHours`, not a process.
+  A subagent's rollout (it names its parent thread, its role, its nickname and its task) is read
+  the same way and shown under the thread it started from, as that thread's subagent.
   Its folder is the thread's, its state follows the turn (started: working; completed or
-  interrupted: your turn; a day after that: stale), and its bubble is the turn's last message;
+  interrupted: your turn; a day after that: stale), and its bubble is the turn's last message.
+  Each answer Codex gets carries its account's limits (the week, the 5 hours, its plan and
+  credits): the freshest is Codex's plan usage, beside Claude's;
 - `git` in each repo, with `GIT_OPTIONAL_LOCKS=0`, so it never takes `index.lock` from an agent
   that is committing (it never fetches);
 - `gh`, for deploys and pull requests.
@@ -903,6 +1042,9 @@ and can do is in [docs/worlds.md](docs/worlds.md).
   them. A Word document's page shows with no scripts at all.
 - Files you attach are kept under `state/uploads/` for 7 days. A folder you attach is sent as its
   path only.
+- Which bed each repo's field has is kept in `state/beds.json` (the repos' folders and a number
+  each), for a day after a repo was last seen. Every dashboard, a guest's too, gets that number
+  with the repo.
 - Your notes on a session are kept under `state/notes/` (the folder and its files readable only by
   you) until you delete them. They never leave your Mac, and nothing in one reaches the session
   until you use or send it. The snapshot the page reads every few seconds carries only how many
@@ -969,9 +1111,14 @@ and can do is in [docs/worlds.md](docs/worlds.md).
 - claude.ai cloud sessions and Remote Control sessions on other machines aren't visible locally.
 - **⑂ Fork** puts your message in the new prompt box with Claude Code's `--prefill` option, which its
   help doesn't list. If a Claude Code update drops it, the fork still opens, with an empty box.
+- The silo needs a reading: Claude's plan comes from the mod only (load it, then `/reload-plugins`
+  in open sessions); Codex's comes from what its sessions write (its last answer from the API), and
+  stays as it was while Codex is closed.
 - Codex sessions are read-only: they can't be answered, messaged, stopped, forked or restored from
-  the dashboard, and show no steps, tools, cost, CPU or memory. A Codex thread's subagents aren't
-  shown, and a prompt waiting in Codex shows as working. A thread nothing wrote to for
+  the dashboard, and show no cost, CPU or memory. Their steps are known by kind only (edit, test,
+  commit…: counted, and shown as the farmer's tool), not with their text. A Codex thread's subagents are
+  shown with their state and last answer only (not what they were asked, nor their steps), and
+  only while their thread is on the dashboard. A prompt waiting in Codex shows as working. A thread nothing wrote to for
   `staleAfterHours` leaves the dashboard, open or not. For up to two minutes after the collector
   starts, a thread written to just before counts as working, until its next turn event is read.
 - **↺ Restore** uses Claude Code's `--rewind-files` and `--prefill` options, which its help doesn't

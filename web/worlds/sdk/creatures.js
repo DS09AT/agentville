@@ -70,8 +70,8 @@
       if (look !== 'hen') p(1, -5, 1, 1, '#ffffff');
       p(1, -7, 2, 3, head); p(3, -6, 2, 1, '#f0b429'); p(2, -6, 1, 1, INK);
     } },
-    cat: { w: 11, h: 9, speed: 12, night: 'awake', draw(p, pose, T, look = 'grey') { // looks: grey, black (its eyes shine, so it shows at night)
-      const [G, D, eye] = look === 'black' ? ['#2a2a31', '#17171c', '#ffd43b'] : ['#9aa4ad', '#5f6b7a', INK];
+    cat: { w: 11, h: 9, speed: 12, night: 'awake', draw(p, pose, T, look = 'grey') { // looks: grey, black (its eyes shine, so it shows at night), ginger
+      const [G, D, eye] = { black: ['#2a2a31', '#17171c', '#ffd43b'], ginger: ['#e9a23b', '#c8681a', INK] }[look] ?? ['#9aa4ad', '#5f6b7a', INK];
       if (pose === 'sleep') { p(-3, -3, 6, 3, G); p(2, -4, 2, 2, G); p(-4, -2, 1, 2, D); if (look === 'black') p(-2, -3, 4, 1, '#3d3d47'); return; } // a sheen on its back, so it isn't a hole in the grass
       const s = legStep(pose, T);
       p(-3, -2, 1, 2 - s, D); p(2, -2, 1, 1 + s, D); p(-3, -5, 6, 3, G); p(-5, -7, 1, 3, D);

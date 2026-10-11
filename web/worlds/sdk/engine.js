@@ -9,129 +9,18 @@
 // The states an agent is out and about in: its bubble shows, its field grows.
 const ACTIVE = new Set(['waiting', 'working', 'turn']);
 
-// A project: the folder holding sibling repos. The scene says which (a repo's `project`); a field
-// without one falls back to its path, read the same way as web/scene.js reads it.
-const CATCH_ALL = new Set(['code', 'projects', 'repos', 'src', 'dev', 'work', 'tools', 'github', 'git', 'documents', 'desktop', 'downloads', 'workspace', 'workspaces', 'sites', 'apps', 'clients', 'tmp']);
-function projectOf(path) {
-  const parts = String(path).split('/').filter(Boolean).slice(0, -1);
-  return parts.length >= 3 && !CATCH_ALL.has(parts.at(-1).toLowerCase()) ? `/${parts.join('/')}` : null;
-}
-// A field keeps its bed; one that leaves keeps it held for a day, so it comes back to the same place.
-const BED_HELD_MS = 86_400_000;
-
-/**
- * The repo grid an engine world lays its fields out on: a bed per repo, in rows of `cols`. While you
- * look a repo keeps its bed (a new one takes a free bed near its project's, a worktree right after its
- * repo), a repo that leaves keeps its bed for a day, and when the page opens the beds are packed. The
- * farm's is 3 across, 88 × 62, from (174, 100).
- */
-function makeGrid({ cols = 3, colW, rowH, cx0, top0, minRows = 3, maxRows = 6, max = 18, slot = () => ({}), fence, height }) {
-  const slotAt = i => { const cx = cx0 + (i % cols) * colW, rowTop = top0 + Math.floor(i / cols) * rowH; return { i, cx, rowTop, ...slot(cx, rowTop) }; };
-  /** The fields as units to place: a project's repos together, else a repo alone; a worktree right after its repo. */
-  function unitsOf(fields) {
-    const byKey = new Map(fields.map(f => [f.key, f]));
-    const home = f => (f.worktree && f.main ? f.main : f.key);
-    const units = new Map();
-    for (const f of fields) {
-      const project = f.project !== undefined ? f.project : projectOf(home(f)), id = project ?? `repo:${home(f)}`;
-      if (!units.has(id)) units.set(id, { project, name: f.projectName ?? (project ? project.split('/').pop() : null), keys: [] });
-      units.get(id).keys.push(f.key);
-    }
-    for (const u of units.values()) { // each repo, then its worktrees
-      const order = [];
-      for (const k of u.keys) if (!byKey.get(k).worktree) { order.push(k); for (const w of u.keys) if (byKey.get(w).worktree && byKey.get(w).main === k) order.push(w); }
-      for (const k of u.keys) if (!order.includes(k)) order.push(k);
-      u.keys = order;
-      if (u.project && new Set(u.keys.map(k => home(byKey.get(k)))).size < 2) u.project = null; // one repo is no project
-    }
-    return { byKey, units: [...units.values()] };
-  }
-  const groupsOf = units => units.filter(u => u.project).map(u => ({ name: u.name, keys: u.keys }));
-  /** Which bed each field gets, the first time: a project's repos side by side (kept to one row when they fit). */
-  function arrange(fields) {
-    const { units } = unitsOf(fields);
-    const slotOf = new Map(), queue = [...units];
-    let row = 0, col = 0;
-    const place = u => { for (const k of u.keys) { slotOf.set(k, row * cols + col); if (++col === cols) { col = 0; row++; } } };
-    while (queue.length) {
-      const n = queue[0].keys.length;
-      if (col > 0 && (n > cols || col + n > cols)) { // it does not fit the rest of this row: a smaller one may, else the next row
-        const j = queue.findIndex(u => u.keys.length <= cols - col);
-        if (j > 0) place(queue.splice(j, 1)[0]); else { row++; col = 0; }
-        continue;
-      }
-      place(queue.shift());
-    }
-    return { slotOf, groups: groupsOf(units) };
-  }
-  /** Beds that stay put, from `beds` (key → { i, left? }). Returns { slotOf, groups, beds } (beds: what to remember now). */
-  function placeBeds(fields, beds, now) {
-    if (!Object.keys(beds).length) {
-      const { slotOf, groups } = arrange(fields);
-      return { slotOf, groups, beds: Object.fromEntries([...slotOf].map(([k, i]) => [k, { i }])) };
-    }
-    const { byKey, units } = unitsOf(fields);
-    const slotOf = new Map(), kept = {}, taken = new Set(), held = new Set();
-    for (const [k, b] of Object.entries(beds)) {
-      if (!Number.isInteger(b?.i)) continue;
-      if (byKey.has(k)) { if (!taken.has(b.i)) { slotOf.set(k, b.i); taken.add(b.i); kept[k] = { i: b.i }; } }
-      else if (now - (b.left ?? now) < BED_HELD_MS) { kept[k] = { i: b.i, left: b.left ?? now }; held.add(b.i); }
-    }
-    const dist = (i, j) => Math.abs(Math.floor(i / cols) - Math.floor(j / cols)) * 10 + Math.abs((i % cols) - (j % cols));
-    const free = () => Array.from({ length: max }, (_, i) => i).filter(i => !taken.has(i) && !held.has(i));
-    for (const u of units) {
-      for (const k of u.keys) {
-        if (slotOf.has(k)) continue;
-        const f = byKey.get(k), open = free();
-        const near = f.worktree && slotOf.has(f.main) ? [slotOf.get(f.main)] : u.project ? u.keys.filter(x => slotOf.has(x)).map(x => slotOf.get(x)) : [];
-        let i;
-        if (!open.length) i = max + slotOf.size; // the grid is full: "+N more"
-        else if (near.length) {
-          const next = near.map(n => n + 1).find(n => n % cols !== 0 && open.includes(n)); // right after it, in the same row
-          i = next ?? open.reduce((best, b) => (Math.min(...near.map(n => dist(b, n))) < Math.min(...near.map(n => dist(best, n))) ? b : best));
-        } else i = open[0];
-        slotOf.set(k, i);
-        taken.add(i);
-        kept[k] = { i };
-      }
-    }
-    return { slotOf, groups: groupsOf(units), beds: kept };
-  }
-  /** The ground for these fields: the beds remembered in `beds` stay put (null: laid out afresh). */
-  function layoutFor(fields, beds = null, now = Date.now()) {
-    const placed = beds ? placeBeds(fields, beds, now) : { ...arrange(fields), beds: null };
-    const { slotOf, groups } = placed;
-    const shown = fields.filter(f => slotOf.get(f.key) < max);
-    const last = Math.max(-1, ...shown.map(f => slotOf.get(f.key)));
-    const rows = Math.min(maxRows, Math.max(minRows, Math.floor(last / cols) + 1));
-    const slots = Array.from({ length: rows * cols }, (_, i) => slotAt(i));
-    const ST = shown.map(f => ({ key: f.key, ...slots[slotOf.get(f.key)] }));
-    const used = new Set(ST.map(s => s.i));
-    const GRID = fence(rows);
-    return {
-      // the key goes by bed: the same ground, whatever order the repos are listed in
-      key: [...ST].sort((a, b) => a.i - b.i).map(s => `${s.key}@${s.i}`).join('\n'), ST, slots, empty: slots.filter(s => !used.has(s.i)), rows, GRID, H: height(GRID),
-      groups: groups.map(g => ({ name: g.name, slots: g.keys.filter(k => slotOf.get(k) < rows * cols).map(k => slotOf.get(k)) })).filter(g => g.slots.length),
-      more: fields.length - shown.length,
-      beds: placed.beds,
-    };
-  }
-  /** The ground when the page opens: the fields in the order of the beds they had, packed into the first free beds. */
-  function packedLayout(fields, beds, now = Date.now()) {
-    const at = k => (Number.isInteger(beds?.[k]?.i) ? beds[k].i : Infinity);
-    return layoutFor([...fields].sort((x, y) => at(x.key) - at(y.key)), {}, now);
-  }
-  return { layoutFor, packedLayout, slotAt, cols };
-}
+// The repo grid (makeGrid) is in grid.js.
 
 /**
  * The engine's scene, from the page's plain-facts one (web/scene.js), under the names the engine draws
  * from: agents as `farmers` (each in its `field`, `pct` of context used, `hearts` left of 4, `shirt` its
  * colour), repos as `fields`, the plan as windows. A world adds its own looks on top (the farm: hats, crops).
  */
+const enginePlan = plan => (plan ? { windows: plan.windows.map(w => ({ kind: w.kind, percentUsed: w.pct, resetsAt: w.resetsAt, reset: w.reset })) } : null);
 function engineScene(s) {
   return {
-    plan: s.plan ? { windows: s.plan.windows.map(w => ({ kind: w.kind, percentUsed: w.pct, resetsAt: w.resetsAt, reset: w.reset })) } : null,
+    plan: enginePlan(s.plan),
+    codexPlan: s.codexPlan ? { ...enginePlan(s.codexPlan), planType: s.codexPlan.planType, credits: s.codexPlan.credits } : null,
     chrome: s.chrome,
     subagents: s.subagents,
     mail: s.mail,
@@ -195,6 +84,7 @@ window.Agentville.world = hooks => {
   let view = null, field = null;
   window.Agentville.raw({
     start({ el, opts, prefs }) {
+      th.attach?.({ prefs }); // the world's own settings, kept in the browser (docs/worlds.md, "Hooks")
       view = makePixelView(th, prefs);
       field = makeField(view);
       field.setOptions(opts);
@@ -206,6 +96,15 @@ window.Agentville.world = hooks => {
 };
 
 /* ---------- the engine: positions, walking, tags, pop-ups, diary, the loop ---------- */
+
+const TAG_PAD = 4; // a fitted tag's padding, left and right together (engine.css, .px-tag.slot)
+/** An agent's way to (tx, ty): one just come takes its world's first steps (spawn's via), then plans on from where they end. */
+const wayFrom = (b, via, plan, tx, ty) => (via?.length ? [...via, ...plan({ x: via.at(-1)[0], y: via.at(-1)[1] }, tx, ty)] : plan(b, tx, ty));
+/** How a tag fits a place `width` CSS pixels wide: in the smaller size unless the full one holds eight characters, and how many it holds. */
+function tagFit(width, charPx = 6 * fontPx()) {
+  const full = Math.floor((width - TAG_PAD) / charPx), small = full < 8;
+  return { small, chars: Math.max(3, small ? Math.floor((width - TAG_PAD) / (charPx * SMALL_TEXT)) : full) };
+}
 
 function makePixelView(th, prefs) {
   let host = null, canvas = null, ctx = null, ov = null, hudEl = null, bg = null, ro = null;
@@ -220,6 +119,8 @@ function makePixelView(th, prefs) {
   // While you look, a field keeps its bed; when the page opens, fields move up into free beds, so empty rows close up.
   let packed = false;
   const groundFor = fields => {
+    // The collector says where each field is (the same in every browser, gaps and all): then nothing is packed or remembered here.
+    if (fields.some(f => Number.isInteger(f.bed))) return th.grid.layoutFor(fields, Object.fromEntries(fields.filter(f => Number.isInteger(f.bed)).map(f => [f.key, { i: f.bed }])));
     if (packed || !fields.length) return th.grid.layoutFor(fields, beds);
     packed = true;
     return th.grid.packedLayout(fields, beds);
@@ -274,7 +175,7 @@ function makePixelView(th, prefs) {
     send: (id, to, { stay = 1.5 } = {}) => { if (!errands || crew.state(id) !== 'idle') return false; errands.start(id, { x: Math.round(to[0]), y: Math.round(to[1]), now: T, busy: false, stay, idleOnly: true }); sync(false); return true; },
     release: id => { if (errands?.release(id)) sync(false); const b = bots.get(id); if (b) b.hatless = false; },
     flag: (id, name, on) => { const b = bots.get(id); if (b) b[name] = on; },
-    chickens: () => [...bots.values()].flatMap(b => b.kids.map(d => ({ x: d.x, y: d.y }))),
+    chickens: () => th.chickens?.() ?? [...bots.values()].flatMap(b => b.kids.map(d => ({ x: d.x, y: d.y }))), // a world that moves its subagents' animals itself says where they are
     spotFree: name => th.spotFree?.(name) ?? true,
     fx: (kind, at) => showFx({ fx: kind, at }),
   };
@@ -326,6 +227,7 @@ function makePixelView(th, prefs) {
     for (const f of scene.farmers) {
       if (!restingShown && resting(f)) continue;
       const s = th.slots(f);
+      if (!s) continue; // the world has no place for it (gone into its house): it is taken off the map
       let at;
       if (s.group.startsWith('st:')) {
         if (!used.has(s.group)) used.set(s.group, []);
@@ -337,7 +239,7 @@ function makePixelView(th, prefs) {
         at = s.at(i);
       }
       const away = errands?.target(f); // borrowed by an animal: there instead, same zone (no diary line); waiting drops it
-      out.set(f.id, away ? { x: away[0], y: away[1], zone: s.zone } : { x: at[0], y: at[1], zone: s.zone });
+      out.set(f.id, away ? { x: away[0], y: away[1], zone: s.zone } : { x: at[0], y: at[1], zone: s.zone, direct: s.direct === true });
     }
     overflow = over;
     return out;
@@ -609,13 +511,13 @@ function makePixelView(th, prefs) {
       const f = scene.farmers.find(x => x.id === id);
       let b = bots.get(id);
       if (!b) {
-        const [sx, sy] = first ? [t.x, t.y] : th.spawn();
-        b = { id, x: sx, y: sy, path: [], tx: NaN, ty: NaN, zone: first ? t.zone : '', kids: [], dir: 0, walk: false, tag: null, tagText: '', lift: 0 };
+        const [sx, sy, via] = first ? [t.x, t.y] : th.spawn(); // via: its first steps from there (out of a door, down some steps), before it finds its own way
+        b = { id, x: sx, y: sy, path: [], tx: NaN, ty: NaN, zone: first ? t.zone : '', kids: [], dir: 0, walk: false, tag: null, tagText: '', lift: 0, via: Array.isArray(via) && via.length ? via : null };
         bots.set(id, b);
         if (!first) addLog(f, th.arriveText);
         if (!first && animalsShown()) kit.react('arrive', [sx, sy]); // someone new: the dog runs to meet them
       }
-      if (t.x !== b.tx || t.y !== b.ty) { b.tx = t.x; b.ty = t.y; b.path = plan(b, t.x, t.y); }
+      if (t.x !== b.tx || t.y !== b.ty) { b.tx = t.x; b.ty = t.y; b.path = t.direct ? [[t.x, t.y]] : wayFrom(b, b.via, plan, t.x, t.y); b.via = null; } // direct: straight there (a few steps at its work), not by the corridors
       if (snapTo) { b.x = b.tx; b.y = b.ty; b.path = []; }
       if (t.zone !== b.zone) {
         addLog(f, th.zoneText(f, t.zone));
@@ -625,7 +527,7 @@ function makePixelView(th, prefs) {
       }
     }
     for (const [id, b] of bots) if (!tg.has(id)) { b.tag?.remove(); bots.delete(id); }
-    if (first && tg.size) { // farmers already out when the page opens stand in place; later ones walk out of the barn
+    if (first && tg.size) { // agents already out when the page opens stand in place; later ones walk in from spawn()
       renderLog();
       first = false;
     }
@@ -702,6 +604,7 @@ function makePixelView(th, prefs) {
     PXG.animals = animalsShown(); // a world hides what its animals replace (the farm's pond duck)
     PXG.taken = animalsShown() ? kit.taken() : new Set(); // what the animals have just now (the bucket): the world doesn't draw it in its place
     th.ground();
+    drawLitWindows(sky, PXG.lights); // with the land: whoever stands before a window stays before it
     for (const f of scene.farmers) { const b = bots.get(f.id); if (b) th.shadows(b); }
     const items = th.items();
     if (animalsShown()) items.push(...kit.items());
@@ -732,19 +635,25 @@ function makePixelView(th, prefs) {
         b.tag.dataset.farmer = f.id;
         ov.appendChild(b.tag);
       }
-      const text = th.tag(f), tip = th.tip(f), sel = f.id === selectedId, hover = f.id === hoverId;
+      const tip = th.tip(f), sel = f.id === selectedId, hover = f.id === hoverId;
+      // A tag with a place of its own (a spot on the porch) is made to fit it, so neighbours stand in one row. Such tags
+      // are all one size: the full one where a place holds eight characters of it, else the smaller one; and each has as
+      // many characters as its place then holds. Picked or pointed at, a tag is whole.
+      const slot = sel || hover ? null : th.tagSlot?.(f) ?? null, { small, chars } = slot ? tagFit(slot * cs) : { small: false, chars: 0 };
+      const text = slot ? th.tag(f, chars) : th.tag(f), badge = th.tagBadge?.(f) ?? '';
       b.shown = sel || f.state === 'waiting' || (f.state === 'turn' && !f.nap); // the rest show their names on hover
-      if (b.tagText !== f.state + text + tip + sel + hover + f.nap) {
-        b.tag.className = `px-tag st-${f.state}${f.nap ? ' nap' : ''}${sel ? ' sel' : ''}${hover ? ' hover' : ''}`;
-        b.tag.innerHTML = f.state === 'turn' ? pxt(text, '#1b1420', null) : pxt(text, '#ffffff');
+      const key = [f.state, text, tip, sel, hover, f.nap, small, badge?.key ?? badge, Boolean(slot)].join('|');
+      if (b.tagText !== key) {
+        b.tag.className = `px-tag st-${f.state}${f.nap ? ' nap' : ''}${sel ? ' sel' : ''}${hover ? ' hover' : ''}${slot ? ' slot' : ''}`;
+        b.tag.innerHTML = `${pxt(text, '#ffffff', '#1b1420', small ? SMALL_TEXT : 1)}${badge?.img ? `<img class="px-badge pic" src="${esc(badge.img)}" alt="">` : badge ? `<b class="px-badge ${esc(badge)}" aria-hidden="true"></b>` : ''}`; // a mark at its corner: a tick, a question mark, or a picture the world gives ({ img, key })
         b.tagW = null;
         b.tag.title = tip;
-        b.tagText = f.state + text + tip + sel + hover + f.nap;
+        b.tagText = key;
       }
       if (b.tagW == null) { b.tagW = b.tag.offsetWidth; b.tagH = b.tag.offsetHeight; } // measured again only when its text changes
       const w = (b.tagW || 120) / cs;
       let lift = 0;
-      while (placed.some(q => Math.abs(q.y - b.y) < 4 && Math.abs(q.x - b.x) < (q.w + w) / 2 + 2 && q.lift === lift)) lift += 11;
+      if (!slot) while (placed.some(q => Math.abs(q.y - b.y) < 4 && Math.abs(q.x - b.x) < (q.w + w) / 2 + 2 && q.lift === lift)) lift += 11; // a fitted tag keeps its row (a step aside, pacing, doesn't lift its neighbour's)
       placed.push({ x: b.x, y: b.y, w, lift: (b.lift = lift) });
       b.tag.style.transform = `translate(${Math.round(b.x * cs)}px, ${Math.round((b.y - th.SH * SC - 3 - b.lift) * cs)}px) translate(-50%, -100%)`;
       placeBubble(f, b);
@@ -755,7 +664,7 @@ function makePixelView(th, prefs) {
     for (const m of th.movers?.(id => bots.get(id)) ?? []) {
       keepMovers.add(m.key);
       let el = moverEls.get(m.key);
-      if (!el) { el = document.createElement('div'); el.className = 'px-mover'; ov.appendChild(el); moverEls.set(m.key, el); }
+      if (!el) { el = document.createElement('div'); el.className = `px-mover${m.cls ? ` ${m.cls}` : ''}`; ov.appendChild(el); moverEls.set(m.key, el); }
       if (el.dataset.html !== m.html) { el.innerHTML = m.html; el.dataset.html = m.html; el.title = m.title ?? ''; }
       el.style.transform = `translate(${Math.round(m.x * cs)}px, ${Math.round(m.y * cs)}px) translate(-50%, -100%)`;
     }
@@ -775,7 +684,7 @@ function makePixelView(th, prefs) {
     T += dt;
     for (const f of scene.farmers) { const b = bots.get(f.id); if (b) { step(dt, f, b); th.emit?.(f, b, dt, addPart); } }
     if (errands?.tick(T, id => bots.get(id) ?? null, id => scene.farmers.find(f => f.id === id)?.state)) sync(false);
-    th.tick?.(dt, id => bots.get(id)); // what else moves, where the farmers are: the MCP carts
+    if (th.tick?.(dt, id => bots.get(id)) === true) { sync(false); layoutLabels(); } // what else moves, where the farmers are (the MCP carts); true: its agents' places changed, and what its labels say may have
     th.ambient?.(dt, addPart);
     if (animalsShown()) {
       for (const f of scene.farmers) if (f.state !== 'idle') idleSince.delete(f.id); else if (!idleSince.has(f.id)) idleSince.set(f.id, T);
@@ -796,7 +705,7 @@ function makePixelView(th, prefs) {
     draw();
   }
   function layoutLabels() {
-    const key = JSON.stringify([th.layout().key, scene.fields, overflow]);
+    const key = JSON.stringify([th.layout().key, scene.fields, overflow, th.labelKey?.() ?? null]); // labelKey: what else a world's labels say (the farm: its henhouse's eggs)
     if (key === labelKey) return;
     labelKey = key;
     ov.querySelectorAll('.px-lab').forEach(n => n.remove());
@@ -881,7 +790,7 @@ function makePixelView(th, prefs) {
     for (const ev of news) { // a harvest over its farmer, a sale at the stall
       const b = ev.id ? bots.get(ev.id) : null, at = ev.at ?? (b ? [b.x, b.y - th.SH * SC - 14] : null);
       if (at && ev.text) pop(at[0], at[1], ev.text, ev.cls);
-      if (ev.log) addLog(next.farmers.find(f => f.id === ev.id) ?? { name: 'The market', state: 'turn' }, ev.log);
+      if (ev.log) addLog(next.farmers.find(f => f.id === ev.id) ?? { name: ev.by ?? 'The market', state: 'turn' }, ev.log);
     }
     for (const ev of news) if (ev.kind && animalsShown()) { const b = ev.id ? bots.get(ev.id) : null; kit.react(ev.kind, ev.at ?? (b ? [b.x, b.y] : null) ?? [th.W / 2, 100]); } // the animals' reactions: a failed deploy scatters them
     layoutLabels();
@@ -910,7 +819,7 @@ function makePixelView(th, prefs) {
       return;
     }
     const pick = e.target.closest?.('[data-farm-pick]');
-    if (pick) { e.stopPropagation(); dlg?.close(); opts.onPickAgent?.(pick.dataset.farmPick); return; }
+    if (pick) { e.stopPropagation(); dlg?.close(); opts.onPickAgent?.(pick.dataset.farmPick, pick.dataset.farmTab ? { tab: pick.dataset.farmTab } : undefined); return; }
     const mem = e.target.closest?.('[data-farm-mem]');
     if (mem) { e.stopPropagation(); dlg?.close(); opts.onOpenDoc?.(mem.dataset.farmMem, mem.dataset.path); return; }
     if (e.target.closest?.('[data-farm-dlg-close]') || (dlg && e.target === dlg)) { e.stopPropagation(); dlg.close(); return; }
@@ -1155,6 +1064,7 @@ function makePixelView(th, prefs) {
     farmerName: id => scene.farmers.find(f => f.id === id)?.name,
     farmerColor: id => { const f = scene.farmers.find(x => x.id === id); return f ? f.shirt : '#9aa0a6'; },
     field: key => scene.fields.find(f => f.key === key),
+    fieldNotes: key => String(th.fieldNotes?.(key) ?? ''), // what the world has to say of a field, in its close-up: HTML of the world's own making
   };
 }
 
@@ -1272,7 +1182,7 @@ function makeField(view) {
       <div class="muted">${esc(label(f))} · by ${names} · ${ago(f.at)} ago · git: ${f.git ? esc(GIT_WORD[f.git] ?? f.git) : 'committed'}</div>
       ${f.doc ? '<div><button type="button" class="act" data-fv-read>Open in the reader</button></div>' : ''}${kind(f) === 'shared' ? '<div class="warnline">Two or more farmers wrote this file: this is where a collision would bite.</div>' : ''}</div>` : '';
     const status = loading && !data ? '<li class="muted">Loading…</li>' : error ? `<li class="muted">${esc(error)}</li>` : '<li class="muted">Nothing touched in the last 24 hours.</li>';
-    back.querySelector('.fv-tree').innerHTML = `<div class="piles">${piles}</div><ul class="fv-list">${rows || status}</ul>${detail}
+    back.querySelector('.fv-tree').innerHTML = `<div class="piles">${piles}</div>${view.fieldNotes(key)}<ul class="fv-list">${rows || status}</ul>${detail}
       <p class="faint fv-note">Only files agents read or wrote in the last 24 h are shown, not the whole folder.${data?.truncated ? ' Showing the newest 300.' : ''}</p>`;
   }
   async function load() {

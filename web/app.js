@@ -241,11 +241,11 @@ function showWorld(w) {
   $('farm-diary-pane').setAttribute('aria-label', noun);
 }
 /** A farmer was clicked: show it in the farm's sidebar, where it can be answered or messaged; its speech bubble: its conversation. */
-async function pickFromFarm(id, { from } = {}) {
+async function pickFromFarm(id, { from, tab } = {}) {
   window.TrackerFarm?.armClickGuard?.(); // a world swapped the sidebar's agent: its action controls ignore clicks for a moment
   if (selected !== id) openChildren.clear();
   selected = id;
-  farmTab = 'agent';
+  farmTab = tab === 'subagents' ? 'subagents' : 'agent'; // one of its hens was clicked: its subagents' cards
   save('tracker-farm-tab', farmTab);
   const agent = snap?.agents.find(a => a.id === id);
   // A speech bubble opens the whole conversation over the farm (its farmer picked behind it), unless

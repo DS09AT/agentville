@@ -15,10 +15,22 @@ const cutMid = (s, n) => {
   const head = Math.ceil((n - 1) / 2);
   return `${t.slice(0, head)}…${t.slice(t.length - (n - 1 - head))}`;
 };
-/** A farmer's name tag: on the porch just its name, short enough to sit beside its neighbours; in the field its hearts and chores too. */
-function tagText(f) {
+/**
+ * A name in at most n characters. One that ends in a short code after a hyphen (shiftaro-1a: a repo and its session)
+ * keeps the code and loses the end of the word before it: shift-1a. Any other is cut in the middle (cutMid).
+ */
+function shortName(s, n) {
+  const t = String(s ?? ''), at = t.lastIndexOf('-'), tail = at > 0 ? t.slice(at + 1) : '';
+  if (t.length <= n) return t;
+  return tail && tail.length <= 3 && n - tail.length - 1 >= 2 ? `${t.slice(0, n - tail.length - 1).replace(/-+$/, '')}-${tail}` : cutMid(t, n);
+}
+/**
+ * A farmer's name tag: on the porch just its name, short enough to sit beside its neighbours (`fit` characters, when the
+ * engine says how many its place holds; else 10); in the field its hearts and chores too.
+ */
+function tagText(f, fit = 10) {
   const onPorch = (f.state === 'waiting' || f.state === 'turn') && !f.nap;
-  if (onPorch) return cutMid(f.name, 10);
+  if (onPorch) return shortName(f.name, fit);
   if (f.kind === 'codex') return cutMid(f.name, 16);
   return `${cutMid(f.name, 16)} ${'♥'.repeat(f.hearts)}${'♡'.repeat(4 - f.hearts)}${f.tasks ? ` ${f.tasks.done}/${f.tasks.total}` : ''}`;
 }
@@ -152,12 +164,21 @@ function drawNight(sky, H, lights) {
   ctx.globalCompositeOperation = 'multiply';
   ctx.drawImage(lightMap, e.x0, e.y0);
   ctx.globalCompositeOperation = 'source-over';
-  for (const [, , , core] of lights) { // lit windows and lamps: they are the lights
-    if (!core) continue;
-    const [cx, cy, cw, ch, panes] = core;
-    px(cx, cy, cw, ch, dark > 0.5 ? '#ffd43b' : '#f4d58d');
-    if (panes) { px(cx + (cw >> 1), cy, 1, ch, '#6b4320'); px(cx, cy + (ch >> 1), cw, 1, '#6b4320'); } // the window frame
-  }
+  for (const [, , , core] of lights) if (core && !core[4]) drawLit(core, dark); // lamps: they are the lights, over the dark
+}
+/** A lit window or lamp: its panes aglow (and a window's frame). */
+function drawLit([cx, cy, cw, ch, panes], dark) {
+  px(cx, cy, cw, ch, dark > 0.5 ? '#ffd43b' : '#f4d58d');
+  if (panes) { px(cx + (cw >> 1), cy, 1, ch, '#6b4320'); px(cx, cy + (ch >> 1), cw, 1, '#6b4320'); } // the window frame
+}
+/**
+ * The lit windows, drawn with the land, before anyone stands in front of them: a seat's back, a head or a bubble
+ * before a window stays before it at night too. Their glow (drawNight's round holes in the dark) keeps them bright.
+ */
+function drawLitWindows(sky, lights) {
+  const dark = 1 - sky.light;
+  if (dark < 0.02) return;
+  for (const [, , , core] of lights) if (core?.[4]) drawLit(core, dark);
 }
 
 /* ---------- the pixel font: names, field names, counts and signs ---------- */
@@ -201,17 +222,18 @@ function textImage(text, color, shadow) {
 /** Pixels per font pixel on screen: 1.5 on a Retina screen (3 device pixels), 2 on a plain one, so it stays sharp. */
 const fontPx = () => { const dpr = window.devicePixelRatio || 1; return Math.max(1, Math.round(1.5 * dpr)) / dpr; };
 /** A text in the pixel font as an image only (hidden from screen readers), or the plain text if it has a letter the font lacks. */
-function pxImg(text, color = '#f4ecd8', shadow = '#1b1420') {
+const SMALL_TEXT = 2 / 3; // the smaller size a text may be drawn at: whole device pixels again, so it stays crisp
+function pxImg(text, color = '#f4ecd8', shadow = '#1b1420', size = 1) {
   const t = String(text ?? '');
   const img = textImage(t, color, shadow);
   if (!img) return `<span aria-hidden="true">${esc(t)}</span>`;
-  const s = fontPx();
+  const s = fontPx() * size;
   return `<i class="pxt" aria-hidden="true" style="width:${(img.w * s).toFixed(1)}px;height:${(img.h * s).toFixed(1)}px;background-image:url(${img.url})"></i>`;
 }
 /** HTML for a text in the pixel font (its words stay for screen readers, copying and search), or plain text if it has a letter the font lacks. */
-function pxt(text, color = '#f4ecd8', shadow = '#1b1420') {
+function pxt(text, color = '#f4ecd8', shadow = '#1b1420', size = 1) {
   const t = String(text ?? '');
-  return textImage(t, color, shadow) ? `${pxImg(t, color, shadow)}<span class="px-sr">${esc(t)}</span>` : esc(t);
+  return textImage(t, color, shadow) ? `${pxImg(t, color, shadow, size)}<span class="px-sr">${esc(t)}</span>` : esc(t);
 }
 
 /* ---------- particles: dust, splashes, chips, smoke, leaves, snow ---------- */

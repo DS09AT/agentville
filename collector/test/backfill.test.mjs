@@ -44,7 +44,7 @@ test('the conversation before a byte offset is found too: your prompts (typed or
     ['prompt', 'typed ask', 0], ['reply', 'A reply', 1], ['prompt', 'sent from the dashboard', 4],
   ]);
   assert.deepEqual(h.files.map(c => c.input.file_path), ['/w/a.md']);
-  assert.deepEqual(await earlierHistory('/no/such/file', 100), { files: [], said: [], tasks: { ops: [], compactions: 0, lastCompactAt: 0 }, background: [] });
+  assert.deepEqual(await earlierHistory('/no/such/file', 100), { files: [], said: [], tasks: { ops: [], compactions: 0, lastCompactAt: 0 }, background: [], children: [], steps: {} });
 });
 
 test('background commands before the offset are found too, with the file their output goes to: one still running is followed after a restart', async () => {
@@ -85,4 +85,38 @@ test('the task list and compactions before a byte offset are found too', async (
   const h = await earlierHistory(f, Buffer.byteLength(head));
   assert.deepEqual(h.tasks.ops.map(o => [o.op, o.id, o.subject ?? o.status]), [['create', '4', 'Early task'], ['update', '4', 'in_progress']]);
   assert.equal(h.tasks.compactions, 1);
+});
+
+test('subagents launched before a byte offset are found too, each as far as that part says: done, failed, or still running', async () => {
+  const f = join(mkdtempSync(join(tmpdir(), 'tracker-backfill-')), 's.jsonl');
+  const t = sec => new Date(Date.UTC(2026, 9, 7, 10, 0, sec)).toISOString();
+  const result = (sec, id, content, extra = {}) => JSON.stringify({ type: 'user', timestamp: t(sec), ...extra, message: { content: [{ type: 'tool_result', tool_use_id: id, content }] } });
+  const launched = (sec, id) => result(sec, id, 'Async agent launched successfully.', { toolUseResult: { isAsync: true, status: 'async_launched' } });
+  const notice = (sec, id, status) => JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: t(sec), content: `<task-notification>\n<tool-use-id>${id}</tool-use-id>\n<status>${status}</status>\n<result>All clear.</result>\n</task-notification>` });
+  const head = [
+    use(1, 'Agent', { description: 'Find callers', subagent_type: 'Explore', prompt: 'Find them' }),
+    result(9, 't1', 'Three callers.'),
+    notice(10, 't11', 'completed'), // a quick one: its notice is written before the call that launched it
+    use(11, 'Agent', { description: 'Quick look', run_in_background: true }),
+    launched(11, 't11'),
+    use(12, 'Agent', { description: 'Long review', run_in_background: true }),
+    launched(12, 't12'),
+    use(13, 'Bash', { command: 'npm test', run_in_background: true }),
+  ].join('\n') + '\n';
+  writeFileSync(f, head);
+  const { children } = await earlierHistory(f, Buffer.byteLength(head));
+  assert.deepEqual(children.map(c => [c.id, c.kind, c.agentType, c.label, c.state, c.isBackground]), [
+    ['t1', 'subagent', 'Explore', 'Find callers', 'done', false],
+    ['t11', 'subagent', undefined, 'Quick look', 'done', true],
+    ['t12', 'subagent', undefined, 'Long review', 'running', true],
+  ], 'not the background command: those are found for themselves');
+  assert.equal(children[0].result, 'Three callers.');
+  assert.equal(children[1].result, 'All clear.');
+});
+
+test('the steps before a byte offset are counted by kind, for the session’s record', async () => {
+  const f = join(mkdtempSync(join(tmpdir(), 'tracker-backfill-')), 's.jsonl');
+  const head = [use(1, 'Read', { file_path: '/w/a.md' }), use(2, 'Edit', { file_path: '/w/a.md' }), use(3, 'Edit', { file_path: '/w/b.md' }), use(4, 'Bash', { command: 'npm test' }), use(5, 'Bash', { command: 'git commit -m x' }), use(6, 'Grep', { pattern: 'x' })].join('\n') + '\n';
+  writeFileSync(f, head);
+  assert.deepEqual((await earlierHistory(f, Buffer.byteLength(head))).steps, { read: 1, edit: 2, test: 1, commit: 1, search: 1 });
 });

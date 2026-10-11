@@ -9,7 +9,7 @@ const MESSAGE_LIMIT = 90 * 1024 * 1024; // up to six 10 MB attached files, base6
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const GUEST_PATH = /^\/($|[a-z]+\.(js|css)$|world\/|api\/(state|events)$)/;
-const GUEST_AGENT = ['id', 'kind', 'cliId', 'name', 'startedAt', 'cwd', 'model', 'modelLabel', 'fast', 'contextTokens', 'compactions', 'lastCompactAt', 'wakeAt', 'state', 'stateReason', 'stateSince', 'mode', 'effort', 'turn', 'usage', 'lastActivityAt', 'mcp', 'touching', 'proc', 'activity', 'timeline'];
+const GUEST_AGENT = ['id', 'kind', 'cliId', 'name', 'startedAt', 'cwd', 'model', 'modelLabel', 'fast', 'contextTokens', 'compactions', 'lastCompactAt', 'wakeAt', 'state', 'stateReason', 'stateSince', 'mode', 'effort', 'turn', 'usage', 'lastActivityAt', 'mcp', 'touching', 'proc', 'activity', 'timeline', 'work'];
 const stepOnly = now => (now ? { tool: now.tool, step: now.step, startedAt: now.startedAt } : undefined);
 
 /**
@@ -24,7 +24,7 @@ export function guestSnapshot(snapshot) {
       now: stepOnly(a.now),
       tasks: a.tasks ? { done: a.tasks.done, total: a.tasks.total, items: [] } : undefined,
       feed: [],
-      children: (a.children ?? []).map(c => ({ id: c.id, kind: c.kind, agentType: c.agentType, label: '', state: c.state, startedAt: c.startedAt, now: stepOnly(c.now), steps: c.steps, lastAt: c.lastAt, endedAt: c.endedAt })),
+      children: (a.children ?? []).map(c => ({ id: c.id, kind: c.kind, agentType: c.agentType, label: '', state: c.state, startedAt: c.startedAt, background: c.background, now: stepOnly(c.now), steps: c.steps, lastAt: c.lastAt, endedAt: c.endedAt })),
       docs: [],
     })),
   };
@@ -180,7 +180,7 @@ export function createTrackerServer({ port, token, webFile, getSnapshot, getFeed
           if (req.headers['x-tracker-token'] !== token) return sendJson(res, 403, { error: 'forbidden' });
           let id = '';
           try { id = decodeURIComponent(m[1]); } catch { /* not an id */ }
-          if (!/^[\w-]+(?::[\w-]+)?$/.test(id)) return sendJson(res, 404, { error: 'unknown agent' });
+          if (!/^(?:codex:)?[\w-]+(?::[\w-]+)?$/.test(id)) return sendJson(res, 404, { error: 'unknown agent' }); // session, session:call, codex:thread, codex:thread:subagent
           if (m[2] === 'subagent') {
             const sub = id.includes(':') ? getSubagent(id) : null;
             return sub ? sendJson(res, 200, sub) : sendJson(res, 404, { error: 'That subagent is not known.' });

@@ -84,7 +84,7 @@ async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false
   const farm = window.TrackerFarm;
   const options = {
     token: 'tok', diary, navState: () => ({ theme: 'dark', side: false, live: true }),
-    onPickAgent: (id, o) => calls.push(['pick', id, o?.from ?? null]), onOpenDoc: (id, p) => calls.push(['doc', id, p]),
+    onPickAgent: (id, o) => calls.push(o?.tab ? ['pick', id, o?.from ?? null, o.tab] : ['pick', id, o?.from ?? null]), onOpenDoc: (id, p) => calls.push(['doc', id, p]),
     onShowRepos: () => calls.push(['repos']), onStartSession: () => calls.push(['start']), onNav: w => calls.push(['nav', w]), onBell: on => calls.push(['bell', on]),
     onWorld: w => calls.push(['world', w.key]),
     onNotice: t => calls.push(['notice', t]),
@@ -1042,4 +1042,19 @@ test('the click guard: a keyboard-activated click is caught only while the windo
   assert.equal(p.farm.clickGuardBlocks(1), true, 'but a pointer click begun before the swap is');
   p.farm.armClickGuard();
   assert.equal(p.farm.clickGuardBlocks(0), true, 'while the window is live, even a keyboard click waits');
+});
+
+test('a pick may name the sidebar’s Subagents tab (a hen was clicked), and no other', async () => {
+  const p = await page();
+  p.calls.length = 0;
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'pick', agentId: 'a1', tab: 'subagents' });
+  assert.deepEqual(p.calls.filter(c => c[0] === 'pick'), [['pick', 'a1', null, 'subagents']]);
+  const q = await page();
+  q.calls.length = 0;
+  q.farm.update(snap);
+  q.from({ type: 'loaded' });
+  q.from({ type: 'pick', agentId: 'a1', tab: 'files' });
+  assert.deepEqual(q.calls.filter(c => c[0] === 'pick'), [['pick', 'a1', null]], 'another tab is not passed on');
 });

@@ -12,9 +12,10 @@ const agent = {
   now: { tool: 'Bash', summary: 'npm test -- cart', step: 'test', startedAt: 4 },
   tasks: { done: 1, total: 2, items: [{ text: 'Write the test', status: 'completed' }] },
   feed: [{ at: 1, kind: 'prompt', text: 'fix the cart' }],
-  children: [{ id: 'c1', kind: 'subagent', agentType: 'Explore', label: 'Find callers', state: 'running', startedAt: 2, now: { tool: 'Grep', summary: 'cart', step: 'search', startedAt: 3 }, steps: 4, lastSaid: 'Found 3.', lastAt: 3, result: 'Three callers.' }],
+  children: [{ id: 'c1', kind: 'subagent', agentType: 'Explore', label: 'Find callers', state: 'running', startedAt: 2, background: true, now: { tool: 'Grep', summary: 'cart', step: 'search', startedAt: 3 }, steps: 4, lastSaid: 'Found 3.', lastAt: 3, result: 'Three callers.' }],
   docs: [{ path: '/p/shop/plan.md', wrote: true, at: 1 }], shells: [{ pid: 9, command: 'npm test' }],
   touching: [{ path: '/p/shop/src', mode: 'write', repo: '/p/shop' }], timeline: [{ at: 1, tool: 'Bash' }],
+  work: { steps: { edit: 3, test: 1 }, failed: 0, streak: 0, lastTest: { ok: true, at: 4 } }, // counts only: nothing that was said
 };
 const snapshot = { generatedAt: 1, counts: { working: 1 }, repos: [{ path: '/p/shop', name: 'shop' }], agents: [agent], collisions: [] };
 
@@ -22,9 +23,9 @@ test('a guest snapshot keeps who works where with what tool, and drops everythin
   const g = guestSnapshot(snapshot);
   assert.deepEqual(g.agents[0], {
     id: 's1', kind: 'interactive', name: 'shop', cwd: '/p/shop', state: 'working', stateReason: 'running Bash', stateSince: 5,
-    touching: agent.touching, timeline: agent.timeline,
+    touching: agent.touching, timeline: agent.timeline, work: agent.work,
     now: { tool: 'Bash', step: 'test', startedAt: 4 }, tasks: { done: 1, total: 2, items: [] }, feed: [],
-    children: [{ id: 'c1', kind: 'subagent', agentType: 'Explore', label: '', state: 'running', startedAt: 2, now: { tool: 'Grep', step: 'search', startedAt: 3 }, steps: 4, lastAt: 3, endedAt: undefined }],
+    children: [{ id: 'c1', kind: 'subagent', agentType: 'Explore', label: '', state: 'running', startedAt: 2, background: true, now: { tool: 'Grep', step: 'search', startedAt: 3 }, steps: 4, lastAt: 3, endedAt: undefined }],
     docs: [],
   });
   assert.doesNotMatch(JSON.stringify(g), /cart|On it|Push it|Which one|why\?|Find callers|Found 3|Three callers|plan\.md|npm test/);

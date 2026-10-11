@@ -553,7 +553,8 @@ try {
   check(await js("(f => !!f && f.getAttribute('sandbox') === 'allow-scripts' && f.src.endsWith('/world/farm/'))(document.querySelector('#farm .world-frame'))"), 'the farm runs in a sandboxed frame of its own');
   // No token, and no cookies: the sandbox refuses even to read them (a SecurityError), as it does storage.
   check(await fjs('typeof TOKEN === "undefined" && (() => { try { return !document.cookie; } catch (e) { return e.name === "SecurityError"; } })()'), 'the farm has no token');
-  check(await funtil("[...document.querySelectorAll('.px-tag')].some(t => t.textContent.startsWith('ui-asker') && t.classList.contains('st-waiting'))"), 'the waiting agent is on the porch');
+  check(await funtil("[...document.querySelectorAll('.px-tag')].some(t => t.dataset.farmer === 'ui-asker' && t.title.startsWith('ui-asker') && t.classList.contains('st-waiting'))"), 'the waiting agent is on the porch');
+  check(await fjs("(t => !!t && t.classList.contains('slot') && t.textContent.trim().length <= 'ui-asker'.length && t.textContent.trim().startsWith('ui'))(document.querySelector('.px-tag[data-farmer=\"ui-asker\"]'))"), 'its name tag is fitted to its place on the porch, its whole name in its tooltip');
   check(/1 needs you/.test(await fjs("document.querySelector('.px-hud')?.textContent ?? ''")), 'the farm says one needs you');
   const porch = JSON.parse(await fjs("JSON.stringify(['ui-done-a', 'ui-done-b', 'ui-asker'].map(id => (r => r.left + r.width / 2)(document.querySelector(`.px-tag[data-farmer='${id}']`).getBoundingClientRect())))"));
   const cs0 = await fjs("(c => c.getBoundingClientRect().width / Number(c.dataset.ew))(document.querySelector('#farm canvas'))");

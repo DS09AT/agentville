@@ -1379,18 +1379,37 @@ test('a Codex thread shows as an agent in its folder while Codex runs, and not o
   writeFileSync(join(codexDir, 'sessions', '2026', '10', '10', 'rollout-x.jsonl'), `${[
     JSON.stringify({ timestamp: iso(now - 9000), type: 'session_meta', payload: { id: 't-1', cwd: '/p/shop', thread_source: 'user' } }),
     JSON.stringify({ timestamp: iso(now - 8000), type: 'event_msg', payload: { type: 'task_started' } }),
+    JSON.stringify({ timestamp: iso(now - 3000), type: 'event_msg', payload: { type: 'token_count', info: {}, rate_limits: { primary: { used_percent: 83, window_minutes: 10080, resets_at: Math.round(now / 1000) + 3600 }, secondary: null, plan_type: 'pro', credits: { balance: '12.5' } } } }),
     JSON.stringify({ timestamp: iso(now - 2000), type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'Cart fixed.' } }),
   ].join('\n')}\n`);
   writeFileSync(join(codexDir, 'session_index.jsonl'), `${JSON.stringify({ id: 't-1', thread_name: 'Fix the cart' })}\n`);
+  const subPath = join(codexDir, 'sessions', '2026', '10', '10', 'rollout-y.jsonl');
+  writeFileSync(subPath, `${[
+    JSON.stringify({ timestamp: iso(now - 5000), type: 'session_meta', payload: { id: 't-sub', cwd: '/p/shop', thread_source: 'subagent', parent_thread_id: 't-1', agent_nickname: 'Socrates', agent_role: 'ship-reviewer', agent_path: '/root/security_all' } }),
+    JSON.stringify({ timestamp: iso(now - 5000), type: 'event_msg', payload: { type: 'task_complete', completed_at: Math.round(now / 1000) - 600, last_agent_message: 'The thread’s own old answer.' } }),
+    JSON.stringify({ timestamp: iso(now - 4000), type: 'event_msg', payload: { type: 'task_started', started_at: Math.round(now / 1000) - 4 } }),
+  ].join('\n')}\n`);
 
   let ps = '900 1 900 01:00 0.0 2048 /usr/local/bin/codex app-server --listen unix://';
   const handle = await startCollector({ root, claudeDir, codexDir, readProcs: async () => parsePs(ps), claudeBin: '/usr/bin/false', notify: () => {}, log: () => {} });
   try {
     const codex = () => handle.getSnapshot().agents.filter(a => a.kind === 'codex');
     assert.deepEqual(codex().map(a => [a.id, a.name, a.cwd, a.state, a.lastReply, a.pid]), [['codex:t-1', 'Fix the cart', '/p/shop', 'yourTurn', 'Cart fixed.', undefined]]);
+    const kids = () => codex()[0].children.map(c => [c.id, c.kind, c.agentType, c.label, c.state, c.result]);
+    assert.deepEqual(kids(), [['t-sub', 'subagent', 'ship-reviewer', 'security_all · Socrates', 'running', undefined]], 'its subagent, at work');
+    const token = readFileSync(join(root, 'state', 'token'), 'utf8').trim(), card = id => fetch(`http://127.0.0.1:${handle.port}/api/agent/${encodeURIComponent(id)}/subagent`, { headers: { 'x-tracker-token': token } });
+    assert.deepEqual(await (await card('codex:t-1:t-sub')).json(), { prompt: null, result: null, feed: [], codex: true }, 'its card: no answer yet');
+    appendFileSync(subPath, `${JSON.stringify({ timestamp: iso(Date.now()), type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'No findings.\nTwo nits.' } })}\n`);
+    for (let i = 0; i < 40 && kids()[0]?.[4] !== 'done'; i++) await new Promise(r => setTimeout(r, 100));
+    assert.deepEqual(kids(), [['t-sub', 'subagent', 'ship-reviewer', 'security_all · Socrates', 'done', 'No findings.']]);
+    assert.equal((await (await card('codex:t-1:t-sub')).json()).result, 'No findings.\nTwo nits.', 'its whole answer');
+    assert.equal((await card('codex:t-9:t-sub')).status, 404, 'only under its own thread');
+    const plan = () => handle.getSnapshot().codexPlan;
+    assert.deepEqual([plan().from, plan().windows.map(w => [w.kind, w.percentUsed]), plan().planType, plan().credits, handle.getSnapshot().plan], ['codex:t-1', [['seven_day', 83]], 'pro', 12.5, null], 'Codex\u2019s own limits, beside Claude\u2019s (none here)');
     ps = '901 1 901 01:00 0.0 2048 /bin/zsh';
     for (let i = 0; i < 40 && codex().length; i++) await new Promise(r => setTimeout(r, 100));
     assert.deepEqual(codex(), []);
+    assert.equal(plan().windows[0].percentUsed, 83, 'its last reading stays while Codex is closed');
   } finally {
     await handle.stop();
   }

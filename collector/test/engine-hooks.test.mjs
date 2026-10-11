@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const web = f => readFileSync(fileURLToPath(new URL(`../../web/${f}`, import.meta.url)), 'utf8');
-const code = ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/engine.js'].map(web).join('\n;\n');
+const code = ['scene.js', 'worlds/sdk/pixel.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js'].map(web).join('\n;\n');
 const plain = v => JSON.parse(JSON.stringify(v));
 const NOW = Date.now();
 const tiny = { W: 200, slots: () => ({ group: 'all', cap: 9, at: i => [20 + i * 10, 40], zone: 'all' }), drawChar() {}, bg() {} };
@@ -224,4 +224,57 @@ test('the real crew: play borrows a farmer idle three minutes, but never one nap
   };
   assert.ok(run(false).size > 1, 'an idle farmer goes to play');
   assert.deepEqual([...run(true)], ['100,40'], 'a napping one stays put');
+});
+
+test('a new agent takes the first steps its world gives it (spawn’s via), then plans its own way from where they end', () => {
+  const window = { Agentville: { raw: () => {} } }, dom = stubDom();
+  vm.runInContext(`${code}\n;window.way = wayFrom;`, vm.createContext({ window, document: dom.document, console, Math, Date, JSON, Map, Set, Intl, ...dom.globals }));
+  const plan = (b, tx, ty) => [[100, b.y], [100, ty], [tx, ty]], b = { x: 50, y: 10 }; // along the corridor at x 100, as the engine plans
+  assert.deepEqual(plain(window.way(b, [[50, 30]], plan, 30, 40)), [[50, 30], [100, 30], [100, 40], [30, 40]], 'out of its door first, then on from the foot of the steps');
+  assert.deepEqual(plain(window.way(b, null, plan, 30, 40)), [[100, 10], [100, 40], [30, 40]], 'no first steps: its own way, as before');
+  assert.deepEqual(plain(window.way(b, [], plan, 30, 40)), [[100, 10], [100, 40], [30, 40]]);
+});
+
+test('a world moves its agents itself: tick’s true asks slots() again, a direct place is walked to in a straight line, and no place takes the agent off the map', () => {
+  const seen = [];
+  let step = 0, where = null;
+  const world = fourHooks({
+    slots: () => (step === 0 ? { group: 'a', cap: 1, at: () => [20, 40], zone: 'a' } : step === 1 ? { group: 'b', cap: 1, at: () => [60, 70], zone: 'b', direct: true } : null),
+    tick(dt, posOf) { const b = posOf('p'); where = b ? [Math.round(b.x), Math.round(b.y)] : null; if (b) seen.push(where.join()); if (b && step < 2 && !b.path.length && b.x === b.tx && b.y === b.ty) { step++; return true; } },
+  });
+  const w = live(world, [someone('p')]);
+  w.run(1);
+  assert.equal(step, 1, 'there when the page opens: on to its next place');
+  for (let i = 0; i < 400 && step < 2; i++) w.run(1);
+  assert.equal(step, 2, 'it walked there');
+  const way = seen.map(s => s.split(',').map(Number)).filter(([x]) => x > 20 && x < 60);
+  assert.ok(way.length > 2 && way.every(([x, y]) => Math.abs((y - 40) / 30 - (x - 20) / 40) < 0.08), `straight across, not round by the corridors: ${way.join(' ')}`);
+  w.run(2);
+  assert.equal(where, null, 'no place: off the map');
+  assert.equal(w.errors(), 0);
+});
+
+test('fields the collector gave beds stand in those beds, gaps and all; without them the engine places them itself', () => {
+  const { sdk } = load();
+  const laid = [], field = (key, bed) => ({ key, name: key, bed });
+  const viewOf = () => sdk.makePixelView(sdk.withDefaults(fourHooks({ relayout: L => laid.push(Object.fromEntries(L.ST.map(s => [s.key, s.i]))) })), prefs);
+  viewOf().update({ fields: [field('/c/x', 4), field('/c/y', 1)], farmers: [] });
+  assert.deepEqual(plain(laid.at(-1)), { '/c/x': 4, '/c/y': 1 }, 'where the collector says, not packed to the front');
+  viewOf().update({ fields: [field('/c/x', null), field('/c/y', null)], farmers: [] });
+  assert.deepEqual(plain(laid.at(-1)), { '/c/x': 0, '/c/y': 1 }, 'an older collector: packed, as before');
+});
+
+test('a world’s labels are laid out anew when its labelKey changes, though the fields are the same; a mover may have a class of its own', () => {
+  const { dom, sdk } = load();
+  let key = 'a', laid = 0;
+  const view = sdk.makePixelView(sdk.withDefaults(fourHooks({ labels: () => { laid++; }, labelKey: () => key, movers: () => [{ key: 'm', cls: 'spot', x: 10, y: 10, html: '<b>x</b>' }] })), prefs);
+  view.mount(dom.make(), { still: true });
+  const scene = () => sdk.engineScene(twoAgents(load().window));
+  view.update(scene());
+  const first = laid;
+  view.update(scene());
+  assert.equal(laid, first, 'nothing changed: the labels stand');
+  key = 'b';
+  view.update(scene());
+  assert.equal(laid, first + 1, 'what the world’s labels say changed');
 });
