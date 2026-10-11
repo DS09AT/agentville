@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/DS09AT/agentville/compare/v0.2.0...v0.3.0) (2026-10-11)
+
+
+### Features
+
+* draw worlds in 3D with three.js and keep the pixel engine as legacy ([6bc1b46](https://github.com/DS09AT/agentville/commit/6bc1b4687285e3f10f63da030e77bc2d2ba7cc08))
+
+
+### Tests
+
+* keep the keyboard on the headless page throughout the browser test ([115eb81](https://github.com/DS09AT/agentville/commit/115eb81949ad5b3b1f9158551f59fa32f6ba2f68))
+
 ## [0.2.0](https://github.com/DS09AT/agentville/compare/v0.1.0...v0.2.0) (2026-10-11)
 
 
