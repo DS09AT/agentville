@@ -268,6 +268,28 @@ dialog.setup-dlg[open] { display: flex; flex-direction: column; }
 .setup-table th, .setup-table td { padding: 2px 12px 2px 0; text-align: left; font-variant-numeric: tabular-nums; }
 .setup-table th { color: var(--muted); font-weight: 600; }
 .setup-list { margin: 8px 0 2px; font-size: 11px; font-weight: 700; color: var(--muted); }
+/* the ⚙ Settings dialog: Agentville's own settings, saved into config.json by the collector */
+dialog.settings-dlg { width: min(760px, calc(100vw - 32px)); }
+#settings-note { min-height: 1.2em; margin: 8px 0 4px; font-size: 12px; }
+#settings-note .bad, .st-err { color: var(--crit); }
+#settings-note .good { color: var(--good-text); }
+#settings-body { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
+.st-group h4 { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.st-row { display: grid; grid-template-columns: minmax(150px, 34%) 1fr; gap: 12px; padding: 8px 2px; border-top: 1px solid var(--line); align-items: start; }
+.st-row.bad { background: color-mix(in srgb, var(--crit) 8%, transparent); }
+.st-row.off > * { opacity: .5; }
+.st-label { font-size: 13px; padding-top: 3px; display: grid; gap: 3px; align-content: start; }
+.st-label label, span.st-label { font-weight: 600; }
+.st-ctl { min-width: 0; display: grid; gap: 4px; font-size: 13px; }
+.st-ctl input[type="text"], .st-ctl input[type="password"], .st-ctl input[type="number"], .st-ctl select { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 0; }
+.st-ctl input[type="text"], .st-ctl input[type="password"] { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.st-ctl input[type="number"] { width: 7.5em; }
+.st-switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.st-help, .st-err { font-size: 12px; line-height: 1.4; font-weight: 400; }
+.st-map { display: grid; gap: 4px; justify-items: start; }
+.st-pair { display: grid; grid-template-columns: 1.4fr 1fr auto; gap: 4px; width: 100%; }
+.st-warn { padding: 8px 10px; border: 1px solid var(--warn); border-radius: 8px; font-size: 13px; }
+@media (max-width: 560px) { .st-row { grid-template-columns: 1fr; gap: 4px; } }
 /* the farm's file dialog: the list view's reader, over the farm */
 dialog.file-dlg { width: min(960px, calc(100vw - 32px)); height: min(88vh, 960px); max-width: none; padding: 0; overflow: hidden; }
 dialog.file-dlg[open] { display: flex; }
@@ -632,6 +654,9 @@ html[data-view="farm"] .banner.show { position: fixed; top: 10px; left: 50%; tra
 .world-icon { font-size: 22px; line-height: 1; width: 28px; text-align: center; flex: none; }
 .world-preview { width: 64px; height: 40px; object-fit: cover; image-rendering: pixelated; border-radius: 6px; flex: none; }
 .world-text { display: grid; gap: 2px; min-width: 0; }
+.world-count { margin-left: 4px; font-size: 12px; font-weight: 600; color: var(--good-text); white-space: nowrap; }
+.world-count::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--good); vertical-align: 1px; }
+.world-count[hidden] { display: none; }
 .worlds-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* The click guard against world redress: while it is up, action controls look quietly unavailable; the page ignores clicks on them (web/worlds.js). No text, so it reads as a brief settle, not an alert. */
 html[data-guard="on"] .app .act, html[data-guard="on"] dialog[open] .act { opacity: .55; }
@@ -653,6 +678,7 @@ html[data-guard="on"] .app .act, html[data-guard="on"] dialog[open] .act { opaci
   <button class="act" id="broadcast-open" type="button" style="margin:0" data-tip="Message several agents at once: all of them, or the ones you pick">📣 Broadcast</button>
   <button class="act" id="helper-open" type="button" style="margin:0" data-tip="✨ Helper: small writing jobs for the dashboard with Haiku, through your own Claude Code (off until you switch it on)">✨ Helper</button>
   <button class="act" id="setup-open" type="button" style="margin:0" data-tip="Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules">⚙ Claude Code</button>
+  <button class="act" id="settings-open" type="button" style="margin:0" data-tip="Network, sessions, notifications, worlds">⚙ Settings</button>
   <button class="act" id="side-toggle" type="button" style="margin:0" aria-pressed="false" hidden data-tip="Show the selected farmer's answer box, activity and files beside the farm">◨ Sidebar</button>
   <button class="act" id="theme-toggle" type="button" style="margin:0">☾ Dark</button>
 </header>
@@ -764,6 +790,11 @@ html[data-guard="on"] .app .act, html[data-guard="on"] dialog[open] .act { opaci
   <div id="setup-note" role="status"></div>
   <div id="setup-body"></div>
 </dialog>
+<dialog id="settings" class="setup-dlg settings-dlg" aria-labelledby="settings-title">
+  <div class="sess-head"><h3 id="settings-title">Settings</h3><span class="grow"></span><button type="button" class="act primary" id="settings-save">Save</button><button type="button" class="act mini" data-settings-close aria-label="Close">×</button></div>
+  <div id="settings-note" role="status"></div>
+  <div id="settings-body"></div>
+</dialog>
 <dialog id="worlds-dlg" class="worlds-dlg" aria-labelledby="worlds-title">
   <div class="sess-head"><h3 id="worlds-title">Worlds</h3><span class="grow"></span><button type="button" class="act mini" data-worlds-close aria-label="Close">×</button></div>
   <ul id="worlds-list" class="world-list"></ul>
@@ -779,6 +810,7 @@ html[data-guard="on"] .app .act, html[data-guard="on"] dialog[open] .act { opaci
 </dialog>
 <script src="/brand.js"></script>
 <script src="/scene.js" defer></script>
+<script src="/live.js" defer></script>
 <script src="/worlds.js" defer></script>
 <script>const TOKEN = '__TRACKER_TOKEN__';</script>
 <script src="/core.js"></script>
@@ -793,5 +825,6 @@ html[data-guard="on"] .app .act, html[data-guard="on"] dialog[open] .act { opaci
 <script src="/app.js"></script>
 <script src="/sessions.js"></script>
 <script src="/setup.js"></script>
+<script src="/settings.js"></script>
 </body>
 </html>

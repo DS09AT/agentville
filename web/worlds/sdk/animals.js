@@ -3,7 +3,7 @@
 // must keep off (avoid(), and its own fields and buildings); the kit keeps where each one is and what it
 // does, its lines and its actions; the engine draws them, places their bubbles, and sends a farmer when
 // you click one. A plain script in a world's frame, after creatures.js. Only its API is global
-// (makeAnimals, chooseDoer, makeErrands, seededRandom), so a world's own names never clash with its helpers.
+// (makeAnimals, chooseDoer, makeErrands, makeJobs, seededRandom), so a world's own names never clash with its helpers.
 'use strict';
 
 (() => {
@@ -84,6 +84,8 @@
       for (let i = 0; i < (def.count ?? 1); i++, seen.set(def.kind, (seen.get(def.kind) ?? 0) + 1)) ones.push({ id: `${def.kind}-${seen.get(def.kind) ?? 0}`, kind: def.kind, def, look: def.looks?.[i] ?? def.look, x: 0, y: 0, face: 1, pose: 'stand', to: null, wait: random() * 3, act: null, fast: false, away: true, lift: 0, wear: {} });
     }
     const byId = id => ones.find(o => o.id === id);
+    /** The den it sleeps in, or walks to: its own doing, or what it was told (adopt). */
+    const denOf = o => (o.act?.den != null ? { den: o.act.den, asleep: !o.act.route.length } : o.seen ?? null);
     let roam = [], avoid = [], blocked = () => false, perches = [], spots = {}, dens = [], frozen = false, T = 0, says = [], quiet = 8, winter = false; // the first idle line after 8 s
     const reactedAt = new Map();
     let running = [], nextGag = 60 + random() * 60, lastCrew = null; // the gags (and play) under way; when the next gag may start; the crew last lent
@@ -146,14 +148,17 @@
     function say(o, key, { fixed = false } = {}) { // fixed: a gag's or play's own line, never the helper's
       if (says.length >= LINES_AT_ONCE || says.some(s => s.id === o.id)) return false;
       const q = FRESH.has(key) && !fixed ? fresh.get(`${o.kind}|${key}`) : null;
-      let text;
-      if (q?.length) text = q.shift(); // the helper's, fresh, first
-      else {
+      let text, plain;
+      if (q?.length) { // the helper's, fresh, first: written from what goes on here, so one watching from the network reads the world's own line instead (plain; none: nothing)
+        text = q.shift();
+        const list = o.def.lines?.[key];
+        plain = list?.length ? String(list[Math.floor(T * 7) % list.length]).slice(0, LINE_MAX) : '';
+      } else {
         const list = o.def.lines?.[key];
         if (!list?.length) return false;
         text = list[Math.floor(random() * list.length)];
       }
-      says.push({ id: o.id, text: String(text).slice(0, LINE_MAX), until: T + LINE_S });
+      says.push({ id: o.id, text: String(text).slice(0, LINE_MAX), until: T + LINE_S, ...(plain === undefined ? {} : { plain }) });
       return true;
     }
     /** One step toward (x, y); true once there. */
@@ -615,6 +620,16 @@
         o.act.bolt = true;
         return true;
       },
+      /** It stays where it is a little longer (someone has come to do something with it, or stands in line for it): never one in a gag, asleep in its den, or in the middle of something else. */
+      stay(id, seconds = 1) {
+        const o = byId(id);
+        if (!o || o.away || o.inGag || o.gagSpot || frozen || (o.act && !o.act.stay)) return false;
+        doing(o, { pose: 'stand', s: seconds });
+        o.act.stay = true;
+        return true;
+      },
+      /** Is it a shy visitor, here just now? (One that only watches asks before it tells the collector it was touched.) */
+      shy(id) { const o = byId(id); return Boolean(o?.def.visits && !o.away); },
       menu(id) {
         const o = byId(id);
         return o && !o.away ? { id, kind: o.kind, title: o.def.name ?? o.kind, actions: (o.def.actions ?? []).map(a => a.label) } : null;
@@ -670,7 +685,47 @@
       freshLines() { return [...fresh.values()].flat(); },
       /** The kinds this world has, each once with its name: what the page tells the collector. */
       cast() { return [...new Map(ones.map(o => [o.kind, { kind: o.kind, name: String(o.def.name ?? o.kind) }])).values()]; },
-      list() { return ones.map(o => ({ id: o.id, kind: o.kind, x: Math.round(o.x), y: Math.round(o.y), pose: o.pose, lift: o.lift || 0, wear: { ...o.wear }, ...(o.act?.den != null ? { den: o.act.den, asleep: !o.act.route.length } : {}), ...(o.away ? { away: true } : {}) })); },
+      list() { return ones.map(o => ({ id: o.id, kind: o.kind, x: Math.round(o.x), y: Math.round(o.y), pose: o.pose, lift: o.lift || 0, wear: { ...o.wear }, ...(denOf(o) ? denOf(o) : {}), ...(o.away ? { away: true } : {}) })); },
+      /**
+       * All of it as plain data, for whoever only watches (the collector moves a built-in world's animals, every browser draws them:
+       * docs/worlds.md, "One world for everyone"): each creature as [id, x, y, bits, pose, lift, den], the lines being said as
+       * [id, text, plain] (plain: what a guest reads when the line is the helper's; null when the line is the world's own), and what
+       * is taken. The bits: 1 away, 2 faces left, 4 a hat, 8 the bucket, 16 a scarf, 32 ice, 64 asleep in its den.
+       */
+      state() {
+        return {
+          ones: ones.map(o => { const d = denOf(o); return [o.id, o.x, o.y, (o.away ? 1 : 0) | (o.face < 0 ? 2 : 0) | (o.wear.hat ? 4 : 0) | (o.wear.bucket ? 8 : 0) | (o.wear.scarf ? 16 : 0) | (o.wear.ice ? 32 : 0) | (d?.asleep ? 64 : 0), o.pose, o.lift || 0, d ? d.den : -1]; }),
+          says: says.map(s => [s.id, s.text, s.plain ?? null]),
+          taken: [...taken],
+        };
+      },
+      /**
+       * The other end of state(): this kit only shows what it is told (it is not ticked meanwhile). `at`: the clock its creatures are
+       * drawn by. `winter`: the season this page shows (it may hold one): scarves and ice go by it, and a duck slides where it would swim.
+       */
+      adopt(st, at, { winter: cold = null } = {}) {
+        if (Number.isFinite(at)) T = at;
+        if (cold !== null) winter = cold;
+        for (const [id, x, y, bits, pose, lift, den] of st?.ones ?? []) {
+          const o = byId(id);
+          if (!o) continue;
+          Object.assign(o, { x, y, pose, lift, away: Boolean(bits & 1), face: bits & 2 ? -1 : 1, to: null, act: null, inGag: false, gagSpot: false, seen: den >= 0 ? { den, asleep: Boolean(bits & 64) } : null });
+          o.wear = { hat: bits & 4 ? HAT : undefined, bucket: bits & 8 ? true : undefined, scarf: bits & 16 ? true : undefined, ice: bits & 32 ? true : undefined };
+          if (cold !== null) {
+            if (o.kind === 'goat') o.wear.scarf = cold || undefined;
+            if (water(o)) { o.wear.ice = cold || undefined; o.pose = cold ? ({ swim: 'slide', dabble: 'stand' })[pose] ?? pose : pose === 'slide' ? 'swim' : pose; }
+          }
+        }
+        says = (st?.says ?? []).map(([id, text]) => ({ id, text: String(text).slice(0, LINE_MAX), until: Infinity }));
+        taken.clear();
+        for (const k of st?.taken ?? []) taken.add(k);
+        running = [];
+      },
+      /** On its own again after adopt(): everyone carries on from where they stand. */
+      resume() {
+        says = [];
+        for (const o of ones) { o.seen = null; o.wait = 1 + random() * 2; if (o.pose !== 'sleep') o.pose = 'stand'; }
+      },
     };
   }
 
@@ -729,5 +784,99 @@
     };
   }
 
-  Object.assign(globalThis, { seededRandom, makeAnimals, chooseDoer, makeErrands, gagProblem }); // gagProblem: check-world asks it too
+  /**
+   * What is asked of the animals, by you or by anyone watching (docs/worlds.md, "One world for everyone"): a job is an animal,
+   * one of its actions and the farmer that goes. They are done in the order asked. At most `outMax` farmers are out at once,
+   * and they set off `gap` seconds apart, so none walks inside another; a job over that waits (`held`: its farmer at the world's
+   * waiting place) until one is back. At an animal they stand in line: the first does its action and stays a moment, the next
+   * steps up when it has gone. A farmer that starts waiting on you (or whose turn ends, or that is gone, or that got work while
+   * it stood in line) drops its job: an action not done yet is then done by you, so nothing asked is lost.
+   *
+   * Its world, each tick (`env`): at(id) → where a farmer is ({ x, y }) or null; state(id) → its state; stand(animal, rank) →
+   * where the rank-th in an animal's line stands ([x, y]) or null; home(id) → it is back at its place; perform(job, went) →
+   * the action is done now (went: by its farmer, there; else by you); hold(animal), if given → someone is there for it:
+   * it stays where it is.
+   */
+  function makeJobs({ outMax = 5, gap = 1.2, stay = 1.5 } = {}) {
+    const list = [], AT = new Set(['go', 'line', 'act']);
+    let seq = 0, lastOut = -Infinity;
+    const lineOf = animal => list.filter(j => j.animal === animal && AT.has(j.phase));
+    const remove = j => { const i = list.indexOf(j); if (i >= 0) list.splice(i, 1); };
+    const of = id => list.find(j => j.doer === id) ?? null;
+    return {
+      size: () => list.length,
+      has: id => Boolean(of(id)),
+      of,
+      /** Each job as plain data: its number, animal, action, farmer, who asked, and where it has come ('wait', 'go', 'line', 'act', 'back'). */
+      all: () => list.map(j => ({ id: j.id, animal: j.animal, act: j.act, doer: j.doer, by: j.by, phase: j.phase, held: j.held })),
+      add({ animal, act, doer, now, busy = false, by = null }) {
+        const j = { id: ++seq, animal, act, doer, by, phase: 'wait', asked: now, at: now, until: Infinity, busy: Boolean(busy), rank: 0, x: 0, y: 0, held: false, done: false, chased: 0 };
+        list.push(j);
+        return j;
+      },
+      /** A farmer with a job: { at } where it goes instead of its place ([x, y]; null: its own place, waiting its turn to set off, or on its way back); null with no job. */
+      target(id, waitSpot) {
+        const j = of(id);
+        if (!j) return null;
+        if (j.phase === 'back') return { at: null, back: true };
+        if (j.phase !== 'wait') return { at: [j.x, j.y] };
+        return { at: j.held ? waitSpot?.(list.filter(x => x.phase === 'wait' && x.held).indexOf(j)) ?? null : null };
+      },
+      /** The jobs go on; true when a farmer has somewhere new to go. */
+      tick(now, env) {
+        let changed = false;
+        const miss = j => { if (!j.done) { j.done = true; env.perform(j, false); } };
+        const moveUp = animal => lineOf(animal).forEach((j, i) => { // someone left the line, or the animal has moved on: each to its place in the line as it is now
+          if (j.phase === 'act') return;
+          const pt = env.stand(animal, i), moved = pt && Math.hypot(pt[0] - j.x, pt[1] - j.y) > 4;
+          if (j.rank === i && !moved) return;
+          j.rank = i;
+          if (!moved) return; // the animal is not there just now (or its place is the same): it does it from where it stands
+          Object.assign(j, { x: pt[0], y: pt[1], phase: 'go', at: now, until: now + 30 });
+          changed = true;
+        });
+        const drop = j => { const lined = AT.has(j.phase); miss(j); remove(j); changed = true; if (lined) moveUp(j.animal); };
+        const back = j => { miss(j); j.phase = 'back'; j.at = now; changed = true; moveUp(j.animal); };
+        for (const j of [...list]) {
+          const st = env.state(j.doer), b = env.at(j.doer), lost = !st || forYou(st);
+          if (j.phase === 'back') { if (lost || !b || (now - j.at >= 0.2 && env.home(j.doer))) { remove(j); changed = true; } continue; }
+          if (lost || (!b && j.phase !== 'wait')) { drop(j); continue; }
+          if (st === 'working' && !j.busy) { // it got work: a few seconds more if it is on its way, else it goes back to it
+            j.busy = true;
+            if (j.phase === 'go') j.until = Math.min(j.until, now + 5);
+            else if (j.phase !== 'act') { drop(j); continue; }
+          }
+          if (now - j.asked > 180 && j.phase !== 'act') { if (j.phase === 'wait') drop(j); else back(j); continue; } // never its turn: enough
+          if (j.phase === 'go') {
+            if (Math.hypot(b.x - j.x, b.y - j.y) < 1) { j.phase = 'line'; j.at = now; }
+            else if (now > j.until) { back(j); continue; } // it never got there
+          }
+          if (j.phase === 'act' && now - j.at >= stay) back(j);
+        }
+        for (const j of list) {
+          if (j.phase !== 'line' || j.rank !== 0 || lineOf(j.animal)[0] !== j) continue;
+          const pt = env.stand(j.animal, 0);
+          if (pt && j.chased < 2 && Math.hypot(pt[0] - j.x, pt[1] - j.y) > 4) { // its animal has wandered on meanwhile: after it (twice at most; then from where it stands), the line with it
+            j.chased++;
+            moveUp(j.animal);
+            continue;
+          }
+          j.done = true; env.perform(j, true); j.phase = 'act'; j.at = now; // the first in line, there: it does it
+        }
+        if (env.hold) for (const animal of new Set(list.filter(j => j.phase === 'line' || j.phase === 'act' || (j.phase === 'go' && j.chased)).map(j => j.animal))) env.hold(animal); // someone is there for it, or after it: it stays
+        const out = list.filter(j => j.phase !== 'wait').length, next = list.find(j => j.phase === 'wait');
+        if (next && out < outMax && now - lastOut >= gap) {
+          const rank = lineOf(next.animal).length, pt = env.stand(next.animal, rank);
+          if (!pt) drop(next); // the animal is gone
+          else { Object.assign(next, { phase: 'go', rank, x: pt[0], y: pt[1], at: now, until: now + (next.busy ? 5 : 30), held: false }); lastOut = now; changed = true; }
+        } else if (next && out >= outMax) for (const j of list) if (j.phase === 'wait' && !j.held) { j.held = true; changed = true; } // over the limit: to the waiting place
+        return changed;
+      },
+      /** Every job ends where it is (motion switched off): what was not done yet is done by you. */
+      finish(env) { for (const j of list.splice(0)) if (!j.done) { j.done = true; env.perform(j, false); } },
+      clear() { list.length = 0; },
+    };
+  }
+
+  Object.assign(globalThis, { seededRandom, makeAnimals, chooseDoer, makeErrands, makeJobs, gagProblem }); // gagProblem: check-world asks it too
 })();

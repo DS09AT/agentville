@@ -60,4 +60,21 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .world-strip { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 10px; align-items: center; max-width: min(560px, calc(100% - 400px)); padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--crit) 50%, var(--line)); border-radius: 10px; background: var(--panel); color: var(--text); font-size: 12px; }
 .world-strip .x { border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; }
 /* The page's way back for a world (top left, clear of the engine HUD's buttons on the right); above the strip. */
+/* Who is watching this world now: the page's chip at the bottom right (the minimap is bottom left), and its list above it. */
+.world-online { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: 12px; }
+.world-online-chip { display: flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--panel) 82%, transparent); color: var(--muted); font: inherit; cursor: pointer; opacity: .78; transition: opacity .15s; }
+.world-online-chip:hover, .world-online-chip:focus-visible, .world-online-chip[aria-expanded="true"] { opacity: 1; color: var(--text); }
+.world-online-chip i, .world-online-panel li i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #2fa57a); flex: none; }
+.world-online-panel { width: 230px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 6px 24px rgba(0, 0, 0, .3); }
+.world-online-panel ul { list-style: none; margin: 6px 0 10px; padding: 0; max-height: 180px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.world-online-panel li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.world-online-panel li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.world-online-panel li small { flex: none; padding: 0 5px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; }
+.world-online-panel li.away { color: var(--muted); }
+.world-online-panel li.away i { background: var(--muted); opacity: .5; }
+.world-online-panel form { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
+.world-online-panel form label { color: var(--muted); font-size: 11px; }
+.world-online-panel form span { display: flex; gap: 6px; }
+.world-online-panel form input { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg, transparent); color: var(--text); font: inherit; }
+.world-online-panel form em { min-height: 14px; color: var(--muted); font-size: 11px; font-style: normal; }
 .world-corner { position: absolute; top: 10px; left: 10px; z-index: 6; display: flex; gap: 6px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--panel) 92%, transparent); }

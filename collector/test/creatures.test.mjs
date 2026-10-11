@@ -16,7 +16,7 @@ function load() {
   vm.runInContext(`${web('worlds/sdk/pixel.js')}\n;${web('worlds/sdk/creatures.js')}\n;PXG.ctx = __ctx; window.lib = { CREATURES, creaturePainter };`, Object.assign(sandbox, { __ctx: ctx }));
   return { ...window.lib, rects };
 }
-const KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'unicorn', 'robodog', 'vacuum'];
+const KINDS = ['cow', 'goat', 'sheepdog', 'ostrich', 'lion', 'tiger', 'pig', 'sheep', 'horse', 'goose', 'duck', 'cat', 'dog', 'pigeon', 'mouse', 'fish', 'unicorn', 'robodog', 'vacuum'];
 const POSES = ['stand', 'walk', 'run', 'eat', 'sleep', 'happy', 'swim', 'dabble', 'hide'];
 
 test('every creature has a size, a speed, a night habit and draws itself', () => {

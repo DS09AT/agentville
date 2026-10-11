@@ -2,8 +2,8 @@
 // Records the many-sessions video: sixteen made-up Claude Code sessions at a travel-booking company,
 // first as sixteen terminal windows, all busy at once and hard to follow; then each window flies
 // into its farmer on the farm, where the ones that need you wait on the porch, you answer two of
-// them, and a team of agents writes to each other. A world of its own, apart from the main demo's;
-// docs/demo-script.md has the script. About 80 seconds.
+// them, and a team of agents writes to each other. A world of its own, apart from the main demo's.
+// About 80 seconds.
 //
 //   node scripts/demo-many.mjs [out.mp4]      (needs Chrome and ffmpeg)
 //
@@ -488,7 +488,7 @@ try {
   // The end
   await say(null);
   await moveTo([VW - 40, VH - 40], 600);
-  await js(`window.__demo.card(${JSON.stringify(`${logo}<div>Agentville</div><small>github.com/hamsathul/agentville</small>`)})`);
+  await js(`window.__demo.card(${JSON.stringify(`${logo}<div>Agentville</div><small>github.com/DS09AT/agentville</small>`)})`);
   await hold(4000);
   await send('Page.stopScreencast');
   await sleep(300);

@@ -14,7 +14,7 @@ const agent = {
   feed: [{ at: 1, kind: 'prompt', text: 'fix the cart' }],
   children: [{ id: 'c1', kind: 'subagent', agentType: 'Explore', label: 'Find callers', state: 'running', startedAt: 2, background: true, now: { tool: 'Grep', summary: 'cart', step: 'search', startedAt: 3 }, steps: 4, lastSaid: 'Found 3.', lastAt: 3, result: 'Three callers.' }],
   docs: [{ path: '/p/shop/plan.md', wrote: true, at: 1 }], shells: [{ pid: 9, command: 'npm test' }],
-  touching: [{ path: '/p/shop/src', mode: 'write', repo: '/p/shop' }], timeline: [{ at: 1, tool: 'Bash' }],
+  touching: [{ path: '/p/shop/src/checkout.ts', mode: 'write', lastAt: 3, repo: '/p/shop' }, { path: '/etc/hosts', mode: 'read', lastAt: 2 }], timeline: [{ at: 1, tool: 'Bash' }],
   work: { steps: { edit: 3, test: 1 }, failed: 0, streak: 0, lastTest: { ok: true, at: 4 } }, // counts only: nothing that was said
 };
 const snapshot = { generatedAt: 1, counts: { working: 1 }, repos: [{ path: '/p/shop', name: 'shop' }], agents: [agent], collisions: [] };
@@ -23,14 +23,29 @@ test('a guest snapshot keeps who works where with what tool, and drops everythin
   const g = guestSnapshot(snapshot);
   assert.deepEqual(g.agents[0], {
     id: 's1', kind: 'interactive', name: 'shop', cwd: '/p/shop', state: 'working', stateReason: 'running Bash', stateSince: 5,
-    touching: agent.touching, timeline: agent.timeline, work: agent.work,
+    touching: [{ path: '/p/shop', mode: 'write', lastAt: 3, repo: '/p/shop' }], timeline: agent.timeline, work: agent.work,
     now: { tool: 'Bash', step: 'test', startedAt: 4 }, tasks: { done: 1, total: 2, items: [] }, feed: [],
     children: [{ id: 'c1', kind: 'subagent', agentType: 'Explore', label: '', state: 'running', startedAt: 2, background: true, now: { tool: 'Grep', step: 'search', startedAt: 3 }, steps: 4, lastAt: 3, endedAt: undefined }],
     docs: [],
   });
-  assert.doesNotMatch(JSON.stringify(g), /cart|On it|Push it|Which one|why\?|Find callers|Found 3|Three callers|plan\.md|npm test/);
+  assert.doesNotMatch(JSON.stringify(g), /cart|On it|Push it|Which one|why\?|Find callers|Found 3|Three callers|plan\.md|npm test|checkout\.ts|etc\/hosts/);
   assert.deepEqual([g.repos, g.counts], [snapshot.repos, snapshot.counts]);
   assert.equal(agent.lastReply, 'On it.', 'the snapshot itself is left alone');
+});
+
+test("a guest's agent between two steps keeps its last tool (the step alone, never its words), and a connector call its server's name: its farmer is drawn as yours is", () => {
+  const between = { ...agent, now: undefined, feed: [{ at: 9, kind: 'reply', text: 'On it.' }, { at: 8, kind: 'tool', tool: 'Edit', step: 'edit', summary: 'src/checkout.ts' }, { at: 7, kind: 'tool', tool: 'Bash', step: 'test', summary: 'npm test -- cart' }] };
+  const calling = { ...agent, id: 's2', now: { tool: 'mcp__notes__search', step: 'mcp', service: 'notes', summary: 'cart', startedAt: 4 } };
+  const fetching = { ...agent, id: 's3', now: { tool: 'WebFetch', step: 'web', service: 'shop.example', summary: 'https://shop.example/cart', startedAt: 4 } };
+  const g = guestSnapshot({ ...snapshot, agents: [between, calling, fetching] });
+  assert.deepEqual(g.agents[0].feed, [{ at: 8, kind: 'tool', tool: 'Edit', step: 'edit' }], 'the newest tool step, as a tool and a kind of step');
+  assert.deepEqual(g.agents[1].now, { tool: 'mcp__notes__search', step: 'mcp', startedAt: 4, service: 'notes' }, "a connector's name (the tool's own name has it)");
+  assert.deepEqual(g.agents[2].now, { tool: 'WebFetch', step: 'web', startedAt: 4 }, 'never where a web call goes');
+  assert.doesNotMatch(JSON.stringify(g), /On it|checkout\.ts|npm test|shop\.example/);
+  // that a message went between two agents (the pigeon that carries it), never what it said
+  const mailed = guestSnapshot({ ...snapshot, agents: [{ ...agent, feed: [{ at: 9, kind: 'peer', dir: 'out', other: 'api', text: 'the cart endpoint is ready' }, { at: 8, kind: 'peer', dir: 'in', other: 'helper', helper: true, text: 'a name for you' }, { at: 7, kind: 'tool', tool: 'Edit', step: 'edit', summary: 'x' }] }] });
+  assert.deepEqual(mailed.agents[0].feed, [{ at: 7, kind: 'tool', tool: 'Edit', step: 'edit' }, { at: 9, kind: 'peer', dir: 'out', other: 'api' }]);
+  assert.doesNotMatch(JSON.stringify(mailed), /endpoint is ready|a name for you/);
 });
 
 const get = (host, port, path, { method = 'GET', headers = {} } = {}) => new Promise((resolve, reject) => {
@@ -76,6 +91,13 @@ test('with the network open, a visitor from it gets no token, no words and no wa
   } finally {
     await srv.close();
   }
+});
+
+test('a guest snapshot says which source fails, not with what words, and keeps the helper’s last error to itself', () => {
+  const g = guestSnapshot({ ...snapshot, sources: { git: { ok: true, at: 1 }, prs: { ok: false, error: 'gh: /Users/me/secret-repo: not found', at: 2 } }, helper: { on: true, lastError: 'quota for key sk-123', today: { calls: 1 } } });
+  assert.deepEqual(g.sources, { git: { ok: true, at: 1 }, prs: { ok: false, error: 'failing', at: 2 } });
+  assert.deepEqual(g.helper, { on: true, lastError: null, today: { calls: 1 } });
+  assert.doesNotMatch(JSON.stringify(g), /secret-repo|sk-123/);
 });
 
 test('a guest snapshot has your accounts by name and limits only, and none of the helper’s lines', () => {

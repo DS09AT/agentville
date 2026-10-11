@@ -7,9 +7,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, mergeConfig } from '../../collector/config.mjs';
 import { worldsDirOf } from '../../collector/worlds.mjs';
+import { dataDirOf } from '../../collector/paths.mjs';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-export function worldsDir(argv = process.argv, configPath = join(ROOT, 'config.json')) {
+export function worldsDir(argv = process.argv, configPath = join(dataDirOf(), 'config.json')) {
   let cfg;
   try { cfg = loadConfig(configPath); } catch (err) {
     console.warn(`config.json is unusable (${err.message}): using the defaults.`);

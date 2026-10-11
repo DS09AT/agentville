@@ -2,7 +2,7 @@
 // Records a demo video of Agentville, with made-up sessions only. A collector runs on a demo
 // ~/.claude (fourteen sessions in six demo repos, with stand-ins for their mods, their processes
 // and GitHub), a director keeps the sessions busy, and headless Chrome tours the features with a
-// cursor and captions, following docs/demo-script.md: the farm, answering and messaging from it, an
+// cursor and captions: the farm, answering and messaging from it, an
 // agent's work, its files, the list view, sessions, Claude Code's own setup, notifications. Frames
 // come from Chrome's screencast; ffmpeg makes the MP4 (about 8 minutes), a copy small enough to upload
 // to GitHub (out-small.mp4, under 10 MB), and a short video for each chapter in a folder beside it
@@ -829,7 +829,7 @@ try {
   await click(q('[data-farm-nav="theme"]'), 500); await hold(1200);
   await say(null);
   await moveTo([VW - 40, VH - 40], 600);
-  await js(`window.__demo.card(${JSON.stringify(`${logo}<div>Agentville</div><small>github.com/hamsathul/agentville</small>`)})`);
+  await js(`window.__demo.card(${JSON.stringify(`${logo}<div>Agentville</div><small>github.com/DS09AT/agentville</small>`)})`);
   await hold(4400);
   await send('Page.stopScreencast');
   await sleep(300);

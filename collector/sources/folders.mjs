@@ -1,11 +1,11 @@
 import { mkdir, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
-// Where a new session may start: any folder in your home folder or on a mounted drive (/Volumes),
+// Where a new session may start: any folder in your home folder or on a mounted drive (/Volumes, /media, D:\),
 // typed, picked from suggestions, or made. Every path is checked here at its real place (links
 // followed), so neither "..", nor a link, leads out of those places.
 
-const OUTSIDE = 'Only a folder in your home folder or a drive (/Volumes) can be used.';
+const OUTSIDE = 'Only a folder in your home folder or a drive can be used.';
 const MAX_DIRS = 300;
 const byName = (x, y) => x.localeCompare(y, undefined, { sensitivity: 'base' });
 
@@ -14,7 +14,7 @@ function absolute(typed, home) {
   if (typeof typed !== 'string') return null;
   const t = typed.trim();
   if (!t || t.length > 1024 || /[\0\r\n]/.test(t)) return null;
-  const p = t === '~' ? home : t.startsWith('~/') ? join(home, t.slice(2)) : t;
+  const p = t === '~' ? home : /^~[\\/]/.test(t) ? join(home, t.slice(2)) : t;
   return isAbsolute(p) ? resolve(p) : null;
 }
 
@@ -54,7 +54,7 @@ export async function listDirs(typed, { home, roots }) {
   const at = await place(typed, { home, roots });
   if (at.error) return { error: at.error };
   const t = typed.trim();
-  const whole = t === '~' || t.endsWith('/');
+  const whole = t === '~' || /[\\/]$/.test(t);
   const dir = whole ? at : await place(dirname(at.path), { home, roots });
   if (dir.error) return { error: dir.error };
   const prefix = whole ? '' : basename(at.path);

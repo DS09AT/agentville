@@ -26,7 +26,7 @@ const DASHBOARD_REASON = 'Answered from the Agentville dashboard'
 type Offer = { stateDir: string; sessionId: string; isLive: boolean; windowSec: number; now: number }
 type Waited = { kind: 'answer'; text: string } | { kind: 'withdrawn' } | { kind: 'timeout' }
 
-const MOD_VERSION = '0.9.1'
+const MOD_VERSION = '0.9.2'
 
 let latest: TrackerView = EMPTY
 // The terminal's working line (Slithering… while thinking), for the dashboard: when the turn began,
@@ -487,7 +487,7 @@ export const register: Register = on => {
     // /agents is a built-in command, so the pane opens with /tracker. A refused registration
     // must not stop the status line and toasts below from starting.
     try {
-      await $.command.register({ name: 'tracker', description: 'Show every agent working on this Mac (Agentville)' })
+      await $.command.register({ name: 'tracker', description: 'Show the Claude Code and Codex sessions on this computer (Agentville)' })
     } catch (err) {
       $.ui.log(`agent-tracker: /tracker not registered: ${String(err)}`)
     }
@@ -553,7 +553,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Text color="warning">Agentville: collector not running</Text>
-          <Text dimColor>Start it with: agent-tracker start</Text>
+          <Text dimColor>Start it with: agentville start</Text>
         </Box>
       )
     }

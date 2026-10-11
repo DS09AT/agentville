@@ -60,6 +60,38 @@
       p(-6, -7, 10, 4, O); for (const sx of [-4, -1, 2]) p(sx, -7, 1, 3, INK); p(-7, -8 + (Math.floor(T * 3) % 2), 1, 2, O);
       p(3, -9, 4, 4, O); p(5, -7, 2, 1, Wt); p(5, -8, 1, 1, INK); p(4, -10, 1, 1, O);
     } },
+    pig: { w: 14, h: 10, speed: 8, night: 'sleep', draw(p, pose, T) {
+      const B = '#f2a7b3', D = '#d9808f';
+      if (pose === 'sleep') { p(-5, -4, 10, 4, B); p(-5, -1, 10, 1, D); p(4, -5, 3, 4, B); p(7, -3, 1, 2, D); p(4, -6, 2, 1, D); p(-6, -4, 1, 1, D); return; }
+      const s = legStep(pose, T), down = pose === 'eat' ? 2 : 0;
+      p(-4, -2, 1, 2 - s, D); p(-2, -2, 1, 1 + s, D); p(1, -2, 1, 2 - s, D); p(3, -2, 1, 1 + s, D);
+      p(-5, -7, 10, 5, B); p(-5, -3, 10, 1, D); p(-6, -7, 1, 1, D); p(-7, -8, 1, 1, D); // a curly tail
+      p(4, -8 + down, 3, 4, B); p(7, -7 + down, 1, 2, D); p(4, -9 + down, 2, 1, D); p(6, -8 + down, 1, 1, INK);
+    } },
+    sheep: { w: 11, h: 9, speed: 8, night: 'sleep', draw(p, pose, T) {
+      const W = '#f4f1ea', S = '#d9d4c7', D = '#4e4a45';
+      if (pose === 'sleep') { p(-5, -4, 9, 4, W); p(-4, -5, 3, 1, W); p(0, -5, 3, 1, W); p(-5, -1, 9, 1, S); p(4, -3, 3, 3, D); return; }
+      const s = legStep(pose, T), down = pose === 'eat' ? 2 : 0;
+      p(-4, -3, 1, 3 - s, D); p(-2, -3, 1, 2 + s, D); p(1, -3, 1, 3 - s, D); p(3, -3, 1, 2 + s, D);
+      p(-5, -7, 9, 4, W); p(-4, -8, 3, 1, W); p(0, -8, 3, 1, W); p(-5, -4, 9, 1, S); p(-6, -6, 1, 2, W);
+      p(4, -8 + down, 3, 4, D); p(4, -9 + down, 3, 1, W); p(5, -7 + down, 1, 1, '#f4f1ea');
+    } },
+    horse: { w: 16, h: 16, speed: 15, night: 'sleep', draw(p, pose, T) {
+      const B = '#8b5a2b', D = '#4e3626', L = '#a97a45';
+      if (pose === 'sleep') { p(-7, -5, 13, 5, B); p(-7, -5, 13, 1, L); p(5, -7, 4, 4, B); p(8, -5, 1, 2, D); p(4, -8, 1, 3, D); p(-8, -4, 1, 4, D); p(6, -6, 1, 1, INK); return; }
+      const s = legStep(pose, T), down = pose === 'eat' ? 6 : 0, sway = Math.floor(T * 2) % 2;
+      p(-6, -5, 1, 5 - s, D); p(-4, -5, 1, 4 + s, D); p(2, -5, 1, 5 - s, D); p(4, -5, 1, 4 + s, D);
+      p(-7, -10, 12, 5, B); p(-7, -10, 12, 1, L); p(-8 - sway, -10, 1, 5, D); // its tail
+      p(3, -14 + down, 3, 6, B); p(5, -15 + down, 4, 3, B); p(8, -13 + down, 1, 1, D); p(6, -15 + down, 1, 1, INK); p(4, -16 + down, 1, 2, D); p(2, -14 + down, 1, 5, D); // neck, head, ear and mane
+    } },
+    goose: { w: 11, h: 14, speed: 10, night: 'sleep', draw(p, pose, T) {
+      const W = '#fbfbff', S = '#d9dcec', O = '#f08a24';
+      if (pose === 'sleep' || pose === 'hide') { p(-3, -4, 6, 4, W); p(-3, -1, 6, 1, S); p(1, -6, 2, 2, W); return; } // its head under a wing
+      const s = legStep(pose, T), down = pose === 'eat' ? 4 : 0;
+      p(-1, -2, 1, 2 - s, O); p(1, -2, 1, 1 + s, O);
+      p(-3, -6, 6, 4, W); p(-3, -3, 6, 1, S); p(-4, -6, 1, 2, W);
+      p(2, -10 + down, 2, 5, W); p(2, -11 + down, 3, 2, W); p(5, -10 + down, 2, 1, O); p(3, -11 + down, 1, 1, INK);
+    } },
     duck: { w: 9, h: 8, speed: 7, night: 'sleep', water: true, draw(p, pose, T, look = 'drake', wear = {}) {
       if ((pose === 'swim' || pose === 'dabble' || pose === 'sleep') && !wear.ice) p(-4, -1, 8, 1, '#2c4a85'); // the water round it (none on ice)
       if (look === 'duckling') { const Y = '#ffd43b'; p(-2, -3, 3, 2, Y); p(0, -4, 2, 2, Y); p(2, -3, 1, 1, '#f08a24'); p(1, -4, 1, 1, INK); return; }
@@ -144,12 +176,14 @@
   // stretch and a roll lie down; the duck slides on ice as it stands. Then each creature's touches for
   // them, and what it wears (a scarf, a hat in its mouth, a bucket; a cat's bucket lies beside it, pushed over).
   const POSE_AS = { yawn: 'stand', startled: 'stand', stretch: 'sleep', roll: 'sleep', slide: 'stand' };
-  const LEGS = { cow: INK, goat: '#8c7b62', sheepdog: '#8a93a0', lion: '#8a5a2b', tiger: '#e8792b', cat: '#5f6b7a', dog: '#6b4320', robodog: '#5f6b7a' };
+  const LEGS = { cow: INK, goat: '#8c7b62', sheepdog: '#8a93a0', lion: '#8a5a2b', tiger: '#e8792b', cat: '#5f6b7a', dog: '#6b4320', robodog: '#5f6b7a', pig: '#d9808f', sheep: '#4e4a45', horse: '#4e3626' };
   const belly = (colour, legs) => p => { p(-4, -4, 8, 2, colour); for (const x of [-4, -2, 1, 3]) p(x, -6, 1, 2, legs); }; // on its back, legs in the air
   const TOUCH = {
     lion: { yawn: p => p(6, -7, 1, 2, '#5a1f19') },
     tiger: { yawn: p => p(6, -6, 1, 1, '#5a1f19') },
     cat: { yawn: p => p(4, -5, 1, 1, '#5a1f19') },
+    pig: { roll: belly('#f2a7b3', '#d9808f') },
+    sheep: { roll: belly('#f4f1ea', '#4e4a45') }, // stuck on its back
     sheepdog: { roll: belly('#e6eef5', '#8a93a0') },
     dog: { roll: belly('#c98d4f', '#6b4320') },
     robodog: { roll: belly('#e6eef5', '#5f6b7a') },
@@ -165,6 +199,7 @@
       if (kind === 'goat' && wear.scarf) { p(2, -7, 3, 1, '#e04a3a'); p(1, -6, 1, 2, '#e04a3a'); }
       if (kind === 'goat' && wear.hat) p(5, -9, 2, 2, wear.hat);
       if (kind === 'ostrich' && wear.bucket) { p(4, -13, 2, 3, '#8a93a0'); p(4, -13, 2, 1, '#c3cbd2'); }
+      if (kind === 'goose' && wear.bucket) { p(2, -14, 3, 3, '#8a93a0'); p(2, -14, 3, 1, '#c3cbd2'); }
       if (kind === 'cat' && wear.bucket) { p(3, -2, 3, 2, '#8a93a0'); p(5, -2, 1, 2, '#c3cbd2'); p(6, -1, 1, 1, '#5ab4ff'); } // the bucket it pushed over, on its side, a drop spilt
     };
   }

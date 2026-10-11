@@ -7,6 +7,7 @@
 // No dependencies; needs Chrome (set CHROME to
 // its path if it isn't in the usual place). Exits 1 if a check fails.
 import { execFileSync, spawn } from 'node:child_process';
+import { Client } from '@colyseus/sdk';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createSocket } from 'node:dgram';
 import { createServer } from 'node:http';
@@ -353,7 +354,7 @@ esac
 `, { mode: 0o755 });
 writeFileSync(join(claudeDir, 'settings.json'), `${JSON.stringify({ permissions: { allow: ['Bash(npm test:*)'] } }, null, 2)}\n`);
 // Finder's folder window is stood in for: it always picks the farm repo.
-const handle = await startCollector({ root, claudeDir, claudeBin: fakeClaude, notify: () => {}, log: () => {}, home: '/nowhere', linesGapMs: 2000, linesIdleMs: 10_000, readProcs, folderRoots: [realpathSync(temp)], chooseFolder: async () => ({ path: `${join(realpathSync(temp), 'farm-repo')}/` }), scratchBase: '/nonexistent', sessionProcs, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
+const handle = await startCollector({ platform: 'darwin', root, claudeDir, claudeBin: fakeClaude, notify: () => {}, log: () => {}, home: '/nowhere', linesGapMs: 2000, linesIdleMs: 10_000, readProcs, folderRoots: [realpathSync(temp)], chooseFolder: async () => ({ path: `${join(realpathSync(temp), 'farm-repo')}/` }), scratchBase: '/nonexistent', sessionProcs, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
 let chrome;
 try {
   chrome = await openChrome();
@@ -672,9 +673,30 @@ try {
   check(/Bell: on/.test(await fjs("document.querySelector('[data-farm-bell]').textContent")) && await until("localStorage.getItem('tracker-bell') === 'on'"), 'the Bell switch turns on the chime for agents that start waiting');
   await fjs("document.querySelector('[data-farm-bell]').click()");
   // Animals: on by default; a click opens one's menu; a farmer walks over (or you do it); the pond opens the ducks; the switch hides them.
-  check(await funtil("window.Agentville.animalsNow().filter(a => !a.away).length === 17"), 'seventeen animals live on the farm');
+  check(await funtil("window.Agentville.animalsNow().filter(a => !a.away).length === 19"), 'nineteen animals live on the farm');
   check(await fjs("JSON.stringify(window.Agentville.animalsNow().filter(a => a.away).map(a => a.kind))") === '["unicorn"]', 'and a unicorn that is not there yet: it only visits');
   check(await fjs("window.Agentville.animalsNow().filter(a => a.kind === 'cat').map(a => a.id).join()") === 'cat-0,cat-1', 'two of them cats, a grey one and a black one');
+  // One farm for everyone: the collector moves it, and this page, like anyone else's, is told where everyone is.
+  check(await until("window.TrackerLive?.watching() === true && window.TrackerLive.world() === 'farm'"), 'the page watches the farm live: the collector moves it, for everyone who has the dashboard open');
+  const other = await new Client(`http://127.0.0.1:${handle.port}`).joinOrCreate('world', { world: 'farm' }); // someone else watching (no token: a guest)
+  let theirs = null;
+  const shownThem = [];
+  other.onStateChange(st => { theirs = st; });
+  other.onMessage('fx', e => shownThem.push(e));
+  await sleep(600);
+  const mine = JSON.parse(await fjs("JSON.stringify(window.Agentville.animalsNow().filter(a => !a.away).map(a => [a.id, a.x, a.y]))"));
+  const same = mine.filter(([id, x, y]) => { const a = theirs?.animals.get(id); return a && Math.abs(a.x / 8 - x) <= 8 && Math.abs(a.y / 8 - y) <= 8; }).length;
+  check(same >= mine.length - 2, `someone else watching is told the same farm: the animals are where this page draws them (${same} of ${mine.length} within a step or two)`);
+  // Who is watching: the page's chip at the world's bottom right, its list, and a name of one's own.
+  check(await until("document.querySelector('.world-online-chip span')?.textContent === '2 online'"), 'a chip at the bottom right says how many look at this world now: two');
+  await js("document.querySelector('[data-online]').click()");
+  const listed = JSON.parse(await js("JSON.stringify([...document.querySelectorAll('.world-online-panel li')].map(li => [li.querySelector('span').textContent, [...li.querySelectorAll('small')].map(x => x.textContent).join()]))"));
+  check(listed.length === 2 && listed[0][1] === 'you,this Mac' && listed[1][1] === '' && listed.every(l => /^\w+ \w+$/.test(l[0])) && listed[0][0] !== listed[1][0], `a click lists them, each under a name of its own, this browser first (${JSON.stringify(listed)})`);
+  await js("(i => { i.value = '  <b>Sam</b>  '; i.form.requestSubmit(); })(document.querySelector('.world-online-panel input'))");
+  check(await until("document.querySelector('.world-online-panel li span')?.textContent === '<b>Sam</b>' && !document.querySelector('.world-online-panel li b') && /Saved/.test(document.querySelector('.world-online-panel em').textContent)"), 'a name you give yourself is shown, as text, and kept');
+  check(await until("localStorage.getItem('tracker-viewer-name') === '<b>Sam</b>'") && [...(theirs?.viewers.values() ?? [])].some(v => v.name === '<b>Sam</b>' && v.host), 'in this browser for the next visit, and the other one watching sees it');
+  await js("document.querySelector('[data-online]').click()");
+  check(await until("document.querySelector('.world-online-panel').hidden"), 'a second click folds the list away');
   const cow = JSON.parse(await fjs("JSON.stringify(window.Agentville.animalsNow().find(a => a.kind === 'cow'))"));
   await fjs(clickFarm(cow.x, cow.y - 4));
   check(await funtil("/Pet/.test(document.querySelector('.px-animal-menu')?.textContent ?? '')"), `clicking a cow opens its menu (the cow at ${cow.x},${cow.y})`);
@@ -685,6 +707,10 @@ try {
   check(await funtil("!document.querySelector('.px-animal-menu')"), 'picking Pet closes the menu');
   check(await funtil("[...document.querySelectorAll('.px-animal-say')].some(b => !b.hidden && /moo/i.test(b.textContent))", 15_000), 'the cow says so in its own bubble (when the farmer gets there, or at once)');
   check(await fjs("[...document.querySelectorAll('.px-animal-say')].every(b => !/<[a-z]/i.test(b.innerHTML))"), "an animal's bubble holds text only");
+  for (let i = 0; i < 100 && !shownThem.some(e => e.fx === 'hearts'); i++) await sleep(100);
+  check(shownThem.some(e => e.fx === 'hearts') && [...(theirs?.says.values() ?? [])].some(text => /moo/i.test(text)), 'the other one watching sees the cow petted too, and reads what it says');
+  await other.leave();
+  check(await until("document.querySelector('.world-online-chip span')?.textContent === '1 online'", 8000), 'the other one gone, the chip says one, a few seconds on');
   let clashes = '';
   for (let i = 0; i < 12 && !clashes; i++) { // over a few seconds: an animal's bubble never lies on a sign, a moving label or the HUD
     clashes = await fjs(`(() => { const rs = s => [...document.querySelectorAll(s)].map(e => e.getBoundingClientRect()).filter(r => r.width && r.height), hit = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
@@ -706,7 +732,7 @@ try {
   const setMotion = async on => { if ((await motionOn()) !== on) await fjs("document.querySelector('[data-farm-motion]').click(); true"); return funtil(`document.querySelector('[data-farm-motion]').textContent.includes('off') === ${!on}`); };
   const motionWas = await motionOn();
   await setMotion(false);
-  let goatMenu = false; // a goat a click there opens: one may stand behind the ostrich (a click picks the one in front)
+  let goatMenu = false; // a goat a click there opens: one may stand behind the horse (a click picks the one in front)
   for (const g of JSON.parse(await fjs("JSON.stringify(window.Agentville.animalsNow().filter(a => a.kind === 'goat'))"))) {
     for (const dy of [4, 2, 6]) {
       await fjs(clickFarm(g.x, g.y - dy));
@@ -717,10 +743,11 @@ try {
   }
   check(goatMenu && await funtil("/You do it/.test(document.querySelector('.px-animal-menu')?.textContent ?? '')"), 'with motion off, the menu says you do it (no one walks)');
   check(await fjs(realClick('[data-animal-act="0"]')), 'and its buttons take a real click');
-  check(await funtil("[...document.querySelectorAll('.px-animal-say')].some(b => !b.hidden && /baa/i.test(b.textContent))", 2000), 'with motion off, the goat says so at once');
+  // (the collector moves this world for everyone, whatever this browser's Motion says: one in reserve walks over first)
+  check(await funtil("[...document.querySelectorAll('.px-animal-say')].some(b => !b.hidden && /baa/i.test(b.textContent))", 20_000), 'with motion off here, the goat still says so once it is done');
   check(await funtil("![...document.querySelectorAll('.px-animal-say')].some(b => !b.hidden)", 8000), 'and the line goes after a few seconds, though nothing moves');
   await setMotion(true);
-  // Part B: habits in a real browser (a goat on the woodpile, the lion yawning, the dog rolling over), with motion on. Gags take a minute or two: the kit's tests cover them.
+  // Part B: habits in a real browser (a goat on the woodpile, the horse stretching, the dog rolling over), with motion on. Gags take a minute or two: the kit's tests cover them.
   check(await funtil('window.Agentville.animalsNow().some(a => a.lift > 0 || a.pose === "hide" || a.pose === "roll" || a.pose === "yawn" || a.pose === "stretch")', 150_000), 'within a couple of minutes an animal is up to one of its habits');
   // ✨ Helper's Animal lines: ticked, the farm says its animals, a batch comes through a 0.9.0 session, and an animal says a fresh line.
   linesOn = true;
@@ -801,6 +828,12 @@ try {
   check(await funtil(`document.querySelector('[data-farm-bubbles]').textContent !== ${JSON.stringify(bubblesWas)} && !document.querySelector('.px-menu').hidden`), 'a switch in it changes, and the menu stays open to change another');
   await fjs("document.querySelector('[data-farm-bubbles]').click()");
   await funtil(`document.querySelector('[data-farm-bubbles]').textContent === ${JSON.stringify(bubblesWas)}`);
+  await sleep(300);
+  await fjs("document.querySelector('[data-farm-awake]').click()");
+  check(await until("localStorage.getItem('tracker-awake') === 'on'") && await funtil("/Screen: stays on/.test(document.querySelector('[data-farm-awake]').textContent)"), "its Screen switch has the page keep this device's screen on (this browser's own choice), and says so");
+  await sleep(300);
+  await fjs("document.querySelector('[data-farm-awake]').click()");
+  check(await until("localStorage.getItem('tracker-awake') === 'off'") && await funtil("/Screen: may sleep/.test(document.querySelector('[data-farm-awake]').textContent)"), 'and lets it sleep again');
   await fjs("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   check(await funtil("document.querySelector('.px-menu').hidden && document.activeElement?.hasAttribute('data-farm-menu')"), 'Esc shuts it, back on its button');
   await sleep(300); // the page takes one press of the top bar's buttons a quarter second
@@ -1000,6 +1033,7 @@ try {
   check(await funtil("!!document.querySelector('[data-farm-nav=\"worlds\"]')"), "the farm's buttons include World");
   await fjs("document.querySelector('[data-farm-nav=\"worlds\"]').click()");
   check(await until("document.getElementById('worlds-dlg').open && /Farm[\\s\\S]*Built in[\\s\\S]*Sample[\\s\\S]*Your folder/.test(document.getElementById('worlds-list').textContent)"), 'World, in the farm buttons, lists the worlds: the farm, built in, and one of yours');
+  check(await until("/^[1-9]\\d* online$/.test(document.querySelector('#worlds-list [data-count=\"farm\"]')?.textContent ?? '') && document.querySelector('#worlds-list [data-count=\"u/sample\"]')?.hidden !== false", 6000), 'the list says how many look at each world just now (the farm: this page; a world no one watches: nothing)');
   await js("document.querySelector('[data-world=\"u/sample\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/sample/')"), 'picking one shows it');
   check(await funtil("!!document.querySelector('#farm canvas') && document.querySelectorAll('.px-tag').length > 0"), 'a world made of three hooks draws, with the engine doing the rest');
@@ -1042,6 +1076,7 @@ try {
   await until("document.getElementById('worlds-dlg').open");
   await js("document.querySelector('[data-world=\"u/pets\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/pets/')"), 'the pets world shows');
+  check(await until("window.TrackerLive?.watching() === true && window.TrackerLive.world() === 'u/pets' && document.querySelector('.world-online-chip span')?.textContent === '1 online'", 8000), 'a world of your own is watched live too: the collector moves it, in a process of its own, for everyone in its room');
   let petsLines = '[]';
   for (let i = 0; i < 150 && !/a nameless purr/.test(petsLines); i++) { petsLines = (await chrome.inFrame('/world/u/pets/', 'JSON.stringify(window.Agentville.freshLinesNow())').catch(() => '[]')) ?? '[]'; await sleep(200); }
   check(/a nameless purr/.test(petsLines) && !/sat on me/.test(petsLines), `a world that can't see what agents say gets only the nameless lines (${petsLines})`);
@@ -1192,6 +1227,24 @@ try {
   check(await until("/Bash\\(npm test:\\*\\)/.test(document.getElementById('setup-body').textContent)"), 'the rules tab lists your permission rules');
   check(await js("(() => { const b = document.getElementById('setup-body'); return b.scrollWidth <= b.clientWidth + 1; })()"), "the dialog doesn't scroll sideways");
   await js("document.getElementById('setup').close()");
+
+  console.log('Settings');
+  await js("document.getElementById('settings-open').click()");
+  check(await until("document.getElementById('settings').open && document.querySelectorAll('#settings-body .st-group').length >= 6 && !!document.getElementById('st-lan') && !!document.getElementById('st-port')"), '⚙ Settings shows every setting in groups (network, sessions, notifications, worlds…): no config file to edit');
+  check(await js("[...document.querySelectorAll('#st-terminal option')].map(o => o.value).join() === 'auto,Terminal,iTerm' || document.querySelectorAll('#st-terminal option').length >= 1"), 'the terminals this system has are the ones to choose from');
+  await js("document.getElementById('st-collisionWindowMin').value = '0'; document.getElementById('st-staleAfterHours').value = '48'; document.getElementById('settings-save').click()");
+  check(await until("/between 1 and 1440/.test(document.querySelector('#settings-body .st-err')?.textContent ?? '')") && JSON.parse(readFileSync(join(root, 'config.json'), 'utf8')).staleAfterHours === undefined, 'a value out of range is refused beside its field, and nothing is saved');
+  check(await js("document.getElementById('st-staleAfterHours').value === '48'"), 'what was typed stays in the window');
+  await js("document.getElementById('st-collisionWindowMin').value = '30'; document.getElementById('settings-save').click()");
+  check(await until("document.getElementById('settings-note').textContent === 'Saved.'") && JSON.parse(readFileSync(join(root, 'config.json'), 'utf8')).staleAfterHours === 48, 'Save writes it into config.json, in force at once');
+  check(await js("(() => { const b = document.getElementById('settings-body'); return b.scrollWidth <= b.clientWidth + 1; })()"), "the window doesn't scroll sideways");
+  const savedNotifications = async want => { for (let i = 0; i < 40 && JSON.parse(readFileSync(join(root, 'config.json'), 'utf8')).notifications !== want; i++) await sleep(100); return JSON.parse(readFileSync(join(root, 'config.json'), 'utf8')).notifications === want; };
+  await js("document.getElementById('st-notifications').click(); document.getElementById('settings-save').click()");
+  check(await savedNotifications(false) && await until("document.getElementById('settings-save').disabled === false && document.getElementById('st-notifications')?.checked === false && document.getElementById('st-notify-waiting')?.disabled === true && document.getElementById('st-notify-waiting')?.checked === true"), 'System notifications switches them all off at once: saved, and the kinds below are shown as they were, not to be changed');
+  await js("document.getElementById('st-notifications').click(); document.getElementById('settings-save').click()");
+  check(await savedNotifications(true) && await until("document.getElementById('st-notifications')?.checked === true && document.getElementById('st-notify-waiting')?.disabled === false && document.getElementById('st-notify-waiting')?.checked === true"), 'and on again straight after, with each kind as it was');
+  await js("document.querySelector('[data-settings-close]').click()");
+  check(await until("!document.getElementById('settings').open"), 'its × closes it');
   console.log('Sessions');
   await js("document.getElementById('sessions-open').click()");
   check(await until("document.getElementById('sessions').open && [...document.querySelectorAll('#sessions [data-sess-resume]')].some(b => b.closest('.sess-row').textContent.includes('Harvest planning'))"), 'the sessions dialog offers to resume a past session by its title');
@@ -1259,7 +1312,7 @@ try {
     if (!existsSync(waitInbox)) return;
     for (const name of readdirSync(waitInbox).sort()) if (name.endsWith('.json')) { waitGot.push(JSON.parse(readFileSync(join(waitInbox, name), 'utf8')).text); unlinkSync(join(waitInbox, name)); }
   }, 100);
-  const waitHandle = await startCollector({ root: waitRoot, claudeDir: waitClaude, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, home: '/nowhere', scratchBase: '/nonexistent' });
+  const waitHandle = await startCollector({ platform: 'darwin', root: waitRoot, claudeDir: waitClaude, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, home: '/nowhere', scratchBase: '/nonexistent' });
   try {
     const heldState = async () => `state ${waitHandle.getSnapshot()?.agents[0]?.state}, held ${JSON.stringify(waitHandle.getSnapshot()?.agents[0]?.held ?? null)}, got ${JSON.stringify(waitGot)}, page: ${JSON.stringify(await js("(document.querySelector('#center-body .held-box')?.textContent ?? 'no list').replace(/\\s+/g, ' ').slice(0, 200) + ' | status: ' + (document.getElementById('msg-status')?.textContent ?? '')"))}`;
     await send('Page.navigate', { url: `http://127.0.0.1:${waitHandle.port}/` });
@@ -1313,7 +1366,7 @@ try {
   const acctCli = join(acct, 'claude-cli');
   writeFileSync(acctCli, `#!/bin/sh\ncase "$1 $2" in\n  "agents --json") echo '[]' ;;\n  "auth status") echo '{"loggedIn":true}' ;;\nesac\n`, { mode: 0o755 });
   const acctLaunched = [];
-  const acctHandle = await startCollector({ root: acctRoot, claudeDir: workDir, claudeBin: acctCli, notify: () => {}, log: () => {}, home: '/nowhere', scratchBase: '/nonexistent', folderRoots: [realpathSync(acct)], launch: async args => { acctLaunched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
+  const acctHandle = await startCollector({ platform: 'darwin', root: acctRoot, claudeDir: workDir, claudeBin: acctCli, notify: () => {}, log: () => {}, home: '/nowhere', scratchBase: '/nonexistent', folderRoots: [realpathSync(acct)], launch: async args => { acctLaunched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
   try {
     await send('Page.navigate', { url: `http://127.0.0.1:${acctHandle.port}/` });
     check(await until("document.querySelectorAll('.row').length === 2"), 'both accounts\' sessions are listed');

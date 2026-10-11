@@ -1,10 +1,13 @@
 import { statSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { run } from '../lib/exec.mjs';
 
 // GIT_OPTIONAL_LOCKS=0 stops `git status` taking index.lock, so polling never makes
 // another agent's commit fail in a shared checkout.
 export const GIT_ENV = { GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
+
+/** A path git printed, the way this system writes it: on Windows git says C:/code/api, everything else here C:\code\api. */
+export const nativePath = p => (process.platform === 'win32' && p ? resolve(p) : p);
 
 /** The nearest existing folder for a file or folder path (paths may not exist yet). */
 export function folderOf(path) {
@@ -13,6 +16,7 @@ export function folderOf(path) {
     try {
       return statSync(p).isDirectory() ? p : dirname(p);
     } catch {
+      if (dirname(p) === p) return null; // a drive that is not there (Windows): nothing above it
       p = dirname(p);
     }
   }
@@ -34,7 +38,7 @@ export class RepoResolver {
     const hit = this.cache.get(dir);
     if (hit && this.now() - hit.at < this.ttlMs) return hit.top;
     const res = await this.runner('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { env: GIT_ENV, timeoutMs: 5000 });
-    const top = res.code === 0 && res.stdout.trim() ? res.stdout.trim() : null;
+    const top = res.code === 0 && res.stdout.trim() ? nativePath(res.stdout.trim()) : null;
     this.cache.set(dir, { top, at: this.now() });
     return top;
   }
@@ -63,7 +67,7 @@ const worktrees = new Map(); // top → the main checkout it is a worktree of, o
 export async function mainOf(top, runner = run) {
   if (worktrees.has(top)) return worktrees.get(top);
   const res = await runner('git', ['-C', top, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], { env: GIT_ENV, timeoutMs: 5000 });
-  const [dir, common] = res.code === 0 ? res.stdout.trim().split('\n') : [];
+  const [dir, common] = res.code === 0 ? res.stdout.trim().split('\n').map(p => nativePath(p.trim())) : [];
   const main = dir && common && dir !== common && basename(common) === '.git' ? dirname(common) : null;
   if (res.code === 0) worktrees.set(top, main);
   return main;

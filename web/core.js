@@ -47,7 +47,13 @@ const clock = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minut
 const hhmm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const ago = ms => (!ms ? '' : Date.now() - ms < 86_400_000 ? clock(ms) : new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' }));
 const gb = mb => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
-const short = p => String(p ?? '').replace(/^\/Users\/[^/]+/, '~');
+// What the page calls the computer the collector runs on and its file manager: by the system the snapshot names
+// (machine.platform; a snapshot from before it had one is a Mac's).
+const hostPlatform = () => snap?.machine?.platform ?? 'darwin';
+const hostName = () => (hostPlatform() === 'darwin' ? 'this Mac' : 'this computer');
+const filesApp = () => ({ darwin: 'Finder', win32: 'Explorer' }[hostPlatform()] ?? 'the file manager');
+// A path with your home folder as ~, wherever this system keeps homes (/Users/you, /home/you, C:\Users\you).
+const short = p => String(p ?? '').replace(/^(?:\/(?:Users|home)\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/, '~');
 const shellQuote = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 function elapsed(from) {

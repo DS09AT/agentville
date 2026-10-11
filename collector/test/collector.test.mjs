@@ -604,7 +604,7 @@ test("a session's conversation is forked at one of its messages into a new sessi
   writeFileSync(join(dir, `${SID}.jsonl`), `${lines.join('\n')}\n`);
   writeFileSync(join(claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: SID, cwd: work, name: 'releaser', kind: 'interactive', status: 'idle' }));
   const launched = [];
-  const handle = await startCollector({ root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args); return { code: 0, stdout: '', stderr: '' }; } });
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args); return { code: 0, stdout: '', stderr: '' }; } });
   try {
     const feed = handle.getSnapshot().agents.find(a => a.id === SID).feed;
     assert.deepEqual(feed.filter(f => f.kind === 'prompt' || f.kind === 'reply').map(f => f.uuid), ['r-2', 'p-2', 'r-1', 'p-1'], 'each message says where it is in the transcript');
@@ -696,7 +696,7 @@ test('a session is restored to before one of your messages: ended, its files and
   const launched = [], signals = [];
   let alive = true;
   const procs = { commandOf: async () => 'claude', ttyOf: async () => 'ttys012', kill: (pid, sig) => { signals.push([pid, sig]); alive = false; }, alive: () => alive };
-  const handle = await startCollector({ root, claudeDir, claudeBin: bin, notify: () => {}, log: () => {}, sessionProcs: procs, endWaitMs: 300,
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, claudeBin: bin, notify: () => {}, log: () => {}, sessionProcs: procs, endWaitMs: 300,
     launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: args.join(' ').includes('tty of') ? 'closed\n' : '', stderr: '' }; } });
   const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
   const marker = JSON.stringify({ type: 'last-prompt', leafUuid: 'r-1', sessionId: SID, explicit: true, rewound: true });
@@ -768,7 +768,7 @@ test('a session starts or resumes in a terminal only in a listed folder, or from
   for (const [id, age] of [[PAST, 60_000], [LIVE, 5000], [GONE, 9000]]) utimesSync(join(dir, `${id}.jsonl`), new Date(now - age), new Date(now - age));
   writeFileSync(join(claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: LIVE, cwd: work, name: 'live', kind: 'interactive', status: 'idle', version: '2.1.291' }));
   const launched = [];
-  const handle = await startCollector({ root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args); return { code: 0, stdout: '', stderr: '' }; } });
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args); return { code: 0, stdout: '', stderr: '' }; } });
   try {
     const past = await handle.pastSessions();
     assert.equal(past.terminal, 'iTerm');
@@ -831,7 +831,7 @@ test('a new session starts in any folder of yours, made first if it is new, and 
   const claudeDir = mkdtempSync(join(tmpdir(), 'tracker-claude-'));
   mkdirSync(join(claudeDir, 'sessions'));
   const launched = [];
-  const handle = await startCollector({ root, claudeDir, home, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, home, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
   try {
     assert.deepEqual((await handle.listDirs('~/')).dirs, ['code'], 'suggestions from your home folder');
     assert.match((await handle.actions.start({ cwd: '~/code/new app' })).error, /doesn't exist/);
@@ -861,7 +861,7 @@ test('a session is ended (SIGTERM, then its window closed by its tty) or restart
   const launched = [], signals = [];
   let alive = true, command = 'claude --resume x';
   const procs = { commandOf: async () => command, ttyOf: async () => 'ttys012', kill: (pid, sig) => { signals.push([pid, sig]); alive = false; }, alive: () => alive };
-  const handle = await startCollector({ root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, sessionProcs: procs, endWaitMs: 300,
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, sessionProcs: procs, endWaitMs: 300,
     launch: async args => { launched.push(args); return { code: 0, stdout: args.join(' ').includes('tty of') ? 'closed\n' : '', stderr: '' }; } });
   try {
     assert.equal(handle.getSnapshot().agents.find(a => a.id === LIVE).mode, 'default');
@@ -1076,7 +1076,7 @@ test("Claude Code's setup for the ⚙ dialog: plugins with their costs, MCP serv
   writeFileSync(join(home, '.claude.json'), JSON.stringify({ projects: { [project]: { mcpServers: { local1: {} } } } }));
   const claude = fakeClaude(home);
   const launched = [];
-  const handle = await startCollector({ root, claudeDir, home, claudeBin: claude.bin, notify: () => {}, log: () => {}, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, home, claudeBin: claude.bin, notify: () => {}, log: () => {}, launch: async args => { launched.push(args.at(-1)); return { code: 0, stdout: '', stderr: '' }; } });
   try {
     const p = await handle.claudePlugins();
     assert.deepEqual(p.plugins.map(x => [x.id, x.name, x.marketplace, x.enabled, x.details?.alwaysOn ?? null, x.managed]), [['alpha@market', 'alpha', 'market', true, 1200, true], ['agent-tracker@inline', 'agent-tracker', 'inline', true, 1200, false]]);
@@ -1131,7 +1131,7 @@ test('files that are not text: a short-lived link to the bytes, for one file or 
   writeFileSync(join(claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-view', cwd: work, name: 'viewer', status: 'idle' }));
   writeFileSync(join(claudeDir, 'projects', '-w', 'sess-view.jsonl'), `${JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), cwd: work, message: { content: 'hi' } })}\n`);
   const revealed = [];
-  const handle = await startCollector({ root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, home: '/nowhere', ticketMs: 300,
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, home: '/nowhere', ticketMs: 300,
     quickLook: async real => Buffer.from(`picture of ${basename(real)}`), revealFile: async real => { revealed.push(real); return { code: 0 }; } });
   const idOf = url => url.split('/')[2];
   try {
@@ -1153,10 +1153,12 @@ test('files that are not text: a short-lived link to the bytes, for one file or 
     assert.equal((await handle.rawFile(id, 'page.html')).status, 404, 'a link lasts only so long');
 
     assert.deepEqual(await handle.officeView('sess-view', join(work, 'data.csv')), { view: 'sheet', sheets: [{ name: 'data.csv', rows: [['name', 'qty'], ['bolts', '4']], truncated: false }] });
-    const word = await handle.officeView('sess-view', join(work, 'notes.rtf')); // macOS's textutil
-    assert.equal(word.view, 'word');
-    assert.match(word.html, /<b>Bold<\/b>|font-weight: bold[\s\S]*Bold/);
-    assert.match(word.text, /Bold plain/);
+    if (process.platform === 'darwin') { // macOS's own textutil reads it (elsewhere LibreOffice does, when it is installed: platform.test.mjs)
+      const word = await handle.officeView('sess-view', join(work, 'notes.rtf'));
+      assert.equal(word.view, 'word');
+      assert.match(word.html, /<b>Bold<\/b>|font-weight: bold[\s\S]*Bold/);
+      assert.match(word.text, /Bold plain/);
+    }
     assert.deepEqual(await handle.officeView('sess-view', join(work, 'deck.pptx')), { view: 'picture', picture: `data:image/png;base64,${Buffer.from('picture of deck.pptx').toString('base64')}` });
     assert.match((await handle.officeView('sess-view', join(work, '.env'))).error, /secrets/);
 
@@ -1177,7 +1179,7 @@ test('Open the worlds folder makes the folder, opens it in Finder only, and says
   const claudeDir = mkdtempSync(join(tmpdir(), 'tracker-claude-worlds-'));
   const opened = [];
   let code = 0;
-  const handle = await startCollector({ root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, home: '/nowhere',
+  const handle = await startCollector({ platform: 'darwin', root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {}, home: '/nowhere',
     openFolder: async dir => { opened.push(dir); return { code }; } });
   try {
     assert.deepEqual(await handle.actions.revealWorlds(), { ok: true, path: worldsDir });

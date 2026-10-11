@@ -16,7 +16,7 @@ const WORLDS = [
   { key: 'u/broken', builtIn: false, name: 'broken', icon: '🧩', description: '', nouns: {}, preview: null, error: 'world.json is missing.' },
 ];
 
-async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false, listFails = false, reveal = { ok: true, path: '/w' }, mounted = true } = {}) {
+async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false, listFails = false, reveal = { ok: true, path: '/w' }, mounted = true, canStayAwake = true } = {}) {
   const posted = [], calls = [], listeners = {}, fetches = [], held = [], warnings = [], made = [], frames = [], timers = [], signals = [], windowPosts = [], bodies = [];
   // The page carries all traffic over a MessageChannel once the frame has loaded. The stub records what
   // the page posts over its port into `posted` (as frame.contentWindow.postMessage already does for the
@@ -86,9 +86,11 @@ async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false
     token: 'tok', diary, navState: () => ({ theme: 'dark', side: false, live: true }),
     onPickAgent: (id, o) => calls.push(o?.tab ? ['pick', id, o?.from ?? null, o.tab] : ['pick', id, o?.from ?? null]), onOpenDoc: (id, p) => calls.push(['doc', id, p]),
     onShowRepos: () => calls.push(['repos']), onStartSession: () => calls.push(['start']), onNav: w => calls.push(['nav', w]), onBell: on => calls.push(['bell', on]),
+    onAwake: on => { calls.push(['awake', on]); awake = on && canStayAwake; }, isAwake: () => awake, // the page keeps the screen on where its browser can
     onWorld: w => calls.push(['world', w.key]),
     onNotice: t => calls.push(['notice', t]),
   };
+  let awake = false;
   const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   if (mounted) farm.mount(host, options); // mounted: false is a page that has only shown its list view
   await settle();
@@ -125,7 +127,7 @@ test('the frame gets its start (prefs, settings), then only the newest scene and
   assert.deepEqual(p.posted.map(m => m.type), ['start', 'scene', 'select']);
   assert.equal(p.posted[0].world, 'farm');
   assert.equal(p.posted[0].prefs.zoom, '2');
-  assert.deepEqual(p.posted[0].settings, { still: false, theme: 'dark', nav: { theme: 'dark', side: false, live: true }, bell: false });
+  assert.deepEqual(p.posted[0].settings, { still: false, theme: 'dark', nav: { theme: 'dark', side: false, live: true }, bell: false, awake: false, sim: false }); // sim: no line to the collector's rooms here (web/live.js), so the world moves itself
   assert.equal(p.posted[1].scene.generatedAt, 2, 'the newest scene, not every one');
   assert.equal(p.posted[2].id, 'a1');
   p.farm.update({ ...snap, generatedAt: 3 });
@@ -1242,4 +1244,130 @@ test('a world’s cast is taken once a second at most (the same again is ignored
   p.farm.mount(p.host, p.options);
   await p.settle();
   assert.equal(posts(), 3, 'shown again: the cast goes at once');
+});
+
+/* ---------- a world the collector moves: the page's line to its room (web/live.js) ---------- */
+
+/** A stand-in for web/live.js: it records what the page asks of it; `h` are the page's handlers for the room joined last. */
+function liveStub(p) {
+  const live = {
+    joins: [], left: 0, acts: [], touches: [], resyncs: 0, room: true, h: null, sees: [],
+    join(world, token, h) { this.joins.push([world, token]); this.h = h; }, leave() { this.left++; }, see(on) { this.sees.push(on); },
+    act(m) { this.acts.push(plain(m)); return this.room; }, touch(animal) { this.touches.push(animal); return this.room; }, resync() { this.resyncs++; },
+  };
+  p.ctx.window.TrackerLive = live;
+  return live;
+}
+const sims = p => p.posted.filter(m => m.type === 'sim').map(m => { const { type, ...rest } = m; return rest; });
+
+test('a built-in world joins its room once its frame has loaded (with the token), and is told so at its start; states and what there is to show go on to the frame', async () => {
+  const p = await page();
+  const live = liveStub(p);
+  p.farm.update(snap);
+  assert.deepEqual(live.joins, [], 'not before the frame is there');
+  p.from({ type: 'loaded' });
+  assert.deepEqual(live.joins, [['farm', 'tok']]);
+  assert.equal(p.posted.find(m => m.type === 'start').settings.sim, true, 'its start says the collector moves this world: it shows no one until it is told where they are');
+  live.h.on();
+  live.h.state({ t: 1, b: [], a: [] });
+  live.h.fx({ fx: 'hearts', at: [1, 2] });
+  live.h.re({ rid: 'r1', animal: 'cow-0', ok: true, doer: 'a1', wait: 0 });
+  assert.deepEqual(sims(p), [{ on: true }, { s: { t: 1, b: [], a: [] } }, { fx: { fx: 'hearts', at: [1, 2] } }, { re: { rid: 'r1', animal: 'cow-0', ok: true, doer: 'a1', wait: 0 } }]);
+  live.h.off();
+  assert.deepEqual(sims(p).at(-1), { on: false }, 'no room (the collector is older, or gone): the frame moves its world itself');
+});
+
+test('out of sight (the list view) a world is sent no states; shown again, it is brought up to date; a frame taken down leaves its room, and hears no more', async () => {
+  const p = await page();
+  const live = liveStub(p);
+  p.from({ type: 'loaded' });
+  const first = live.h;
+  assert.deepEqual(live.sees, [true], 'it looks at the world');
+  p.farm.hide();
+  first.state({ t: 1, b: [], a: [] });
+  first.fx({ fx: 'hearts', at: [1, 2] });
+  assert.deepEqual(sims(p), [], 'nothing while it is hidden');
+  assert.deepEqual(live.sees, [true, false], 'and it is not counted as looking');
+  p.farm.mount(p.host, p.options);
+  assert.equal(live.resyncs, 1, 'shown again: where everyone is by now, whole');
+  assert.deepEqual(live.sees, [true, false, true]);
+  first.state({ t: 2, b: [], a: [] });
+  assert.equal(sims(p).length, 1);
+  const left = live.left;
+  await p.farm.worldsChanged({ key: 'farm' }); // its files changed: a new frame
+  assert.ok(live.left > left, 'the old frame\'s room is left');
+  first.state({ t: 3, b: [], a: [] });
+  assert.equal(sims(p).length, 1, 'and what its room still says goes nowhere');
+  p.from({ type: 'loaded' });
+  assert.equal(live.joins.length, 2, 'the new frame joins again');
+  p.farm.unmount();
+  assert.ok(live.left > left + 1);
+});
+
+test('a world of your own has its room too (the collector moves it in a process of its own); one that draws itself has none, and neither does the test page', async () => {
+  const space = await page({ stored: { 'tracker-world': 'u/space' } });
+  const live = liveStub(space);
+  space.farm.update(snap);
+  space.from({ type: 'loaded' });
+  assert.deepEqual(live.joins, [['u/space', 'tok']]);
+  assert.equal(space.posted.find(m => m.type === 'start').settings.sim, true);
+  // the collector's stand-ins for names become this page's: its private scene then numbers everything as the world's process has it
+  const before = space.posted.filter(m => m.type === 'scene').length;
+  assert.equal(space.posted.filter(m => m.type === 'scene').at(-1).scene.repos[0].key, 'r1');
+  live.h.names([['r:/code/shop/web', 'r7'], ['a:a1', 'a3'], ['x:nope', 'r1'], ['r:other', 'p2'], 'junk']);
+  const again = space.posted.filter(m => m.type === 'scene');
+  assert.equal(again.length, before + 1, 'the scene goes again, numbered anew');
+  assert.deepEqual([again.at(-1).scene.repos[0].key, again.at(-1).scene.repos[0].name, again.at(-1).scene.agents[0].name], ['r7', 'repo 7', 'agent 3']);
+  live.h.names([['r:/code/shop/web', 'r7']]);
+  assert.equal(space.posted.filter(m => m.type === 'scene').length, before + 1, 'the same table again changes nothing');
+  space.from({ type: 'act', rid: 'r1', animal: 'cow-0', act: 0, doer: 'a1' });
+  assert.deepEqual(live.acts, [{ rid: 'r1', animal: 'cow-0', act: 0, doer: 'a1' }], 'a private world asks its animals too: an animal, an action and an agent (their ids it has) say nothing it may not know');
+  const raw = await page({ stored: { 'tracker-world': 'u/space' } });
+  const rlive = liveStub(raw);
+  raw.from({ type: 'loaded', raw: true });
+  assert.deepEqual(rlive.joins, [], 'a world that draws itself: there is no engine in it to tell where anyone is');
+  assert.equal(raw.posted.find(m => m.type === 'start').settings.sim, false);
+  const t = await page({ mounted: false });
+  const tlive = liveStub(t);
+  t.farm.mount(t.host, { ...t.options, token: undefined, world: { key: 'farm' }, memory: { prefs: {} }, answer: () => ({ ok: true, status: 200, data: {} }) });
+  await t.settle();
+  t.from({ type: 'loaded' });
+  assert.deepEqual(tlive.joins, [], 'the test page: made-up data, kept in memory');
+  assert.equal(t.posted.find(m => m.type === 'start').settings.sim, false);
+});
+
+test('what a world asks of an animal goes to its room, checked: an animal\'s id, an action, an id of its own; who should go only if it is an agent on the dashboard', async () => {
+  const p = await page();
+  const live = liveStub(p);
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'act', rid: 'abc-123', animal: 'cow-0', act: 1, doer: 'a1' });
+  p.from({ type: 'act', rid: 'abc-124', animal: 'sheepdog-12', act: 0, doer: 'someone-else' });
+  p.from({ type: 'touch', animal: 'cat-1' });
+  assert.deepEqual(live.acts, [{ rid: 'abc-123', animal: 'cow-0', act: 1, doer: 'a1' }, { rid: 'abc-124', animal: 'sheepdog-12', act: 0, doer: null }]);
+  assert.deepEqual(live.touches, ['cat-1']);
+  for (const bad of [{ type: 'act', rid: 'r', animal: 'cow', act: 0 }, { type: 'act', rid: 'r', animal: 'cow-0', act: 8 }, { type: 'act', rid: 'r', animal: 'cow-0', act: 0.5 }, { type: 'act', rid: 'has space', animal: 'cow-0', act: 0 }, { type: 'act', animal: 'cow-0', act: 0 },
+    { type: 'act', rid: 'x'.repeat(41), animal: 'cow-0', act: 0 }, { type: 'act', rid: 'r', animal: '../../etc-1', act: 0 }, { type: 'touch', animal: 'COW-0' }, { type: 'touch' }]) p.from(bad);
+  assert.equal(live.acts.length, 2, 'what is written wrong is dropped');
+  assert.equal(live.touches.length, 1);
+  live.room = false; // the room is gone
+  p.from({ type: 'act', rid: 'abc-125', animal: 'cow-0', act: 0 });
+  assert.deepEqual(sims(p).at(-1), { re: { rid: 'abc-125', animal: 'cow-0', ok: false, why: 'offline' } }, 'with no room to ask in, the world is answered, not left waiting');
+});
+
+test('the Screen switch: a world asks the page to keep the screen on; the page says in its settings whether it does (a browser may not be able to)', async () => {
+  const p = await page();
+  p.from({ type: 'loaded' });
+  p.posted.length = 0;
+  p.from({ type: 'awake', on: 'yes' }); // not a switch
+  p.from({ type: 'awake', on: true });
+  await p.settle();
+  assert.deepEqual(p.calls.filter(c => c[0] === 'awake'), [['awake', true]]);
+  assert.equal(p.posted.filter(m => m.type === 'settings').at(-1)?.settings.awake, true, 'the world is told it is on');
+  const no = await page({ canStayAwake: false });
+  no.from({ type: 'loaded' });
+  no.posted.length = 0;
+  no.from({ type: 'awake', on: true });
+  await no.settle();
+  assert.equal(no.posted.filter(m => m.type === 'settings').at(-1)?.settings.awake ?? false, false, 'where the browser cannot, the switch is shown off again');
 });

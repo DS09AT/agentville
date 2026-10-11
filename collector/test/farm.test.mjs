@@ -312,7 +312,7 @@ test("the farm's buttons are in one Menu, top right: the dashboard's (with Broad
   assert.match(nav, /class="px-menu" role="group" aria-label="Menu" hidden>/);
   const menu = nav.slice(nav.indexOf('class="px-menu"'));
   for (const attr of ['list', 'worlds', 'session', 'setup', 'side', 'broadcast', 'theme'].map(n => `data-farm-nav="${n}"`)
-    .concat(['data-farm-follow', 'data-farm-resting', 'data-farm-bubbles', 'data-farm-animals', 'data-farm-sky', 'data-farm-season', 'data-farm-motion', 'data-farm-bell', 'data-farm-help', 'data-farm-zoom="-1"', 'data-farm-zoom="0"', 'data-farm-zoom="1"'])) {
+    .concat(['data-farm-follow', 'data-farm-resting', 'data-farm-bubbles', 'data-farm-animals', 'data-farm-sky', 'data-farm-season', 'data-farm-motion', 'data-farm-bell', 'data-farm-awake', 'data-farm-help', 'data-farm-zoom="-1"', 'data-farm-zoom="0"', 'data-farm-zoom="1"'])) {
     assert.ok(menu.includes(attr), `${attr} is in the menu`);
   }
   assert.doesNotMatch(shut, /px-tools/, 'no row along the bottom');
@@ -578,9 +578,9 @@ test('a long name is shortened in the middle, so both ends stay readable', () =>
 
 test('a name that ends in a short code keeps the code and loses the end of the word before it; any other is cut in the middle', () => {
   const { shortName } = load();
-  assert.deepEqual(['shiftaro-1a', 'kuberbase-f3', 'dev-a4', 'shiftaro-legal-7c', 'nachtlauf-modularisierung', 'Übernimm den Umsetzungslauf'].map(n => shortName(n, 8)),
-    ['shift-1a', 'kuber-f3', 'dev-a4', 'shift-7c', 'nach…ung', 'Über…auf']);
-  assert.deepEqual([6, 5, 4, 3].map(n => shortName('shiftaro-1a', n)), ['shi-1a', 'sh-1a', 'sh…a', 's…a'], 'two letters of the word at least, else the middle goes');
+  assert.deepEqual(['shipyard-1a', 'warehouse-f3', 'dev-a4', 'shipyard-legal-7c', 'nightly-reorganisation', 'Übersicht der offenen Aufgaben'].map(n => shortName(n, 8)),
+    ['shipy-1a', 'wareh-f3', 'dev-a4', 'shipy-7c', 'nigh…ion', 'Über…ben']);
+  assert.deepEqual([6, 5, 4, 3].map(n => shortName('shipyard-1a', n)), ['shi-1a', 'sh-1a', 'sh…a', 's…a'], 'two letters of the word at least, else the middle goes');
   assert.equal(shortName('a-b-1a', 5), 'a-1a', 'no hyphen left hanging before the code');
 });
 
@@ -590,10 +590,10 @@ test('a tag made to fit a place: all one size (the full one only where it holds 
   const fit = w => plain(window.__fit(w, 9)); // a character is 9 CSS pixels wide in the full size, 6 in the smaller
   assert.deepEqual([44, 58, 76, 100].map(fit), [{ small: true, chars: 6 }, { small: true, chars: 9 }, { small: false, chars: 8 }, { small: false, chars: 10 }]);
   assert.deepEqual(fit(10), { small: true, chars: 3 }, 'three characters at least');
-  const th = window.AgentvilleFarm.makeFarm(), f = over => ({ id: 'a', name: 'shiftaro-1a', state: 'turn', ...over });
+  const th = window.AgentvilleFarm.makeFarm(), f = over => ({ id: 'a', name: 'shipyard-1a', state: 'turn', ...over });
   assert.deepEqual([th.tagSlot(f()), th.tagSlot(f({ state: 'waiting' })), th.tagSlot(f({ state: 'working' })), th.tagSlot(f({ nap: true }))], [21, 21, null, null], 'a place on the porch is 21 wide');
   assert.deepEqual([th.tagBadge(f()), th.tagBadge(f({ question: 'Push it?' })), th.tagBadge(f({ state: 'waiting' })), th.tagBadge(f({ nap: true }))], ['ok', 'ask', null, null], 'a tick or a question for a turn that ended; one waiting keeps its "!"');
-  assert.equal(th.tag(f(), 8), 'shift-1a');
+  assert.equal(th.tag(f(), 8), 'shipy-1a');
 });
 
 test('on the porch a name tag is just the name, 10 characters at most; in the field it has its hearts and chores', () => {
@@ -632,18 +632,18 @@ test('the farm reaches the page only through what it is handed: no storage, netw
   }
 });
 
-test('the farm’s animals: nine kinds, seventeen animals, and a unicorn that only visits; never a chicken, the Explore dog or a pigeon; lines of 40 at most; 2 to 4 actions each', () => {
+test('the farm’s animals: ten kinds that live on a farm, nineteen animals, and a unicorn that only visits; no lion, tiger or ostrich; never a chicken, the Explore dog or a pigeon; lines of 40 at most; 2 to 4 actions each', () => {
   const window = { Agentville: { raw: () => {} } };
   vm.runInNewContext(`${code}\n;window.CREATURES = CREATURES;`, { window, console, Math, Date, JSON, Map, Set });
   const th = window.AgentvilleFarm.makeFarm();
   const cast = plain(th.animals().cast); // animals() is { cast, gags, play }
-  assert.deepEqual(cast.map(c => [c.kind, c.count ?? 1]), [['cow', 2], ['goat', 2], ['sheepdog', 1], ['ostrich', 1], ['lion', 1], ['tiger', 1], ['duck', 5], ['cat', 1], ['cat', 1], ['mouse', 2], ['unicorn', 1]]);
+  assert.deepEqual(cast.map(c => [c.kind, c.count ?? 1]), [['cow', 2], ['goat', 2], ['sheepdog', 1], ['goose', 1], ['pig', 1], ['horse', 1], ['sheep', 2], ['duck', 5], ['cat', 1], ['cat', 1], ['mouse', 2], ['unicorn', 1]]);
   const unicorn = cast.find(c => c.kind === 'unicorn');
   assert.deepEqual([unicorn.actions, unicorn.lines, unicorn.visits.every[0] >= 120, unicorn.visits.stay[1] <= 60], [[], {}, true, true], 'shy: no menu, nothing to say, rare and brief');
   assert.deepEqual(cast.filter(c => c.kind === 'cat').map(c => [c.look, c.name, c.habits.includes('nap')]), [['grey', 'Grey cat', true], ['black', 'Black cat', true]]);
   for (const c of cast) {
     assert.ok(window.CREATURES[c.kind], c.kind);
-    assert.ok(!['chicken', 'dog', 'pigeon'].includes(c.kind), `${c.kind} is taken on the farm`);
+    assert.ok(!['chicken', 'dog', 'pigeon', 'lion', 'tiger', 'ostrich'].includes(c.kind), `${c.kind} is taken on the farm, or does not live on one`);
     assert.ok(c.visits || (c.actions.length >= 2 && c.actions.length <= 4), `${c.kind} actions`);
     for (const lines of Object.values(c.lines)) for (const l of lines) assert.ok(l.length <= 40, `${c.kind}: ${l}`);
   }
@@ -652,14 +652,15 @@ test('the farm’s animals: nine kinds, seventeen animals, and a unicorn that on
   assert.deepEqual(ducks.actions.map(a => a.label), ['Feed bread', 'Quack back']);
 });
 
-test('where the farm’s animals may walk: the whole farm, but never a crop bed, a building, the carts’ row, the pond, the hammocks or the henhouse', () => {
+test('where the farm’s animals may walk: the pasture (the yard and the meadow below the fields), never behind the buildings, on the porch, among the scarecrows, on a bed, the pond, the hammocks or the henhouse', () => {
   const window = { Agentville: { raw: () => {} } };
   vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set });
   const th = window.AgentvilleFarm.makeFarm();
   th.relayout(window.AgentvilleFarm.layoutFor([{ key: '/a', name: 'a' }, { key: '/b', name: 'b' }, { key: '/c', name: 'c' }, { key: '/d', name: 'd' }]));
   const roam = plain(th.roam()), avoid = plain(th.avoid());
   const inRoam = (x, y) => roam.some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
-  for (const [x, y, where] of [[20, 160, 'the yard'], [60, 86, 'the lane'], [200, 80, 'the porch'], [300, 300, 'the meadow below the fields'], [394, 60, 'by the scarecrows'], [120, 200, 'the path beside the fields']]) assert.ok(inRoam(x, y), where);
+  for (const [x, y, where] of [[20, 160, 'the yard'], [60, 120, 'the yard by the henhouse'], [120, 200, 'the path beside the fields'], [300, 300, 'the meadow below the fields']]) assert.ok(inRoam(x, y), where);
+  for (const [x, y, where] of [[200, 80, 'the porch'], [60, 86, 'the lane'], [394, 60, 'the scarecrows’ field'], [60, 40, 'behind the barn'], [190, 30, 'behind the house'], [250, 160, 'between the beds']]) assert.ok(!inRoam(x, y), `not ${where}`);
   const covers = (x, y) => avoid.some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
   assert.ok(covers(42, 210), 'the pond');
   assert.ok(covers(97, 204) && covers(97, 224), 'the hammocks');
@@ -669,13 +670,15 @@ test('where the farm’s animals may walk: the whole farm, but never a crop bed,
   assert.ok(th.fieldAt(174, 120) && th.buildingAt(60, 40), 'beds and buildings are the engine’s to keep them off (fieldAt, buildingAt)');
 });
 
-test('the farm’s animals wander the whole farm, out of the yard, and never onto a bed, a building or a place kept off', () => {
+test('the farm’s animals wander the whole farm, out of the yard, and never onto a bed (in use or fallow), a building or a place kept off', () => {
   const window = { Agentville: { raw: () => {} } };
   vm.runInNewContext(`${code}\n;window.__kit = { makeAnimals, seededRandom };`, { window, console, Math, Date, JSON, Map, Set });
   const farm = window.AgentvilleFarm, th = farm.makeFarm();
   th.relayout(farm.layoutFor([{ key: '/a', name: 'a' }, { key: '/b', name: 'b' }, { key: '/c', name: 'c' }, { key: '/d', name: 'd' }]));
   th.setScene({ plan: null, chrome: {}, fields: [], farmers: [], carts: [], mail: [], henhouse: { eggs: 0, roosting: 0 } });
   const avoid = plain(th.avoid()), inAvoid = (x, y) => avoid.some(r => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h);
+  const { slots, empty } = plain(th.layout()), onBed = (x, y) => slots.some(s => Math.abs(x - s.cx) <= 40 && y >= s.rowTop && y <= s.rowTop + 56); // every bed's box, fallow ones too
+  assert.ok(empty.length > 0, 'the layout has fallow beds');
   const a = window.__kit.makeAnimals(th.animals(), { random: window.__kit.seededRandom(3) });
   a.place({ roam: th.roam(), avoid: th.avoid(), perches: th.perches(), spots: th.spots(), blocked: (x, y) => Boolean(th.fieldAt(x, y) || th.buildingAt?.(x, y)) });
   let out = 0;
@@ -684,7 +687,7 @@ test('the farm’s animals wander the whole farm, out of the yard, and never ont
     for (const o of a.list()) {
       if (o.kind === 'duck') continue;
       if (o.x > 112 || o.y < 94) out++; // out of the old yard
-      assert.ok(!th.fieldAt(o.x, o.y) && !th.buildingAt(o.x, o.y) && !inAvoid(o.x, o.y), `${o.id} at (${o.x},${o.y})`);
+      assert.ok(!th.fieldAt(o.x, o.y) && !onBed(o.x, o.y) && !th.buildingAt(o.x, o.y) && !inAvoid(o.x, o.y), `${o.id} at (${o.x},${o.y})`);
     }
   }
   assert.ok(out > 1000, `they leave the yard (${out} animal-ticks out of it)`);
@@ -716,7 +719,7 @@ test('the farm’s gags, play and habits are written right: known steps, roles i
   const { cast, gags, play } = plain(th.animals());
   const kinds = new Set(cast.map(c => c.kind));
   const STEPS = new Set(['go', 'chase', 'say', 'pose', 'wear', 'wait', 'fx', 'stay']);
-  assert.deepEqual(gags.map(g => g.id).sort(), ['bucket', 'hammock', 'hat', 'nibble', 'startled', 'tag', 'mouse', 'tables', 'herding', 'gravity', 'mouseking', 'fits', 'faint', 'gossip'].sort());
+  assert.deepEqual(gags.map(g => g.id).sort(), ['bucket', 'hammock', 'hat', 'nibble', 'startled', 'tag', 'mouse', 'tables', 'herding', 'gravity', 'mouseking', 'fits', 'faint', 'gossip', 'flock'].sort());
   for (const g of [...gags, ...play]) {
     for (const k of Object.keys(g.needs)) assert.ok(kinds.has(k) || ['farmer', 'chicken', 'spot'].includes(k), `${g.id}: ${k}`);
     for (const s of g.steps) assert.ok(Object.keys(s).some(k => STEPS.has(k)), `${g.id}: ${JSON.stringify(s)}`);
@@ -724,7 +727,7 @@ test('the farm’s gags, play and habits are written right: known steps, roles i
   for (const c of cast) for (const lines of Object.values(c.lines)) for (const l of lines) assert.ok(l.length <= 40, l);
   for (const g of [...gags, ...play]) for (const lines of Object.values(g.lines ?? {})) for (const l of lines) assert.ok(l.length <= 40, l);
   assert.ok(cast.find(c => c.kind === 'goat').habits.includes('climb'));
-  assert.ok(play.length >= 3, 'play: a stick for the dog, a goat to pet, a nap by the lion');
+  assert.ok(play.length >= 3, 'play: a stick for the dog, a goat to pet, a nap by the pig');
 });
 
 test('the farm says when the hammock is free, and turns a field’s weather into events for the animals', () => {
@@ -792,14 +795,14 @@ test('the cats sleep in the basket and on the moss at the wood’s edge and curl
   const within = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
   const basket = avoid.find(r => within(r, dens[0][0], dens[0][1]));
   assert.ok(basket, 'the basket is kept clear of the others');
-  assert.deepEqual(spots.basket, dens[0], 'and is the spot the lion borrows');
+  assert.deepEqual(spots.basket, dens[0], 'and is the spot the pig borrows');
   const wood = avoid.find(r => within(r, dens[1][0], dens[1][1]));
   assert.ok(wood && wood !== basket && within(roam, dens[1][0], dens[1][1]) && wood.y + wood.h < L.GRID.y1 - 8, 'the moss is at the wood’s edge in the yard, kept clear too, above where idle farmers stand');
 
   const warns = [], ran = new Set(), slept = new Set(), crossed = new Set();
   let cuddled = false, far = 0;
-  const want = ['mouse', 'tables', 'herding', 'gravity', 'mouseking', 'fits', 'faint', 'gossip', 'hammock', 'tag'];
-  for (const seed of [1, 2, 3]) {
+  const want = ['mouse', 'tables', 'herding', 'flock', 'gravity', 'mouseking', 'fits', 'faint', 'gossip', 'hammock', 'tag'];
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
     const a = window.__kit.makeAnimals(th.animals(), { random: window.__kit.seededRandom(seed), warn: m => warns.push(m) });
     a.place({ roam: th.roam(), avoid: th.avoid(), perches: th.perches(), spots: th.spots(), dens: th.dens(), blocked: (x, y) => Boolean(th.fieldAt(x, y) || th.buildingAt?.(x, y)) });
     const crew = { idle: () => [], busy: () => [], longIdle: () => [], at: () => null, state: () => undefined, send: () => false, release() {}, flag() {}, chickens: () => [], spotFree: n => th.spotFree(n), fx() {} };
@@ -821,7 +824,7 @@ test('the cats sleep in the basket and on the moss at the wood’s edge and curl
       for (const o of all) {
         if (o.kind === 'cat' || o.kind === 'duck' || o.away) continue;
         const inside = r => o.x > r.x && o.x < r.x + r.w && o.y > r.y && o.y < r.y + r.h; // on its edge is beside it
-        assert.ok(!inside(basket) || (o.kind === 'lion' && gag === 'fits'), `${o.id} in the cats’ basket at ${o.x},${o.y}`);
+        assert.ok(!inside(basket) || (o.kind === 'pig' && gag === 'fits'), `${o.id} in the cats’ basket at ${o.x},${o.y}`);
         assert.ok(!inside(wood), `${o.id} under the trees at the wood’s edge at ${o.x},${o.y}`);
       }
     }
@@ -1034,7 +1037,8 @@ function porchStage(clock) {
   /** One frame at T (the clock goes with it); with `b`, the farmer walks there. What the porch drew. */
   let T0 = null;
   const base = clock.now;
-  const frame = (T, b) => { T0 ??= T; clock.now = base + Math.round((T - T0) * 1000); window.__PXG.T = T; fills.length = 0; th.ground(); const drawn = fills.slice(); if (b) th.drawChar(f, { walk: true, face: 'down', kids: [], zone: '', ...b }); return drawn; };
+  // As the engine does it: the farm ticks with everyone where they are (the door, the cat), then it is drawn.
+  const frame = (T, b) => { T0 ??= T; clock.now = base + Math.round((T - T0) * 1000); window.__PXG.T = T; const body = b ? { walk: true, face: 'down', kids: [], zone: '', path: [], ...b } : null; th.tick(0.05, () => body); fills.length = 0; th.ground(); const drawn = fills.slice(); if (body) th.drawChar(f, body); return drawn; };
   const ginger = farm.ink('#e9a23b'), shadow = farm.ink('#4e6b3a');
   return { farm, th, frame, catHome: d => d.some(r => r[0] === 196 && r[1] === 77 && r[4] === shadow), catAt: d => { const g = d.filter(r => r[4] === ginger && r[1] < 95 && r[0] > 120 && r[0] < 290); return g.length ? [Math.round(g.reduce((t, r) => t + r[0], 0) / g.length), Math.min(...g.map(r => r[1]))] : null; } };
 }
@@ -1344,6 +1348,17 @@ test('a farmer leads four hens; more wait in the run, as do those of a farmer th
   assert.deepEqual(plain(still.th.chickens()), [], 'and in at once when it is done');
 });
 
+test('a farmer on the porch (waiting for you) keeps its hens in the run: they never go up onto the porch', () => {
+  const w = stagedFarm(), waiting = { ...onA, state: 'waiting', stateReason: 'waiting', ask: { kind: 'question', questions: ['Which one?'] } };
+  w.give([onA], [repoA]); w.round();
+  w.give([withKids(onA, kid('k1'), kid('k2'))], [repoA]); w.round();
+  assert.deepEqual(w.hensGo(120).map(h => h.want), ['follow', 'follow'], 'at work in its field: beside it');
+  w.give([withKids(waiting, kid('k1'), kid('k2'))], [repoA]); w.round();
+  const hens = w.hensGo(240);
+  assert.deepEqual(hens.map(h => h.want), ['run', 'run'], 'on the porch: in the run');
+  assert.ok(plain(w.th.chickens()).every(h => h.y > 90), 'and none of them up there');
+});
+
 test('a farmer whose session ends waits a moment where it stands while its hens set off home', () => {
   const w = stagedFarm(), two = repo(FA, { agentIds: ['a', 'a2'] }), a2 = agent('a2', { cwd: FA });
   w.give([onA, withKids(a2, kid('k1'))], [two]); w.round(); w.hensGo(1);
@@ -1446,7 +1461,7 @@ const FROZEN_HUD = {
               <button type="button" class="px-kpi hot" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:156.0px;height:20.0px;background-image:url(px:78x10:#c9b48a:46831424)"></i><span class="px-sr">two in one repo</span></span></button>
             </div>
             <div class="px-gauges">
-              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
+              <span class="px-gauge" title="Memory used by the agents, of this computer's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
               <span class="px-gauge" title="CPU used by the agents: 140% of one core, 8 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:18%"></i></span><i class="pxt" aria-hidden="true" style="width:32.0px;height:20.0px;background-image:url(px:16x10:#2a1d14/#fff3d6:acf1cb9c)"></i><span class="px-sr">18%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
               <span class="px-gauge" title="Your plan's 5-hour limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#a9c79a:77a45452)"></i><span class="px-sr">5H</span><span class="px-bar"><i class="ok" style="width:30%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:7df674fb)"></i><span class="px-sr">30%</span><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#c9b48a:3961ca8e)"></i><span class="px-sr">5-hour limit</span></span>
               <span class="px-gauge" title="Your plan's weekly limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:7d693448)"></i><span class="px-sr">WEEK</span><span class="px-bar"><i class="warn" style="width:55%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:71287b6d)"></i><span class="px-sr">55%</span><i class="pxt" aria-hidden="true" style="width:92.0px;height:20.0px;background-image:url(px:46x10:#c9b48a:170a2ba1)"></i><span class="px-sr">this week</span></span>
@@ -1478,6 +1493,7 @@ ${pad(14)}
               <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
               <div class="px-menu-sep"></div>
               <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" data-farm-awake title="Keep this screen on while the dashboard is open. Needs HTTPS or localhost"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:68.0px;height:20.0px;background-image:url(px:34x10:#4e3626:cebf56d8)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#8b5a2b:d244b1b5)"></i></span><span class="px-sr">Screen: may sleep</span></button>
               <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
               <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:7305c299)"></i><span class="px-sr">100%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
             </div>
@@ -1492,7 +1508,7 @@ ${pad(14)}
               <button type="button" class="px-kpi" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#c9b48a:eb6a233d)"></i><span class="px-sr">none</span></span></button>
             </div>
             <div class="px-gauges">
-              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:64.0px;height:20.0px;background-image:url(px:32x10:#2a1d14/#fff3d6:70dee863)"></i><span class="px-sr">512 MB</span></span>
+              <span class="px-gauge" title="Memory used by the agents, of this computer's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:64.0px;height:20.0px;background-image:url(px:32x10:#2a1d14/#fff3d6:70dee863)"></i><span class="px-sr">512 MB</span></span>
               <span class="px-gauge" title="CPU used by the agents: 0% of one core, 1 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#2a1d14/#fff3d6:65853a4f)"></i><span class="px-sr">0%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
               <span class="px-gauge" title="Your plan's 5-hour limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#a9c79a:77a45452)"></i><span class="px-sr">5H</span><span class="px-bar"><i class="ok" style="width:42%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:6b284487)"></i><span class="px-sr">42%</span><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#c9b48a:3961ca8e)"></i><span class="px-sr">5-hour limit</span></span>
 ${pad(14)}
@@ -1524,6 +1540,7 @@ ${pad(12)}
               <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:d6b1f9fa)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Motion: off</span></button>
               <div class="px-menu-sep"></div>
               <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Bell: on</span></button>
+              <button type="button" data-farm-awake title="Keep this screen on while the dashboard is open. Needs HTTPS or localhost"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:68.0px;height:20.0px;background-image:url(px:34x10:#4e3626:cebf56d8)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#8b5a2b:d244b1b5)"></i></span><span class="px-sr">Screen: may sleep</span></button>
               <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
               <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#4e3626:dc8025dd)"></i><span class="px-sr">200%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
             </div>
@@ -1538,7 +1555,7 @@ ${pad(12)}
               <button type="button" class="px-kpi" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#2a1d14/#fff3d6:75d8935e)"></i><span class="px-sr">0</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#c9b48a:eb6a233d)"></i><span class="px-sr">none</span></span></button>
             </div>
             <div class="px-gauges">
-              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#2a1d14/#fff3d6:aa7ff1cd)"></i><span class="px-sr">0 MB</span></span>
+              <span class="px-gauge" title="Memory used by the agents, of this computer's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#2a1d14/#fff3d6:aa7ff1cd)"></i><span class="px-sr">0 MB</span></span>
               <span class="px-gauge" title="CPU used by the agents: 0% of one core, 1 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:0%"></i></span><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#2a1d14/#fff3d6:65853a4f)"></i><span class="px-sr">0%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
 ${pad(14)}
 ${pad(14)}
@@ -1570,6 +1587,7 @@ ${pad(12)}
               <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
               <div class="px-menu-sep"></div>
               <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" data-farm-awake title="Keep this screen on while the dashboard is open. Needs HTTPS or localhost"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:68.0px;height:20.0px;background-image:url(px:34x10:#4e3626:cebf56d8)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#8b5a2b:d244b1b5)"></i></span><span class="px-sr">Screen: may sleep</span></button>
               <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
               <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:daea42d0)"></i><span class="px-sr">75%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
             </div>
@@ -1583,7 +1601,8 @@ test("the farm's panel and buttons are byte for byte as they were: live; winter 
 // With two Claude accounts the panel shows a gauge for each (its name, its week, its 5 hours beside it) in
 // place of the plan's 5H and WEEK. Recorded on main's own farm hud (a6c2617), before the merge moved its
 // accounts into the engine's panelHud; recorded again on main's (2c3d7f7) when its Menu replaced the two
-// button rows. Never re-record this to make a change pass.
+// button rows. Never re-record this to make a change pass. (The Screen switch, added to the Menu after the
+// bell, is one line put into each of these by hand: everything around it is as recorded.)
 const TWO_ACCOUNTS = {
   scene: () => ({ ...HUD_CASES.live.scene(), accounts: [{ key: 'main', name: 'work', plan: planWith(30, 55) }, { key: 'home', name: 'home', plan: planWith(95, 92) }] }),
   params: HUD_CASES.live.params,
@@ -1598,7 +1617,7 @@ const FROZEN_TWO_ACCOUNTS = `<div class="px-stats">
               <button type="button" class="px-kpi hot" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:156.0px;height:20.0px;background-image:url(px:78x10:#c9b48a:46831424)"></i><span class="px-sr">two in one repo</span></span></button>
             </div>
             <div class="px-gauges">
-              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
+              <span class="px-gauge" title="Memory used by the agents, of this computer's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
               <span class="px-gauge" title="CPU used by the agents: 140% of one core, 8 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:18%"></i></span><i class="pxt" aria-hidden="true" style="width:32.0px;height:20.0px;background-image:url(px:16x10:#2a1d14/#fff3d6:acf1cb9c)"></i><span class="px-sr">18%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
               <span class="px-gauge" title="Your work account: 55% of its week, 30% of its 5 hours (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:e652820e)"></i><span class="px-sr">WORK</span><span class="px-bar"><i class="warn" style="width:55%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:71287b6d)"></i><span class="px-sr">55%</span><i class="pxt" aria-hidden="true" style="width:134.0px;height:20.0px;background-image:url(px:67x10:#c9b48a:ed2a9603)"></i><span class="px-sr">week · 5h 30%</span></span><span class="px-gauge" title="Your home account: 92% of its week, 95% of its 5 hours (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:e310d20e)"></i><span class="px-sr">HOME</span><span class="px-bar"><i class="bad" style="width:92%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:1d47f549)"></i><span class="px-sr">92%</span><i class="pxt" aria-hidden="true" style="width:134.0px;height:20.0px;background-image:url(px:67x10:#c9b48a:2ffb0ba6)"></i><span class="px-sr">week · 5h 95%</span></span>
               <span class="px-gauge" title="The tracker itself"><i class="pxt" aria-hidden="true" style="width:238.0px;height:20.0px;background-image:url(px:119x10:#c9b48a:b6098418)"></i><span class="px-sr">tracker 1.5% CPU · 80 MB</span></span>
@@ -1629,6 +1648,7 @@ ${pad(14)}
               <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
               <div class="px-menu-sep"></div>
               <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" data-farm-awake title="Keep this screen on while the dashboard is open. Needs HTTPS or localhost"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:68.0px;height:20.0px;background-image:url(px:34x10:#4e3626:cebf56d8)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#8b5a2b:d244b1b5)"></i></span><span class="px-sr">Screen: may sleep</span></button>
               <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
               <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:7305c299)"></i><span class="px-sr">100%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
             </div>
@@ -1651,7 +1671,7 @@ const FROZEN_MENU_OPEN = `<div class="px-stats">
               <button type="button" class="px-kpi hot" disabled title="Two agents writing one repo"><span class="px-kpi-ico k-collide"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#ffffff:83c8e004)"></i><span class="px-sr">⚠</span></span><span class="px-kpi-n"><i class="pxt" aria-hidden="true" style="width:8.0px;height:20.0px;background-image:url(px:4x10:#2a1d14/#fff3d6:83763ee2)"></i><span class="px-sr">1</span></span><span class="px-kpi-l"><i class="pxt" aria-hidden="true" style="width:90.0px;height:20.0px;background-image:url(px:45x10:#a9c79a:2a874721)"></i><span class="px-sr">collisions</span><br><i class="pxt" aria-hidden="true" style="width:156.0px;height:20.0px;background-image:url(px:78x10:#c9b48a:46831424)"></i><span class="px-sr">two in one repo</span></span></button>
             </div>
             <div class="px-gauges">
-              <span class="px-gauge" title="Memory used by the agents, of this Mac's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
+              <span class="px-gauge" title="Memory used by the agents, of this computer's"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:4d724c39)"></i><span class="px-sr">RAM</span><span class="px-bar"><i class="ok" style="width:14%"></i></span><i class="pxt" aria-hidden="true" style="width:60.0px;height:20.0px;background-image:url(px:30x10:#2a1d14/#fff3d6:21697233)"></i><span class="px-sr">2.2 GB</span><i class="pxt" aria-hidden="true" style="width:96.0px;height:20.0px;background-image:url(px:48x10:#c9b48a:235e5bd0)"></i><span class="px-sr">of 16.0 GB</span></span>
               <span class="px-gauge" title="CPU used by the agents: 140% of one core, 8 cores"><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#a9c79a:d77b3be4)"></i><span class="px-sr">CPU</span><span class="px-bar"><i class="ok" style="width:18%"></i></span><i class="pxt" aria-hidden="true" style="width:32.0px;height:20.0px;background-image:url(px:16x10:#2a1d14/#fff3d6:acf1cb9c)"></i><span class="px-sr">18%</span><i class="pxt" aria-hidden="true" style="width:108.0px;height:20.0px;background-image:url(px:54x10:#c9b48a:85e5bd15)"></i><span class="px-sr">of this Mac</span></span>
               <span class="px-gauge" title="Your plan's 5-hour limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#a9c79a:77a45452)"></i><span class="px-sr">5H</span><span class="px-bar"><i class="ok" style="width:30%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:7df674fb)"></i><span class="px-sr">30%</span><i class="pxt" aria-hidden="true" style="width:112.0px;height:20.0px;background-image:url(px:56x10:#c9b48a:3961ca8e)"></i><span class="px-sr">5-hour limit</span></span>
               <span class="px-gauge" title="Your plan's weekly limit (from the mod)"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#a9c79a:7d693448)"></i><span class="px-sr">WEEK</span><span class="px-bar"><i class="warn" style="width:55%"></i></span><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#2a1d14/#fff3d6:71287b6d)"></i><span class="px-sr">55%</span><i class="pxt" aria-hidden="true" style="width:92.0px;height:20.0px;background-image:url(px:46x10:#c9b48a:170a2ba1)"></i><span class="px-sr">this week</span></span>
@@ -1683,6 +1703,7 @@ ${pad(14)}
               <button type="button" class="px-motion" data-farm-motion title="Walking and animation on the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#3f9b3a:ff6f425d)"></i><i class="pxt" aria-hidden="true" style="width:62.0px;height:20.0px;background-image:url(px:31x10:#4e3626:01d5614b)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:24.0px;height:20.0px;background-image:url(px:12x10:#8b5a2b:707b331e)"></i></span><span class="px-sr">Motion: on</span></button>
               <div class="px-menu-sep"></div>
               <button type="button" data-farm-bell title="A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626/#f0b429:a9646b11)"></i><i class="pxt" aria-hidden="true" style="width:36.0px;height:20.0px;background-image:url(px:18x10:#4e3626:46160bc0)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:28.0px;height:20.0px;background-image:url(px:14x10:#8b5a2b:eaab783c)"></i></span><span class="px-sr">Bell: off</span></button>
+              <button type="button" data-farm-awake title="Keep this screen on while the dashboard is open. Needs HTTPS or localhost"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#f0b429:d67156b4)"></i><i class="pxt" aria-hidden="true" style="width:68.0px;height:20.0px;background-image:url(px:34x10:#4e3626:cebf56d8)"></i><span class="px-mi-s"><i class="pxt" aria-hidden="true" style="width:98.0px;height:20.0px;background-image:url(px:49x10:#8b5a2b:d244b1b5)"></i></span><span class="px-sr">Screen: may sleep</span></button>
               <button type="button" class="px-info" data-farm-help aria-label="How to read the farm" title="How to read the farm"><i class="px-ico" aria-hidden="true" style="background-image:url(px:9x9:#4e3626:afe15026)"></i><i class="pxt" aria-hidden="true" style="width:42.0px;height:20.0px;background-image:url(px:21x10:#4e3626:afcb62cc)"></i><span class="px-sr">Help</span></button>
               <div class="px-menu-zoom"><i class="pxt" aria-hidden="true" style="width:48.0px;height:20.0px;background-image:url(px:24x10:#8b5a2b:65bf7a88)"></i><span class="px-sr">ZOOM</span><span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out"><i class="pxt" aria-hidden="true" style="width:10.0px;height:20.0px;background-image:url(px:5x10:#4e3626:dcfc19a0)"></i><span class="px-sr">-</span></button><button type="button" data-farm-zoom="0" title="Show the whole farm"><i class="pxt" aria-hidden="true" style="width:44.0px;height:20.0px;background-image:url(px:22x10:#4e3626:7305c299)"></i><span class="px-sr">100%</span></button><button type="button" data-farm-zoom="1" aria-label="Zoom in"><i class="pxt" aria-hidden="true" style="width:12.0px;height:20.0px;background-image:url(px:6x10:#4e3626:9e3f96e4)"></i><span class="px-sr">+</span></button></span></div>
             </div>
@@ -1708,4 +1729,120 @@ test("the farm's scene keeps the accounts and each farmer's", () => {
   const s = plain(toScene({ generatedAt: NOW, collisions: [], repos: [], agents: [agent('a', { account: 'zeta' })], accounts: [{ key: 'main', name: 'nco', plan: planWith(10, 40) }, { key: 'zeta', name: 'zeta', plan: null }] }));
   assert.deepEqual(s.accounts.map(a => [a.key, a.name, a.plan?.windows.length ?? null]), [['main', 'nco', 2], ['zeta', 'zeta', null]]);
   assert.equal(s.farmers[0].account, 'zeta');
+});
+
+test('farmers never walk along the porch to the scarecrows or over the board and the stall: from or to either, by the lane', () => {
+  const window = { Agentville: { raw: () => {} } };
+  vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set });
+  const th = window.AgentvilleFarm.makeFarm();
+  const route = (from, to) => plain(th.route(from, to[0], to[1]));
+  const LANE = 87;
+  // from the tree (below) to the scarecrows' row (above): by a path up to the lane, along it, then up at its place; never along y = 78
+  const up = route({ x: 64, y: 282 }, [328, 78]);
+  assert.deepEqual(up.at(-1), [328, 78]);
+  assert.ok(up.some(([, y]) => y === LANE) && up.every(([x, y], i) => y !== 78 || i === up.length - 1), `along the lane: ${JSON.stringify(up)}`);
+  // from a porch seat to the scarecrows: down off the deck first
+  const across = route({ x: 237, y: 78 }, [348, 78]);
+  assert.deepEqual(across, [[237, LANE], [348, LANE], [348, 78]]);
+  // within the porch, or within the row: the engine's own way
+  assert.equal(th.route({ x: 142, y: 78 }, 258, 78), null);
+  assert.equal(th.route({ x: 328, y: 78 }, 368, 78), null);
+  // on the ground: the engine's own way, by the paths
+  assert.equal(th.route({ x: 64, y: 282 }, 300, 144), null);
+  // a leg of any such walk that stays above the lane stays on its own deck or row, and no leg runs through the stall's box (x 283–313, above the lane)
+  const band = x => (x < 270 ? 0 : x >= 316 ? 2 : 1);
+  for (const [from, to] of [[{ x: 64, y: 282 }, [348, 78]], [{ x: 237, y: 78 }, [348, 78]], [{ x: 163, y: 78 }, [74, 282]], [{ x: 348, y: 78 }, [163, 78]], [{ x: 200, y: 68 }, [330, 144]]]) {
+    let at = [from.x, from.y];
+    for (const [x, y] of route(from, to)) {
+      if (at[1] < LANE - 3 && y < LANE - 3 && Math.abs(x - at[0]) > 1) assert.equal(band(at[0]), band(x), `a leg along the deck or the row from ${at} to ${x},${y}`);
+      for (let k = 0; k <= 20; k++) { const px = at[0] + ((x - at[0]) * k) / 20, py = at[1] + ((y - at[1]) * k) / 20; assert.ok(!(px > 283 && px < 313 && py > 47 && py < LANE - 3), `through the stall at ${px},${py}`); }
+      at = [x, y];
+    }
+  }
+});
+
+
+/* ---------- one farm for everyone who watches: what the farm itself shares (share, adopt), who waits where ---------- */
+
+test("what the farm shares of its own goings-on is taken by another farm as it is: the hens where they are, a field as far built, a cart where it drives", () => {
+  const moved = stagedFarm(), shown = stagedFarm();
+  const t = Date.now();
+  const first = [withKids(onA, kid('k1'))], second = [withKids(agent('a', { cwd: FA, mcp: [{ server: 'notes', at: t }], now: { tool: 'mcp__notes__search', step: 'mcp', service: 'notes', startedAt: t } }), kid('k1'), kid('k2')), agent('n', { cwd: FB, state: 'idle' })];
+  for (const w of [moved, shown]) { w.give(first, [repoA]); w.round(); w.hensGo(1); w.give(second, [repoA, repoB]); }
+  moved.round(); moved.hensGo(12, 0.1); // a hen is on its way from the henhouse, a field is being built, a cart is driving
+  const got = plain(moved.th.share());
+  assert.deepEqual(Object.keys(got), ['works', 'rounds', 'left', 'leavers', 'ghosts', 'hens', 'carts', 'cat', 'porch', 'whistled']);
+  assert.deepEqual(got.whistled.map(w => w[0]), ['a'], 'the farmer that just whistled for its new hen');
+  assert.deepEqual(Object.keys(got.cat), ['x', 'y', 'where', 'goal', 'face', 'run', 'pose', 'jump', 'legs', 'plan', 'stayUntil'], 'the porch cat: where it is, what it is at, where it is going');
+  assert.deepEqual(got.works.map(([key, w]) => [key, w.kind, w.by]), [[FB, 'build', 'n']]);
+  assert.deepEqual(got.hens.map(h => [h.id, h.phase]), [['k1', 'at'], ['k2', 'go']]);
+  assert.equal(got.carts[0][0], 'notes');
+  assert.ok(got.hens.every(h => Number.isInteger(h.x * 8) && Number.isInteger(h.y * 8)), 'to an eighth of a pixel: it changes only when something moves');
+  assert.notDeepEqual(plain(shown.th.chickens()), plain(moved.th.chickens()), 'the other farm has them elsewhere until it is told');
+  shown.th.adopt(got);
+  const near = (a, b) => a.length === b.length && a.every((h, i) => h.id === b[i].id && Math.abs(h.x - b[i].x) < 0.13 && Math.abs(h.y - b[i].y) < 0.13 && h.phase === b[i].phase && h.want === b[i].want);
+  assert.ok(near(plain(shown.th.chickens()), plain(moved.th.chickens())), 'now its hens are where the first farm has them');
+  for (const key of ['works', 'carts', 'cat', 'porch', 'whistled']) assert.deepEqual(plain(shown.th.share())[key], got[key], key);
+  // told, its own tick moves none of it
+  const before = plain(shown.th.share());
+  const posOf = id => shown.at(id);
+  for (let i = 0; i < 40; i++) shown.th.tick(0.1, posOf, false, true);
+  assert.deepEqual(plain(shown.th.share()), before, 'a farm that is told leaves the moving to whoever tells it');
+  for (let i = 0; i < 40; i++) moved.th.tick(0.1, id => moved.at(id));
+  assert.notDeepEqual(plain(moved.th.share()).hens, got.hens, 'the one that moves goes on');
+  // a hen gone home there is gone here
+  shown.th.adopt({ hens: got.hens.filter(h => h.id !== 'k2') });
+  assert.deepEqual(plain(shown.th.chickens()).map(h => h.id), ['k1']);
+  assert.equal(shown.th.tick(0.1, posOf, false, true), true, 'and the henhouse has news for its labels');
+  assert.equal(shown.th.tick(0.1, posOf, false, true), false);
+});
+
+test('a browser that looks only after a farmer set off for the farmhouse is told who it is, and draws it leaving; when it is in, it is gone there too', () => {
+  const moved = stagedFarm(), late = stagedFarm();
+  moved.give([onA, agent('n', { cwd: FA, state: 'idle' })], [repoA]); moved.round();
+  moved.give([onA], [repoA]); moved.round(); // n's session ended: it walks back to the farmhouse
+  const got = plain(moved.th.share());
+  assert.deepEqual([got.left.map(f => [f.id, f.state]), got.leavers.map(l => l[0])], [[['n', 'leaving']], ['n']]);
+  late.give([onA], [repoA]); late.round(); // it never saw n at all
+  assert.deepEqual(plain(late.scene().farmers.map(f => f.id)), ['a']);
+  late.th.adopt(got);
+  assert.deepEqual(plain(late.scene().farmers.map(f => [f.id, f.state])), [['a', 'working'], ['n', 'leaving']], 'drawn at once, not with the next scene');
+  late.th.adopt(got);
+  assert.equal(late.scene().farmers.length, 2, 'told twice, there once');
+  late.give([onA], [repoA]);
+  assert.deepEqual(plain(late.scene().farmers.map(f => f.id)), ['a', 'n'], 'and it stays through the next scene');
+  late.th.adopt({ leavers: [] }); // it is in
+  assert.deepEqual(plain(late.scene().farmers.map(f => f.id)), ['a']);
+});
+
+test('the porch cat is moved by the farm\'s tick, not by its drawing: a farm that is told draws it where the other has it, and leaves it there', () => {
+  const moved = porchStage(catClock('mat', 'nap')), shown = porchStage(catClock('mat', 'nap'));
+  moved.frame(1); shown.frame(1);
+  moved.frame(2, { x: 200, y: 68 }); moved.frame(2.05, { x: 200, y: 71 }); // a farmer comes out: the cat runs
+  for (let T = 2.1; T < 4; T += 0.05) moved.frame(T);
+  const got = plain(moved.th.share());
+  assert.notDeepEqual([got.cat.x, got.cat.y], [plain(shown.th.share()).cat.x, plain(shown.th.share()).cat.y], 'it has run off');
+  assert.equal(got.cat.run, true);
+  shown.th.adopt(got);
+  assert.deepEqual(plain(shown.th.share()).cat, got.cat);
+  assert.deepEqual(plain(shown.th.share()).porch, got.porch, 'and the front door stood open at the same moment');
+  shown.th.tick(0.05, () => null, false, true);
+  shown.th.tick(0.05, () => ({ walk: true, x: got.cat.x, y: got.cat.y, path: [] }), false, true);
+  assert.deepEqual(plain(shown.th.share()).cat, got.cat, 'told, it does not move it itself, whoever walks up to it');
+});
+
+test('one whose job must wait its turn stands in a line along the lane, by the scarecrows\' gate; one behind their row steps out between two of it', () => {
+  const { makeFarm, farmScene, toScene, layoutFor } = (() => { const window = { Agentville: { raw: () => {} } }; vm.runInNewContext(code, { window, console, Math, Date, JSON, Map, Set }); return { ...window.AgentvilleFarm, toScene: window.AgentvilleScene.toScene }; })();
+  const th = makeFarm();
+  const sc = th.fromScene(toScene(snapOf(Array.from({ length: 6 }, (_, i) => agent(`s${i}`, { state: 'stale' })), [])));
+  th.setScene(sc); th.relayout(layoutFor(sc.fields));
+  void farmScene;
+  const spots = [0, 1, 2, 3, 30].map(k => plain(th.waitSpot(k)));
+  assert.deepEqual(spots.slice(0, 4), [[310, 87], [297, 87], [284, 87], [271, 87]], 'thirteen pixels apart, on the lane, from the gate past the stall');
+  assert.ok(spots[4][0] >= 20, 'never off the farm');
+  assert.equal(th.route({ x: 348, y: 78 }, spots[0][0], spots[0][1]).length, 2, 'from the row: down to the lane and along it, no detour');
+  const s = th.slots(sc.farmers[5]);
+  assert.deepEqual([s.group, s.cap], ['storage', 4]);
+  assert.deepEqual([0, 1, 2, 3].map(k => plain(s.extra(k))), [[338, 71], [358, 71], [378, 71], [338, 71]], 'behind the row, between two of its scarecrows');
+  assert.deepEqual(plain(th.route({ x: 338, y: 71 }, 100, 180)).slice(0, 2), [[338, 87], [116, 87]], 'and out: straight down to the lane, then along it to the path it takes');
 });
