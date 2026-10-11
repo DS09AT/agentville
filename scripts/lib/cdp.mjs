@@ -35,9 +35,13 @@ export async function openChrome({ prepare = async () => {} } = {}) {
   const pending = new Map(), errors = [];
   const frames = new Map(); // sessionId → { targetId, url }: frames in a process of their own
   const contexts = new Map(); // frameId → its main world's context id, for frames in the page's process
+  // A call to a frame that is detached or navigating is never answered: it settles as an error after CALL_MS so a
+  // wait loop keeps checking its own deadline instead of hanging the whole run.
+  const CALL_MS = 15_000;
   const raw = (method, params = {}, sessionId) => new Promise(r => {
     const n = ++id;
-    pending.set(n, r);
+    const timer = setTimeout(() => { pending.delete(n); r({ error: { message: `${method}: no answer in ${CALL_MS} ms` } }); }, CALL_MS);
+    pending.set(n, m => { clearTimeout(timer); r(m); });
     ws.send(JSON.stringify({ id: n, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
   const send = (method, params = {}, sessionId = page) => raw(method, params, sessionId);
@@ -66,6 +70,7 @@ export async function openChrome({ prepare = async () => {} } = {}) {
   await adopt(page);
   async function evaluate(expression, sessionId, contextId) {
     const r = await raw('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, ...(contextId ? { contextId } : {}) }, sessionId);
+    if (r.error) throw new Error(r.error.message);
     if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? r.result.exceptionDetails.text);
     return r.result?.result?.value;
   }

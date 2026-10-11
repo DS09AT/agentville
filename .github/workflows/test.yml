@@ -13,19 +13,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Two jobs side by side: the run takes as long as the slower one (about 4 minutes), not the sum.
   test:
     runs-on: ubicloud-standard-2-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: Dependencies
         run: npm ci
       - name: Collector and dashboard
         run: npm test
+
+  ui:
+    runs-on: ubicloud-standard-2-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Dependencies
+        run: npm ci
       # Ubuntu 24.04 keeps unprivileged user namespaces from Chrome's sandbox unless this is switched off.
       - name: Let headless Chrome use its sandbox
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Dashboard in a browser
+        timeout-minutes: 12
         run: npm run test:ui
