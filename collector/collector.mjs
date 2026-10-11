@@ -9,6 +9,7 @@ import { SessionModel } from './transcript/session-model.mjs';
 import { Conversation } from './transcript/conversation.mjs';
 import { earlierHistory } from './transcript/backfill.mjs';
 import { readRegistry } from './sources/registry.mjs';
+import { accountEnv, createSessionAccounts, findAccounts, keyOfDir } from './sources/accounts.mjs';
 import { readAgentsCli } from './sources/agents-cli.mjs';
 import { CodexThread, listCodexThreads } from './sources/codex.mjs';
 import { childrenIndex, findCodexRoots, findPidByArg, isShellCommand, readPs, shellsOf, treeStats } from './sources/ps.mjs';
@@ -21,9 +22,10 @@ import { contentTypeOf, parseCsv, readXlsx, viewOf } from './sources/previews.mj
 import { repoFiles } from './derive/repo-files.mjs';
 import { checkFiles, checkFolders, pruneUploads, saveFiles, typedPart, withAttachments } from './sources/uploads.mjs';
 import { compactSummary, memoryFiles, scratchpadOf } from './sources/memory.mjs';
-import { EFFORTS, MODELS, MODE_FLAGS, SESSION_ID, claudeCommand, closeTerminalScript, forkCommand, listSessions, projectsOf, shellQuote, terminalScript } from './sources/sessions.mjs';
+import { EFFORTS, MODELS, MODE_FLAGS, SESSION_ID, accountPrefix, claudeCommand, closeTerminalScript, forkCommand, listSessions, projectsOf, shellQuote, terminalScript } from './sources/sessions.mjs';
 import { appendRewind, cutTranscript, pruneForks, restorePoint } from './sources/fork.mjs';
-import { createNotes } from './sources/notes.mjs';
+import { MAX_NOTE_CHARS, createNotes } from './sources/notes.mjs';
+import { createHeld } from './sources/held.mjs';
 import { NAME_RE, cleanName, createHelper } from './sources/helper.mjs';
 import { parseMcpList, parsePluginDetails, projectServersOf, readOwnSkills, readRules, removeRule } from './sources/claude-setup.mjs';
 import { applySince, buildAgent, countStates, sortAgents } from './derive/agent.mjs';
@@ -36,6 +38,7 @@ import { AlertEngine, notifyMac } from './alerts.mjs';
 import { createTrackerServer } from './server.mjs';
 import { makeWorlds, watchWorlds, worldsDirOf } from './worlds.mjs';
 import { renderTranscriptPage } from './transcript-page.mjs';
+import { checkCast, chooseSession, createLinesWatch, dueLines, factsOf, lineWorld, namesOf, parseLines } from './sources/lines.mjs';
 
 const DOC_FILE = /\.(md|markdown|mdx)$/i;
 
@@ -108,7 +111,7 @@ async function quickLookPicture(real) {
   }
 }
 
-export async function startCollector({ root, claudeDir = join(homedir(), '.claude'), claudeBin = 'claude', home = homedir(), codexDir = join(home, '.codex'), scratchBase = `/private/tmp/claude-${process.getuid?.() ?? 0}`, port: portOverride, deliveryTimeoutMs = 5000, helperTimeoutMs = 30_000, notify = notifyMac, launch = args => run('osascript', args, { timeoutMs: 15_000 }), sessionProcs = systemProcs, endWaitMs = 8000, readProcs = readPs, deployStatusOf = deployStatus, pullRequestsOf = pullRequests, githubSlugOf = githubSlug, ticketMs = 600_000, quickLook = quickLookPicture, folderRoots = [home, '/Volumes'], chooseFolder = chooseFolderMac, stopWaitMs = 3000, revealFile = real => run('open', ['-R', real], { timeoutMs: 10_000 }), openFolder = dir => run('open', ['-a', 'Finder', dir], { timeoutMs: 10_000 }), log = makeLogger(join(root, 'logs')) }) {
+export async function startCollector({ root, claudeDir = join(homedir(), '.claude'), claudeBin = 'claude', home = homedir(), codexDir = join(home, '.codex'), signedInMs = 60_000, heldGoneMs = 120_000, scratchBase = `/private/tmp/claude-${process.getuid?.() ?? 0}`, port: portOverride, deliveryTimeoutMs = 5000, helperTimeoutMs = 30_000, linesGapMs = 300_000, linesIdleMs = 1_800_000, castKeepMs = 600_000, notify = notifyMac, launch = args => run('osascript', args, { timeoutMs: 15_000 }), sessionProcs = systemProcs, endWaitMs = 8000, readProcs = readPs, deployStatusOf = deployStatus, pullRequestsOf = pullRequests, githubSlugOf = githubSlug, ticketMs = 600_000, quickLook = quickLookPicture, folderRoots = [home, '/Volumes'], chooseFolder = chooseFolderMac, stopWaitMs = 3000, revealFile = real => run('open', ['-R', real], { timeoutMs: 10_000 }), openFolder = dir => run('open', ['-a', 'Finder', dir], { timeoutMs: 10_000 }), log = makeLogger(join(root, 'logs')) }) {
   // readProcs, deployStatusOf, pullRequestsOf and githubSlugOf read the machine and GitHub; a test or the demo video passes stand-ins.
   const stateDir = join(root, 'state');
   const pendingDir = join(stateDir, 'pending');
@@ -118,11 +121,27 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   const uploadsDir = join(stateDir, 'uploads');
   const forksDir = join(stateDir, 'forks'); // transcripts cut at a message, for a fork to start from
   const notes = createNotes(join(stateDir, 'notes')); // your notes on each session, for later (or never)
+  // What you sent a session while it worked, waiting for its turn to end (remove, edit or send each early).
+  const held = createHeld(join(stateDir, 'held'));
+  const releases = new Map(); // sessionId → { at, inflight }: its last release
+  const heldFailed = new Map(); // sessionId → { at, error }: its last release wasn't taken
+  const heldGoneSince = new Map(); // sessionId → since when it has been off the dashboard with messages waiting
   const helper = createHelper(stateDir); // the helper (Haiku through a session's mod): its setting, today's count, each session's name outcome
+  // Your Claude accounts (config folders): read again each minute, and when config.json changes.
+  const sessionAccounts = createSessionAccounts(join(stateDir, 'session-accounts.json')); // which account each session last ran on
+  let accounts = [], accountsAt = 0;
+  const signedIn = new Map(), signedAt = new Map(); // account key → true or false once `claude auth status` has said, and when it was asked
   const helperDir = join(stateDir, 'helper'), helperRepliesDir = join(stateDir, 'helper-replies');
   const helperPending = new Map(); // sessionId → { id, file, at, auto }: a name asked for, not yet answered
   const nameOffers = new Map(); // sessionId → { name, at, auto }
   const nameErrors = new Map(); // sessionId → { error, at }
+  // Animal lines (✨ Helper): the animals worlds on screen have (kind → { name, seenAt }, as pages report them),
+  // what is news, the one batch asked for, the latest batch, why none can be asked, who ran one last.
+  const casts = new Map();
+  let castWorld = null; // the world the last cast came from, if one the mod has words for (lineWorld): { key, seenAt }
+  const linesWatch = createLinesWatch();
+  let linesPending = null, linesAskedAt = null, chatter = null, linesBlocked = null;
+  const linesUsed = new Map();
   // Model and effort switches and side questions go to a session's mod as files; it writes back what came of them.
   const commandsDir = join(stateDir, 'commands'), resultsDir = join(stateDir, 'command-results');
   const asksDir = join(stateDir, 'btw'), asideAnswersDir = join(stateDir, 'asides');
@@ -148,6 +167,45 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     cfg = mergeConfig({});
     markFail('config', err);
   }
+  function refreshAccounts(now) {
+    if (accounts.length && now - accountsAt < 60_000) return;
+    accountsAt = now;
+    try {
+      accounts = findAccounts({ claudeDir, names: cfg.accounts, home, log });
+      markOk('accounts');
+    } catch (err) {
+      markFail('accounts', err);
+      if (!accounts.length) accounts = [{ key: 'main', name: 'main', dir: claudeDir, first: true, email: null, org: null, projectsReal: null }];
+    }
+  }
+  refreshAccounts(Date.now());
+  const many = () => accounts.length > 1;
+  const accountByKey = key => accounts.find(a => a.key === key) ?? null;
+  const accountByDir = dir => accounts.find(a => a.dir === dir) ?? null;
+  /** The account to put before `claude` in a command: null with one account (commands as they always were). */
+  const launchAccount = account => (many() ? account : null);
+  const envFor = account => accountEnv(account, many());
+  /** The projects folders to read, each real folder once (accounts sharing one): [{ path, real, keys }]. */
+  function projectsFolders() {
+    const out = [];
+    for (const a of accounts) {
+      const path = join(a.dir, 'projects'), real = a.projectsReal ?? path;
+      const known = out.find(p => p.real === real);
+      if (known) known.keys.push(a.key); else out.push({ path, real, keys: [a.key] });
+    }
+    return out;
+  }
+  /** The accounts that can resume a transcript: those whose projects folder holds it. */
+  function canRunOnPath(path) {
+    const folder = dirname(dirname(path));
+    let real = folder;
+    try { real = realpathSync(folder); } catch { /* compared as it is */ }
+    return projectsFolders().find(p => p.real === real || p.path === folder)?.keys ?? [];
+  }
+  /** The account a session is on: where a registry lists it, else where it last ran, else the first. */
+  const accountOfSessionIn = (agents, id) => accountByKey(agents.find(a => a.id === id)?.account) ?? accountByDir(sessionAccounts.get(id)) ?? accounts[0];
+  const accountOfSession = id => accountOfSessionIn(snapshot?.agents ?? [], id);
+
   const token = loadToken(join(stateDir, 'token'));
   const tail = new TailReader();
   const beds = createBeds({ file: join(stateDir, 'beds.json'), log });
@@ -175,16 +233,17 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   // A session resumed from another folder leaves a frozen copy of its transcript in the old
   // project; the live one is the most recently written.
   function findTranscript(sessionId) {
-    const projects = join(claudeDir, 'projects');
-    let dirs;
-    try { dirs = readdirSync(projects); } catch { return null; }
     let best = null;
-    for (const d of dirs) {
-      const p = join(projects, d, `${sessionId}.jsonl`);
-      try {
-        const mtime = statSync(p).mtimeMs;
-        if (!best || mtime > best.mtime) best = { path: p, mtime };
-      } catch { /* not in this project */ }
+    for (const { path: projects } of projectsFolders()) {
+      let dirs;
+      try { dirs = readdirSync(projects); } catch { continue; }
+      for (const d of dirs) {
+        const p = join(projects, d, `${sessionId}.jsonl`);
+        try {
+          const mtime = statSync(p).mtimeMs;
+          if (!best || mtime > best.mtime) best = { path: p, mtime };
+        } catch { /* not in this project */ }
+      }
     }
     return best?.path ?? null;
   }
@@ -260,12 +319,12 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   function computeBases() {
     const bases = new Map();
     for (const r of registry) {
-      bases.set(r.sessionId, { id: r.sessionId, kind: r.kind === 'background' ? 'background' : 'interactive', name: r.name, cwd: r.cwd, pid: r.pid, registry: r });
+      bases.set(r.sessionId, { id: r.sessionId, kind: r.kind === 'background' ? 'background' : 'interactive', name: r.name, cwd: r.cwd, pid: r.pid, registry: r, account: r.account });
     }
     for (const c of cliAgents) {
       const known = bases.get(c.sessionId);
       if (known) { known.cliId = c.id; continue; }
-      bases.set(c.sessionId, { id: c.sessionId, kind: c.kind, name: c.name, cwd: c.cwd, pid: c.pid ?? findPidByArg(procs, c.sessionId), cliId: c.id });
+      bases.set(c.sessionId, { id: c.sessionId, kind: c.kind, name: c.name, cwd: c.cwd, pid: c.pid ?? findPidByArg(procs, c.sessionId), cliId: c.id, account: c.account });
     }
     return bases;
   }
@@ -351,7 +410,19 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   async function tick(isFull) {
     const now = Date.now();
     if (isFull) {
-      try { registry = readRegistry(join(claudeDir, 'sessions')); markOk('registry'); } catch (err) { markFail('registry', err); }
+      refreshAccounts(now);
+      try {
+        const seen = new Set(), all = [];
+        for (const a of accounts) {
+          for (const r of readRegistry(join(a.dir, 'sessions'))) {
+            if (seen.has(r.sessionId)) { log(`registry: ${r.sessionId} is listed by two accounts; kept on the first`); continue; }
+            seen.add(r.sessionId);
+            all.push({ ...r, account: a.key });
+          }
+        }
+        registry = all;
+        markOk('registry');
+      } catch (err) { markFail('registry', err); }
       try { procs = await readProcs(); markOk('ps'); } catch (err) { markFail('ps', err); }
     }
     const bases = computeBases();
@@ -388,18 +459,31 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
         shells: base.pid && base.kind !== 'codex' ? shellsOf(procs, base.pid, now, idx) : undefined,
         notes: base.kind === 'codex' ? undefined : notes.summary(base.id),
       });
+      if (base.kind !== 'codex') { // an account that has just left the list leaves its sessions to the first
+        const acc = accountByKey(base.account);
+        agent.account = acc?.key ?? accounts[0].key;
+        if (acc && many()) sessionAccounts.see(base.id, acc.dir, now); // remembered only with two or more accounts
+      }
       agents.push(applySince(agent, prevAgents.get(agent.id), now));
       if (rec) { // deploys it ran itself (a script over ssh, rsync…), its subagents' too
         const known = [...repoInfo.keys(), ...Object.keys(cfg.deployRepos)];
         for (const m of [rec.model, ...(rec.childModels?.values() ?? [])]) noteDirectDeploys(directDeploys, { calls: m.calls, by: agent.name, lookup: p => resolver.lookup(p), known, folder: agent.cwd });
       }
     }
+    sessionAccounts.save();
     const liveIds = new Set(agents.map(a => a.id));
     for (const id of [...cpuHist.keys()]) if (!liveIds.has(id)) cpuHist.delete(id);
 
     queueResolve(agents);
     const collisions = findCollisions(agents, now, cfg.collisionWindowMin * 60_000);
     try { helperTick(agents, now); markOk('helper'); } catch (err) { markFail('helper', err); } // the helper never stops the dashboard
+    try { heldTick(agents, now); markOk('held'); } catch (err) { markFail('held', err); } // nor do held messages
+    // Each account's plan, from its own sessions' readings; the old `plan` is the first account's.
+    const readings = planReadings(beacons, agents, id => accountOfSessionIn(agents, id).key);
+    const accountsView = accounts.map(a => {
+      const mine = agents.filter(x => x.account === a.key);
+      return { key: a.key, name: a.name, email: a.email, org: a.org, signedIn: signedIn.get(a.key) ?? null, plan: planUsage(readings.filter(r => r.account === a.key), now), open: mine.length, costUsd: Math.round(mine.reduce((t, x) => t + (x.usage?.costUsd ?? 0), 0) * 100) / 100 };
+    });
     snapshot = {
       generatedAt: now,
       settings: { modToasts: cfg.modToasts, permissionDashboardSec: cfg.permissionDashboardSec, memoryAlertGb: cfg.memoryAlertGb, cpuAlertPct: cfg.cpuAlertPct },
@@ -409,12 +493,16 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       counts: countStates(agents, collisions),
       agents: sortAgents(agents),
       repos: reposFor(agents, { deployRepos: cfg.deployRepos, repoInfo, deploys, directs: directDeploys, prs, lookup: p => resolver.lookup(p), home }),
-      plan: planUsage(planReadings(beacons, agents), now),
+      accounts: accountsView,
+      plan: accountsView[0]?.plan ?? null,
       codexPlan: codexPlan(now),
       helper: helper.view(),
       collisions,
     };
     beds.place(snapshot, now); // each repo's field has its bed: the same in every browser
+    try { linesTick(snapshot, now); } catch (err) { markFail('helper', err); } // lines never stop the dashboard
+    snapshot.chatter = chatter;
+    if (linesBlocked) snapshot.helper = { ...snapshot.helper, linesBlocked };
     prevAgents = new Map(agents.map(a => [a.id, a]));
     alerts.process(snapshot, now, cpuHist);
     writeState(snapshot);
@@ -430,7 +518,38 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   };
 
   async function pollAgents() {
-    try { cliAgents = await readAgentsCli(claudeBin); markOk('agents'); } catch (err) { markFail('agents', err); }
+    const all = [];
+    let failed = null;
+    for (const a of accounts) {
+      try { all.push(...(await readAgentsCli(claudeBin, run, envFor(a))).map(c => ({ ...c, account: a.key }))); } catch (err) {
+        failed = err;
+        all.push(...cliAgents.filter(c => c.account === a.key)); // kept as last listed until it answers again
+      }
+    }
+    cliAgents = all;
+    if (failed) markFail('agents', failed); else markOk('agents');
+  }
+
+  /**
+   * Whether each account is signed in (`claude auth status`), with two or more accounts: one signed in
+   * is asked again every 5 minutes, any other every `signedInMs`, so a /login shows soon. Kept as it
+   * was when it can't say.
+   */
+  let signing = false;
+  async function pollSignedIn() {
+    if (!many() || signing) return;
+    signing = true;
+    try {
+      for (const a of accounts) {
+        const now = Date.now();
+        if (signedIn.get(a.key) === true && now - (signedAt.get(a.key) ?? 0) < 300_000) continue;
+        signedAt.set(a.key, now);
+        const r = await run(claudeBin, ['auth', 'status'], { env: envFor(a), timeoutMs: 10_000 });
+        try { const st = JSON.parse(r.stdout); if (typeof st.loggedIn === 'boolean') signedIn.set(a.key, st.loggedIn); } catch { /* kept as it was */ }
+      }
+    } finally {
+      signing = false;
+    }
   }
 
   async function pollGit() {
@@ -471,6 +590,7 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     for (const t of timers.splice(0)) clearInterval(t);
     timers.push(setInterval(() => schedule(true), cfg.pollMs));
     timers.push(setInterval(() => void pollAgents(), cfg.agentsCliPollMs));
+    timers.push(setInterval(() => void pollSignedIn(), signedInMs));
     timers.push(setInterval(() => void pollGit(), cfg.gitPollMs));
     timers.push(setInterval(() => void pollDeploys(), cfg.deployPollMs));
     timers.push(setInterval(() => void pollPullRequests(), cfg.prPollMs));
@@ -478,6 +598,7 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   }
 
   function reloadConfig() {
+    accountsAt = 0; // its names may have changed
     try {
       cfg = loadConfig(configPath);
       alerts.setConfig(cfg);
@@ -799,8 +920,16 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   async function pastSessions({ all = false } = {}) {
     const live = new Set(snapshot?.agents.map(a => a.id) ?? []);
     const noted = notes.counts(); // sessions with notes you haven't used yet: a 📝 on their row
-    const sessions = listSessions({ claudeDir, cache: sessionCache, maxAgeDays: all ? Infinity : 30 }).map(s => ({ ...s, live: live.has(s.id), ...(noted.has(s.id) ? { notes: noted.get(s.id) } : {}) }));
-    return { terminal: cfg.terminal === 'iTerm' ? 'iTerm' : 'Terminal', projects: projectsOf(sessions).filter(p => isDir(p.cwd)), sessions };
+    const folders = projectsFolders();
+    const sessions = listSessions({ claudeDir, projectsDirs: folders.map(p => p.path), cache: sessionCache, maxAgeDays: all ? Infinity : 30 }).map(({ projectsDir, ...s }) => {
+      // the account it is on: running, where it last ran (that folder may be no account now), else the
+      // first account whose history holds it
+      const liveOn = snapshot?.agents.find(a => a.id === s.id)?.account, dir = sessionAccounts.get(s.id), canRunOn = folders.find(p => p.path === projectsDir)?.keys ?? [];
+      const known = liveOn ? accountByKey(liveOn) : dir ? accountByDir(dir) : accounts.find(a => canRunOn.includes(a.key)) ?? accounts[0];
+      return { ...s, live: live.has(s.id), account: known?.key ?? null, ...(dir && !known ? { accountGone: keyOfDir(dir, claudeDir) } : {}), canRunOn, ...(noted.has(s.id) ? { notes: noted.get(s.id) } : {}) };
+    });
+    const projects = projectsOf(sessions).filter(p => isDir(p.cwd)).map(p => ({ ...p, account: sessions.find(s => s.cwd === p.cwd)?.account ?? accounts[0].key })); // its newest session's
+    return { terminal: cfg.terminal === 'iTerm' ? 'iTerm' : 'Terminal', projects, sessions };
   }
   // ---- The ⚙ Claude Code dialog: plugins (with what each costs in context), MCP servers, permission rules ----
   const homeDir = () => (isDir(home) ? home : undefined); // where the claude CLI runs from, when that folder exists
@@ -887,6 +1016,18 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   }
   const validMode = mode => mode === undefined || Object.hasOwn(MODE_FLAGS, mode);
   const validStart = b => (b?.model === undefined || MODELS.includes(b.model)) && (b?.effort === undefined || EFFORTS.includes(b.effort));
+  /** The account a request names, or `fallback`: { account } or { error }. */
+  function accountFor(body, fallback) {
+    if (body?.account === undefined) return { account: fallback ?? accounts[0] };
+    const a = typeof body.account === 'string' ? accountByKey(body.account) : null;
+    return a ? { account: a } : { error: `No account "${String(body.account).slice(0, 40)}".` };
+  }
+  /** Why a session can't run on `target`: the folders to link are the other account's, to the first account's (as the README says). */
+  const notShared = (target, keys) => {
+    const other = target.first ? accountByKey(keys.find(k => k !== accounts[0].key)) ?? target : target;
+    return `Its history isn't shared with ${target.name}: to move conversations between accounts, link ${other.name}'s projects and file-history folders to ${accounts[0].name}'s (see Several Claude accounts in the README).`;
+  };
+  const remember = (id, account) => { if (!many()) return; sessionAccounts.see(id, account.dir, Date.now()); sessionAccounts.save(); };
   const ASIDE_WAIT_MS = 3 * 60_000;
   /** A session's side questions, newest first: answered ones, and the ones still being answered (given up on after 3 minutes). */
   function asidesOf(id, answered, now) {
@@ -903,6 +1044,78 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     return { command: r.command, args: r.args, ok: r.ok === true, text: typeof r.text === 'string' ? r.text.slice(0, 300) : '', at: r.at };
   }
 
+  /**
+   * Whether the prompt the session's last release handed over has landed in its transcript (or a turn
+   * ended since). Claude Code writes its queue lines first: those don't count, or the next message
+   * could go into a session that is busy with this one.
+   */
+  const landedSince = (id, at) => { const m = sessions.get(id)?.model; return (m?.lastPromptAt ?? 0) > at || (m?.lastTurnEndAt ?? 0) > at; };
+  /** A release being handed over, or handed over and not landed yet (2 minutes at most): new messages wait behind it. */
+  const awaitingRelease = (id, now) => { const last = releases.get(id); return Boolean(last) && (last.inflight || (!landedSince(id, last.at) && now - last.at < 120_000)); };
+  /** Sends held messages as one message (their texts in order, a blank line between, every attachment), as a message is sent. A file that can't be written is a failure like any other. */
+  async function deliverHeld(sessionId, items) {
+    const text = items.map(i => i.text).filter(Boolean).join('\n\n');
+    const file = writeMessageFile(messagesDir, sessionId, withAttachments(text, items.flatMap(i => i.files ?? []), items.flatMap(i => i.folders ?? [])));
+    return confirmDelivery(file, { timeoutMs: deliveryTimeoutMs, failure: "The session didn't take it: it is still waiting here." });
+  }
+  /**
+   * A session gone a while: what it had waiting becomes notes on it (attachments named). Each one
+   * leaves the list only once its note is saved; one that can't be saved stays held, tried again
+   * after another heldGoneMs.
+   */
+  function heldToNotes(id, now) {
+    for (const i of held.list(id).items) {
+      const attached = [...(i.files ?? []), ...(i.folders ?? [])];
+      let text = [i.text, attached.length ? `(attached: ${attached.join(', ')})` : ''].filter(Boolean).join('\n');
+      if (text.length > MAX_NOTE_CHARS) text = `${text.slice(0, MAX_NOTE_CHARS - 50)}… (cut: longer than a note can be)`;
+      let saved = null;
+      try { saved = notes.add(id, text); } catch (err) { saved = { ok: false, error: err?.message ?? String(err) }; }
+      if (!saved?.ok) { log(`held: ${id}'s waiting messages could not become notes (${saved?.error}); kept`); heldGoneSince.set(id, now); return; }
+      held.remove(id, i.id);
+    }
+    held.drop(id);
+    for (const m of [heldGoneSince, releases, heldFailed]) m.delete(id);
+  }
+  /**
+   * Each update: the next held message (or all of them, together) to each session whose turn is over,
+   * once the turn the last one started has ended (its transcript moved since, or 2 minutes passed);
+   * the messages of a session gone for heldGoneMs turned into notes; and each agent's count for the page.
+   */
+  function heldTick(agents, now) {
+    const byId = new Map(agents.map(a => [a.id, a]));
+    for (const id of held.sessions()) {
+      const a = byId.get(id);
+      if (!a) { // off the dashboard: a restart or a move brings it back soon
+        if (!heldGoneSince.has(id)) heldGoneSince.set(id, now);
+        else if (now - heldGoneSince.get(id) >= heldGoneMs) heldToNotes(id, now);
+        continue;
+      }
+      heldGoneSince.delete(id);
+      const last = releases.get(id);
+      if (a.kind === 'codex' || !a.mod?.live || !['yourTurn', 'idle'].includes(a.state) || last?.inflight) continue;
+      if (last && !(landedSince(id, last.at) || now - last.at >= 120_000)) continue; // the turn the last one started has ended
+      const items = held.list(id).together ? held.takeAll(id) : [held.take(id)];
+      releases.set(id, { at: now, inflight: true });
+      deliverHeld(id, items).catch(err => ({ ok: false, error: `The message could not be written (${err?.code ?? err?.message ?? err}): it is still waiting here.` })).then(sent => {
+        releases.set(id, { at: now, inflight: false });
+        if (sent.ok) heldFailed.delete(id);
+        else { held.putBack(id, items); heldFailed.set(id, { at: Date.now(), error: sent.error }); }
+        scheduleLight();
+      });
+    }
+    for (const a of agents) {
+      const s = a.kind === 'codex' ? null : held.summary(a.id);
+      if (s) a.held = { ...s, ...(heldFailed.has(a.id) ? { failed: heldFailed.get(a.id) } : {}) };
+      else heldFailed.delete(a.id);
+    }
+  }
+  /** A session's held messages for its list on the page (files by name), or null for one neither on the dashboard nor holding any. */
+  function getHeld(id) {
+    if (!(snapshot?.agents.some(a => a.id === id && a.kind !== 'codex') || held.summary(id))) return null;
+    const l = held.list(id);
+    return { items: l.items.map(i => ({ id: i.id, text: i.text, files: (i.files ?? []).map(p => basename(p).replace(/^\d+-[a-z0-9]+-\d+-/, '')), folders: i.folders ?? [], at: i.at, ...(i.editedAt ? { editedAt: i.editedAt } : {}) })), together: l.together, rev: l.rev };
+  }
+
   /** Asks a session's mod for a name: the request carries only its kind (the mod's prompt is fixed). */
   function askName(agent, auto) {
     const can = helper.canCall('names');
@@ -913,6 +1126,44 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     helperPending.set(agent.id, { id, file, at: Date.now(), auto });
     nameErrors.delete(agent.id);
     return { ok: true };
+  }
+  /** Animal lines, each tick: news noted, stale casts forgotten, a request that waited too long withdrawn, a batch asked for when due. */
+  function linesTick(snap, now) {
+    linesWatch.observe(snap);
+    for (const [kind, c] of casts) if (now - c.seenAt > castKeepMs) casts.delete(kind);
+    const s = helper.settings();
+    linesBlocked = null;
+    if (!s.on || !s.uses.lines) { withdrawLines(); chatter = null; return; }
+    if (linesPending && now - linesPending.at > helperTimeoutMs) { withdrawLines(); helper.fail('The session gave no animal lines in 30 seconds.'); }
+    if (linesPending || !casts.size) return;
+    if (!dueLines({ now, lastAskedAt: linesAskedAt, eventSince: linesWatch.since(linesAskedAt ?? 0), gapMs: linesGapMs, idleMs: linesIdleMs })) return;
+    if (!helper.canCall('lines').ok) { linesBlocked = 'limit'; return; }
+    const cast = [...casts].map(([kind, c]) => ({ kind, name: c.name }));
+    const a = chooseSession(snap.agents, linesUsed, cast); // a mod that knows every kind on screen
+    if (!a) { linesBlocked = 'no-session'; return; }
+    const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
+    const facts = factsOf(snap, cast, linesWatch.recent(), now, castWorld && now - castWorld.seenAt <= castKeepMs ? castWorld.key : null);
+    const file = writeRequestFile(helperDir, a.id, { id, kind: 'lines', at: now, ...facts }, id);
+    helper.count();
+    linesPending = { sid: a.id, id, file, at: now, names: namesOf(snap, facts) }; // every name it could put in a line, for the private filter
+    linesAskedAt = now;
+    linesUsed.set(a.id, now);
+  }
+  function withdrawLines() {
+    if (!linesPending) return;
+    try { unlinkSync(linesPending.file); } catch { /* taken already: its answer is dropped */ }
+    linesPending = null;
+  }
+  /** A mod's lines: kept if they answer the batch asked for; the good rows become the chatter, none counts as a failure. */
+  function linesReply(sid, r, now) {
+    const p = linesPending;
+    if (!p || p.sid !== sid || p.id !== r.id) return; // late, or withdrawn: dropped
+    linesPending = null;
+    if (!r.ok) { helper.fail(String(r.error ?? 'no answer')); return; }
+    const lines = parseLines(r.text, [...casts.keys()], p.names);
+    if (!lines.length) { helper.fail('Haiku gave no usable lines.'); return; }
+    helper.ok();
+    chatter = { at: now, lines };
   }
   function withdrawName(sessionId) {
     const p = helperPending.get(sessionId);
@@ -929,6 +1180,7 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     for (const [sid, list] of readReplies(helperRepliesDir, now, { perSession: 5 })) {
       for (const r of list) {
         try { unlinkSync(join(helperRepliesDir, `${sid}.${r.id}.json`)); } catch { /* gone */ }
+        if (r.kind === 'lines') { linesReply(sid, r, now); continue; }
         const p = helperPending.get(sid);
         if (!p || p.id !== r.id) continue; // late, or the helper was switched off: dropped
         helperPending.delete(sid);
@@ -980,9 +1232,15 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       const agent = snapshot?.agents.find(a => a.id === body?.agentId);
       if (!validMode(body?.mode)) return { ok: false, error: 'That is not a permission mode.' };
       if (!agent || !SESSION_ID.test(agent.id) || !agent.cwd || !isDir(agent.cwd)) return { ok: false, error: 'That session cannot be resumed from here.' };
+      const chosen = accountFor(body, accountOfSession(agent.id)); // another account than its own moves it there
+      if (chosen.error) return { ok: false, error: chosen.error };
+      const runsOn = canRunOnPath(sessions.get(agent.id)?.path ?? '');
+      if (chosen.account.key !== agent.account && !runsOn.includes(chosen.account.key)) return { ok: false, error: notShared(chosen.account, runsOn) };
       const ended = await endSession(agent);
       if (!ended.ok) return ended;
-      return openTerminal(claudeCommand(agent.cwd, agent.id, body.mode ?? 'default'));
+      const opened = await openTerminal(claudeCommand(agent.cwd, agent.id, body.mode ?? 'default', { account: launchAccount(chosen.account) }));
+      if (opened.ok) remember(agent.id, chosen.account);
+      return opened;
     },
     /**
      * Switches a running session's model or effort, or compacts it: its mod runs /model, /effort or
@@ -1019,10 +1277,23 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     },
     /** The ✨ Helper dialog: on or off, its uses, the daily limit. Switching off withdraws what is out. */
     async helper(body) {
+      const was = helper.settings(), linesWere = was.on && was.uses.lines;
       const r = helper.update(body ?? {});
+      if (r.ok && r.helper.on && r.helper.uses.lines && !linesWere) linesAskedAt = null; // ticked (again): the first batch goes out at once
       if (r.ok && !r.helper.on) for (const id of [...helperPending.keys()]) withdrawName(id);
+      if (r.ok && (!r.helper.on || !r.helper.uses.lines)) { withdrawLines(); chatter = null; }
       if (r.ok) await schedule(false);
       return r;
+    },
+    /** A page's world reports its animals (kinds and names only), and its key if it is a built-in world the mod has words for: kept 10 minutes, for Animal lines to write for. */
+    async animals(body) {
+      const cast = checkCast(body?.cast);
+      if (!cast) return { ok: false, error: 'That is not a cast of animals.' };
+      const at = Date.now(), first = casts.size === 0;
+      for (const c of cast) casts.set(c.kind, { name: c.name, seenAt: at });
+      castWorld = { key: lineWorld(body?.world), seenAt: at }; // the newest page's world; any other key, none
+      if (first && cast.length) await schedule(false); // the first batch goes out as soon as a cast is live
+      return { ok: true };
     },
     /** A session's name: ✨ suggest (Haiku, through its own mod), rename (/rename, as /compact runs), or dismiss the offer. */
     async name(body) {
@@ -1101,9 +1372,9 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       if (!validMode(body?.mode)) return { ok: false, error: 'That is not a permission mode.' };
       if (!validStart(body)) return { ok: false, error: 'That is not a model or an effort level to start with.' };
       const known = await pastSessions();
-      let cwd, resume;
+      let cwd, resume, s;
       if (body?.resume !== undefined) {
-        const s = typeof body.resume === 'string' && SESSION_ID.test(body.resume) ? known.sessions.find(x => x.id === body.resume) : undefined;
+        s = typeof body.resume === 'string' && SESSION_ID.test(body.resume) ? known.sessions.find(x => x.id === body.resume) : undefined;
         if (!s) return { ok: false, error: 'That session was not found.' };
         if (s.live) return { ok: false, error: 'That session is already running.' };
         if (!s.cwd || !isDir(s.cwd)) return { ok: false, error: 'The folder that session ran in no longer exists.' };
@@ -1117,7 +1388,13 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
           cwd = at.path;
         }
       }
-      return openTerminal(claudeCommand(cwd, resume, body?.mode ?? 'default', { model: body?.model ?? 'default', effort: body?.effort }));
+      // the account: the one asked for, else the session's own, or the account the folder's last session ran on
+      const chosen = accountFor(body, resume ? accountByKey(s.account) ?? accountOfSession(resume) : accountByKey(known.projects.find(p => p.cwd === cwd)?.account) ?? accounts[0]);
+      if (chosen.error) return { ok: false, error: chosen.error };
+      if (resume && !s.canRunOn.includes(chosen.account.key)) return { ok: false, error: notShared(chosen.account, s.canRunOn) };
+      const opened = await openTerminal(claudeCommand(cwd, resume, body?.mode ?? 'default', { model: body?.model ?? 'default', effort: body?.effort, account: launchAccount(chosen.account) }));
+      if (opened.ok && resume) remember(resume, chosen.account);
+      return opened;
     },
     /**
      * Forks a session's conversation at one of its messages (`at`, its transcript row) into a new
@@ -1132,12 +1409,14 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       if (!path) return { ok: false, error: 'That session has no conversation to fork.' };
       if (!agent.cwd || !isDir(agent.cwd)) return { ok: false, error: 'The folder that session ran in no longer exists.' };
       if (typeof body.at !== 'string' || !/^[\w-]{1,64}$/.test(body.at)) return { ok: false, error: 'Pick a message to fork from.' };
+      const chosen = accountFor(body, accountOfSession(agent.id)); // any account: the fork starts from a copy, by its path
+      if (chosen.error) return { ok: false, error: chosen.error };
       pruneForks(forksDir, Date.now());
       const cut = await cutTranscript(path, body.at, forksDir, basename(path, '.jsonl')); // the copy is named as the transcript
       if (cut.error) return { ok: false, error: cut.error };
       const forkId = randomUUID(); // chosen here, so the fork's notes can be ready for it
-      const opened = await openTerminal(forkCommand(agent.cwd, cut.file, body.mode ?? 'default', { model: body.model ?? 'default', effort: body.effort, name: `${agent.name} (fork)`.slice(0, 80), prefillFile: cut.prefillFile, sessionId: forkId }));
-      if (opened.ok) notes.copy(agent.id, forkId);
+      const opened = await openTerminal(forkCommand(agent.cwd, cut.file, body.mode ?? 'default', { model: body.model ?? 'default', effort: body.effort, name: `${agent.name} (fork)`.slice(0, 80), prefillFile: cut.prefillFile, sessionId: forkId, account: launchAccount(chosen.account) }));
+      if (opened.ok) { notes.copy(agent.id, forkId); remember(forkId, chosen.account); }
       return opened;
     },
     /**
@@ -1163,10 +1442,11 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
         const ended = await endSession(agent);
         if (!ended.ok) return ended;
       }
-      const resume = prefillFile => openTerminal(claudeCommand(agent.cwd, agent.id, body.mode ?? 'default', { prefillFile }));
+      const account = accountOfSession(agent.id); // it is restored and resumed on its own account
+      const resume = prefillFile => openTerminal(claudeCommand(agent.cwd, agent.id, body.mode ?? 'default', { prefillFile, account: launchAccount(account) }));
       let files = null; // put back, none to put back, or not asked
       if (what !== 'conversation') {
-        const r = await run(claudeBin, ['--resume', agent.id, '--rewind-files', body.at], { cwd: agent.cwd, timeoutMs: 60_000, env: { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: '1' } });
+        const r = await run(claudeBin, ['--resume', agent.id, '--rewind-files', body.at], { cwd: agent.cwd, timeoutMs: 60_000, env: { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: '1', ...envFor(account) } });
         const said = (r.stdout || r.stderr).trim().split('\n').filter(Boolean).at(-1) ?? `exit ${r.code}`;
         files = r.code === 0;
         if (!files && !(what === 'both' && /No file checkpoint/i.test(said))) { // nothing changed: it goes on as it was
@@ -1186,6 +1466,31 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       const opened = await resume(prefillFile);
       return opened.ok ? { ...opened, files } : opened;
     },
+    /**
+     * What you sent a working session, waiting for its turn to end: remove one, edit one, send one now
+     * (as a message is sent, read at the session's next step), or send them all together at the turn's end.
+     */
+    async held(body) {
+      const agent = snapshot?.agents.find(a => a.id === body?.agentId);
+      if (!agent || agent.kind === 'codex') return { ok: false, error: 'That session was not found.' };
+      const id = agent.id;
+      let r;
+      if (body.op === 'remove') r = held.remove(id, body.id);
+      else if (body.op === 'edit') r = held.edit(id, body.id, body.text);
+      else if (body.op === 'together') { held.setTogether(id, body.on === true); r = { ok: true }; }
+      else if (body.op === 'send-now') {
+        const at = held.list(id).items.findIndex(i => i.id === body.id);
+        if (at < 0) return { ok: false, error: 'That message is no longer waiting.' };
+        if (!agent.mod?.live) return { ok: false, error: "That session isn't listening for dashboard messages yet." };
+        const item = held.take(id, body.id);
+        let sent;
+        try { sent = await deliverHeld(id, [item]); } catch (err) { sent = { ok: false, error: `The message could not be written (${err?.code ?? err?.message ?? err}): it is still waiting here.` }; }
+        if (!sent.ok) held.putBack(id, [item], at); // back where it was
+        r = sent.ok ? { ok: true } : sent;
+      } else return { ok: false, error: 'That is not something to do with a waiting message.' };
+      if (r.ok) await schedule(false);
+      return r;
+    },
     async message(body) {
       const agent = snapshot?.agents.find(a => a.id === body?.agentId);
       if (!agent || agent.kind === 'codex') return { ok: false, error: 'That session was not found.' };
@@ -1198,6 +1503,13 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       if (text.length > 20_000) return { ok: false, error: 'That message is too long (20,000 characters at most).' };
       if (!agent.mod?.live) return { ok: false, error: "That session isn't listening for dashboard messages yet. Send it anything in its terminal once, or start a new session." };
       const saved = saveFiles(uploadsDir, agent.id, checked.files);
+      // mid-turn, or behind messages still waiting (or a release not landed yet): it waits, in order
+      if (body.now !== true && (agent.state === 'working' || agent.state === 'waiting' || held.summary(agent.id) || awaitingRelease(agent.id, Date.now()))) {
+        const r = held.add(agent.id, { text, files: saved, folders: dirs.folders });
+        if (!r.ok) return r;
+        await schedule(false);
+        return { ok: true, held: true, count: r.count };
+      }
       const file = writeMessageFile(messagesDir, agent.id, withAttachments(text, saved, dirs.folders));
       return confirmDelivery(file, { timeoutMs: deliveryTimeoutMs, failure: "The session didn't pick up the message. Please send it in its terminal." });
     },
@@ -1322,7 +1634,7 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
       const agent = ID_RE.test(id) ? snapshot?.agents.find(a => a.id === id || a.cliId === id) : undefined;
       if (!agent) return { ok: false, error: 'unknown agent' };
       if (agent.kind !== 'background' || !agent.cliId || !ID_RE.test(agent.cliId)) return { ok: false, error: 'only background sessions can be opened from here' };
-      return openTerminal(`claude attach ${agent.cliId}`); // cliId is [A-Za-z0-9-] only
+      return openTerminal(`${accountPrefix(launchAccount(accountOfSession(agent.id)))}claude attach ${agent.cliId}`); // cliId is [A-Za-z0-9-] only
     },
     async rm(ids) {
       const results = [];
@@ -1332,7 +1644,8 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
           results.push({ id: String(id), ok: false, error: 'not a stale background session' });
           continue;
         }
-        const res = await run(claudeBin, ['rm', agent.cliId], { timeoutMs: 30_000 });
+        const env = envFor(accountOfSession(agent.id));
+        const res = await run(claudeBin, ['rm', agent.cliId], { timeoutMs: 30_000, ...(env ? { env } : {}) });
         results.push(res.code === 0 ? { id, ok: true } : { id, ok: false, error: res.stderr.trim().slice(0, 200) });
       }
       await pollAgents();
@@ -1350,7 +1663,7 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     worlds: makeWorlds({ builtinDir: join(root, 'web', 'worlds'), userDir: worldsDir, home }),
     getSnapshot: () => snapshot,
     getFeed: (id, limit) => modelFor(id)?.history(limit) ?? null,
-    getConversation, getPrompts, getNotes, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, shellOutput, namedFiles,
+    getConversation, getPrompts, getNotes, getHeld, getSubagent, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, shellOutput, namedFiles,
     getTranscriptHtml, getDoc: readDoc, listFiles, readFile, repoTouched, actions, pastSessions, listDirs: dirsFor, log,
   });
   const port = await server.listen();
@@ -1358,11 +1671,18 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
 
   try {
     watchers.push(watch(pendingDir, () => scheduleLight()));
-    watchers.push(watch(join(claudeDir, 'projects'), { recursive: true }, (_event, name) => {
-      if (String(name ?? '').endsWith('.jsonl')) scheduleLight();
-    }));
   } catch (err) {
     markFail('watch', err);
+  }
+  for (const [i, { path }] of projectsFolders().entries()) { // each real projects folder once; another account's may not exist yet
+    if (i > 0 && !isDir(path)) continue;
+    try {
+      watchers.push(watch(path, { recursive: true }, (_event, name) => {
+        if (String(name ?? '').endsWith('.jsonl')) scheduleLight();
+      }));
+    } catch (err) {
+      markFail('watch', err);
+    }
   }
   let configTimer = null;
   watchers.push(watch(root, (_event, name) => {
@@ -1372,6 +1692,7 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
   }));
 
   startTimers();
+  void pollSignedIn();
   pruneUploads(uploadsDir, Date.now());
   pruneForks(forksDir, Date.now());
   void pollGit();
@@ -1391,5 +1712,5 @@ export async function startCollector({ root, claudeDir = join(homedir(), '.claud
     await server.close();
   }
 
-  return { port, getSnapshot: () => snapshot, reloadConfig, actions, pastSessions, listDirs: dirsFor, shellOutput, namedFiles, getConversation, getPrompts, getNotes, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, readDoc, listFiles, readFile, repoTouched, stop };
+  return { port, getSnapshot: () => snapshot, reloadConfig, actions, pastSessions, listDirs: dirsFor, shellOutput, namedFiles, getConversation, getPrompts, getNotes, getHeld, claudePlugins, claudeMcp, claudeRules, fileTicket, rawFile, officeView, readDoc, listFiles, readFile, repoTouched, stop };
 }

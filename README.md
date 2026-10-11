@@ -30,17 +30,21 @@ It listens on `127.0.0.1` only and reads what Claude Code already writes to disk
 - [Using it](#using-it)
   - [The list view](#the-list-view)
   - [Answering and messaging agents](#answering-and-messaging-agents)
+  - [📣 Broadcast: one message to several agents](#-broadcast-one-message-to-several-agents)
   - [Stopping a turn (■ Stop)](#stopping-a-turn--stop)
   - [Side questions (/btw)](#side-questions-btw)
   - [Notes for later](#notes-for-later)
   - [✨ Helper and suggested names](#-helper-and-suggested-names)
   - [Model, effort and permission mode](#model-effort-and-permission-mode)
   - [Starting, resuming, forking, ending and restarting sessions](#starting-resuming-forking-ending-and-restarting-sessions)
+  - [Several Claude accounts](#several-claude-accounts)
+    - [Setting up a second account](#setting-up-a-second-account)
   - [Going back to an earlier point (↺ Restore)](#going-back-to-an-earlier-point--restore)
   - [⚙ Claude Code: plugins, MCP servers and permission rules](#-claude-code-plugins-mcp-servers-and-permission-rules)
   - [Files, documents and quoting](#files-documents-and-quoting)
   - [Worlds](#worlds)
     - [The farm](#the-farm)
+    - [The robot factory](#the-robot-factory)
   - [Notifications and the bell](#notifications-and-the-bell)
   - [Inside Claude Code: the mod](#inside-claude-code-the-mod)
 - [Configuration](#configuration)
@@ -62,7 +66,7 @@ It listens on `127.0.0.1` only and reads what Claude Code already writes to disk
 - Its subagents, background jobs, task list, model, effort, permission mode, context left and
   cost so far.
 - Your plan's usage (the 5-hour and weekly limits, and when they reset), and the CPU and memory
-  your agents use.
+  your agents use. With several Claude accounts, each one's plan, and which account every agent is on.
 - Collisions: two agents writing to the same repo at the same time.
 - Each repo's branch, uncommitted files, unpushed commits, last deploy (GitHub Actions or a
   deploy an agent ran itself) and open pull requests.
@@ -71,7 +75,10 @@ It listens on `127.0.0.1` only and reads what Claude Code already writes to disk
 - Answer an agent's question (with its options) or a permission prompt (**Allow** / **Deny**), or
   cancel its questions as Esc does and tell it what you want instead.
 - Message any session like a chat, with screenshots, PDFs or other files; it arrives as your own prompt.
+  What you send a working session waits until its turn ends, where you can remove, edit or send it
+  early.
   ↑ in the box brings back what you sent it before, as in its terminal.
+- Broadcast one message to several sessions at once: all of them, or the ones you tick.
 - Read a session's whole conversation, from its first message, in a dialog you can search.
 - Ask a session a side question (`/btw`) without interrupting or adding to its conversation.
 - Keep notes on a session: things you may want to tell it later, or not. Put one in the message
@@ -85,13 +92,14 @@ It listens on `127.0.0.1` only and reads what Claude Code already writes to disk
 - Restore a session to before one of your messages, as `/rewind` does: its conversation, its code
   (the files Claude edited since), or both.
 - Name a session with one click: a small Claude model (Haiku) suggests a short name from what it is
-  working on, through your own Claude Code, only after you switch the ✨ Helper on.
+  working on, through your own Claude Code, only after you switch the ✨ Helper on. With its Animal
+  lines ticked, Haiku also writes what the farm's animals say about what is happening.
 - Start a new session in any folder of yours (type it, browse to it, or create it) or in one you've
-  worked in, or find a past one (search, filter by folder, model, branch or running, sort by
+  worked in, or find a past one (search, filter by folder, model, branch, account or running, sort by
   activity, start, name, folder or length) and resume it, in the permission mode, model and effort
-  you choose.
-- Switch a running session's model or effort, compact it, restart it in another permission mode,
-  or end it (its terminal window closes too).
+  you choose, and on the Claude account you choose when you have several.
+- Switch a running session's model or effort, compact it, restart it in another permission mode
+  or move it to another of your Claude accounts, or end it (its terminal window closes too).
 - See the shell commands each session runs right now (how long, CPU, memory), follow a background
   one's output, and stop one with everything it started.
 
@@ -115,25 +123,41 @@ It listens on `127.0.0.1` only and reads what Claude Code already writes to disk
 - A bell in the page, and a count in the tab title.
 - Inside Claude Code: a `/tracker` pane, a status line and toasts.
 
-**Watch it as a farm, or a world of your own** (optional)
-- Choose how the dashboard draws your agents: the farm, or a world of your own.
+**Watch it as a farm, a robot factory, or a world of your own** (optional)
+- Choose how the dashboard draws your agents: the farm, the robot factory, or a world of your own.
 - A pixel farm where every agent is a farmer and every repo a field. Crops grow as context
-  fills, weather shows the last deploy, a cart runs to town for each web call, each MCP server's
-  cart drives to the farmer calling it, and you click
-  the barn to start a session.
+  fills, weather shows the last deploy, the season follows your 5-hour limit (or hold one with the
+  **Season** switch), a cart runs to town for each web call, each MCP server's cart drives to the
+  farmer calling it, and you click the barn to start a session.
+- A sidebar beside the farm for any agent: pick one from a list or step through them, answer the
+  others that need you from their cards without leaving the one you are on (Allow, Yes, an option),
+  and chat with it, the newest message by one box for a message, a side question or a note.
 - Animals on the farm, just for fun: cows, goats, a sheepdog, an ostrich, a lion, a tiger, two cats,
   two mice and a duck family on the pond. Click one to pet or feed it, and a farmer walks over to do
   it. Now and then they get up to something (a goat steals a hat, a cat hunts a mouse), react to
   deploys and merges, and huddle in winter. The cats nap in their basket, sometimes curled up together.
   Now and then a shy unicorn is there for a moment.
-- The farm is a world: it runs in a sandboxed frame of its own, with no access to the token, and
-  asks the page for the little it needs ([docs/worlds.md](docs/worlds.md)). A world from your own
-  folder sees no words or paths until you tick **Can see what agents say** for it.
+- A bright robot factory, the second world, showing everything the farm shows: every agent a robot
+  put together from parts picked by its id, every repo an assembly bay where a robot is built as the
+  context fills. Drones are subagents and web calls, AGVs drive to the robot calling an MCP server,
+  messages shoot through pneumatic tubes, and the floor heats up with your 5-hour limit (or hold a
+  level with the **Heat** switch). A robot dog, a robot vacuum and a cat live there just for fun.
+- The farm and the factory are worlds: each runs in a sandboxed frame of its own, with no access to
+  the token, and asks the page for the little it needs ([docs/worlds.md](docs/worlds.md)). A world
+  from your own folder sees no words or paths until you tick **Can see what agents say** for it.
+- Make your own world, or have Claude make one: `npm run new-world`, the test page, `check-world`
+  and `world-shots`, with a guide written for Claude Code to follow ([docs/worlds.md](docs/worlds.md)).
+  The test page shows any world playing a tour of made-up snapshots, each situation at its own
+  address for a screenshot, with no token and no real data; `npm run check-world` plays the same
+  tour headless and names the file and line of what breaks; `npm run world-shots` takes a picture of
+  every stop. A world draws its people, what they hold and its animals with the kits that come with
+  it.
 
 ## Requirements
 
 - **macOS.** The service runs under launchd, and the tracker uses `ps` and `osascript`.
-- **Node.js 22 or newer.** An nvm install is found automatically.
+- **Node.js 22 or newer.** An nvm install is found automatically. `npm run check-world` needs
+  22.13 or later (or 23.5 or later), to run a world contained.
 - **Claude Code.** The mod needs a build with plugin mods; it is tested on 2.1.293.
 - **Optional: the GitHub CLI (`gh`)**, signed in, for deploy status and pull requests.
 
@@ -255,7 +279,8 @@ The page is laid out like an editor, in three columns:
 - **Right: the explorer.** The agent's folder with git status letters (M, U, D) and a dot on files
   it edited or read, its **Scratchpad** and its **Memory**.
 
-Along the top: your agents' memory and CPU, your plan's 5-hour and weekly usage, and four cards:
+Along the top: your agents' memory and CPU, your plan's 5-hour and weekly usage (a block for each
+account when you have several Claude accounts: see [Several Claude accounts](#several-claude-accounts)), and four cards:
 **Waiting on you**, **Working**, **Your turn** and **Collisions**. The tab title counts the agents
 that need you, e.g. `(2) Agentville`, and the farmhouse in the tab gets a red light.
 
@@ -289,7 +314,17 @@ These need the mod in that session.
 - **Questions in replies.** When an agent ends its turn by asking something ("Should I push?"),
   it gets an "asks you" chip and a card, with one-click **Yes** / **No…** for yes/no questions.
 - **Messages.** Type in the box under **Now** and press Enter (Shift+Enter for a new line). It
-  arrives as your own prompt; a busy agent reads it when its current step ends.
+  arrives as your own prompt.
+- **Messages to a working session wait.** Sent while it is busy (working, or waiting on you in the
+  middle of a turn), a message goes into **Waiting to send** under the box instead, until the turn
+  ends. There, each one has **✕** (don't send it), **Edit** (change it in place) and **⚡ Send now**
+  (send it at once: Claude Code hands it to Claude at its next step, so it can steer the turn).
+  When the turn ends, the first one goes out, and the next waits until that turn ends too; tick
+  **Send together** to send all of them as one message instead. A session that is gone for two
+  minutes with messages still waiting gets them as notes on it (a very long one is cut to a note's
+  4,000 characters). (Prompts you type in
+  the session's terminal while it works go into Claude Code's own queue, which the dashboard can't
+  see or change.)
 - **↑ / ↓ recall what you sent**, as in the session's terminal. With the cursor on the box's first
   line, ↑ brings back your last message to that session, then the one before. ↓ on the last line
   goes forward again, and past the newest gives back what you were typing.
@@ -306,9 +341,25 @@ These need the mod in that session.
 - **⤢ Read all**, on the Conversation heading, opens the whole conversation in a dialog: every
   message from the first, oldest first, read from the transcript however long it is. **Search**
   highlights every match in place, with "1 of 12" and ↑ ↓ (Enter for older, Shift+Enter for
-  newer); it starts at the newest. While the dialog is open, new messages appear at the bottom.
+  newer); it starts at the newest. While the dialog is open, new messages appear at the bottom,
+  and it goes down to each one as it comes, unless you are searching.
   You can reply from it too: it has the same message box, with 📎 Attach and 📁 Folder, sharing the side
   panel's draft and files.
+
+### 📣 Broadcast: one message to several agents
+
+**📣 Broadcast** (in the list view's top bar, and in the farm's Menu) sends one message to every
+agent you tick:
+- The list has every agent, those that need you first. Tick them one by one, or pick **All**, **Need
+  you**, **Working**, **Your turn & idle** or **None**.
+- Each one gets it as your own message, as its own message box would send it: a busy one's copy waits
+  for its turn to end, under its message box, where you can remove, edit or send it now (see
+  "Messages to a working session wait"). The line under the box says which wait.
+- A session that isn't listening for the dashboard yet (send it anything in its terminal once), and
+  Codex, can't be ticked; the list says why.
+- **⌘↩** sends (a plain ↩ is a new line, so one key can't reach several agents by accident). Under the
+  box, a line for each says whether it was sent.
+- It is text only: send files and folders from an agent's own box.
 
 ### Stopping a turn (■ Stop)
 
@@ -321,7 +372,8 @@ Esc does in its terminal:
 - A message you sent while it worked isn't lost: it becomes the session's next prompt. That's the
   way to stop it and steer it at once.
 - A command the model put in the background on purpose keeps running. Stop that one under
-  **Commands running**, whose **■ Stop** ends a single command.
+  **Commands running** (in the farm's sidebar, open **N commands running** under Now), whose
+  **■ Stop** ends a single command.
 - There is no confirm, as Esc has none. It takes up to 2 seconds, since the mod checks for
   requests every 2 seconds.
 
@@ -334,9 +386,10 @@ The **Side question** box asks the session something on the side, like `/btw` in
 It is answered from the conversation so far, with no tools, even while the session is busy, and
 nothing is added to the conversation. The answer appears under the box.
 
-Click the **Side question** heading to fold the whole section away, or to bring it back. Folded,
-the heading shows how many side questions the session has. The choice holds for every session,
-in the list and in the farm's sidebar, and is remembered.
+In the list, click the **Side question** heading to fold the whole section away, or to bring it
+back. Folded, the heading shows how many side questions the session has. The choice holds for every
+session, and is remembered. In the farm's sidebar, **Side question** is one of the message box's three
+modes instead: pick it above the box, and the chat shows the side questions and their answers.
 
 ### Notes for later
 
@@ -348,8 +401,8 @@ the session until you use it.
   card, in the order you wrote them. Click a note's text to edit it (↩ saves, Esc cancels).
 - **↳ Use** puts the note at the end of the message box, to change before you send it. Once that
   message is sent, the note counts as used. If you clear the box instead, it stays unused.
-- **Send now** sends the note as it is, as your own message (queued if the session is busy), and
-  marks it used.
+- **Send now** sends the note as it is, as your own message, at once even if the session is busy (it
+  reads it at its next step), and marks it used.
 - A used note stays, crossed out, so you can see what you have already said. **Clear used** removes
   them all; **✕** deletes one.
 - You can write notes for any session on the dashboard, even one that isn't listening for the
@@ -359,6 +412,8 @@ the session until you use it.
   and how many.
 - A session holds up to 200 notes of up to 4,000 characters each.
 - Like Side question, the heading folds the section away and, folded, says how many notes are unused.
+  In the farm's sidebar, **Note** is one of the message box's modes: pick it to write notes in the
+  box and see them above it, with **↳ Use** turning the box back into a message box.
 
 ### ✨ Helper and suggested names
 
@@ -371,7 +426,7 @@ view.
 - **How it calls Haiku:** through the Agentville mod inside one of your open Claude Code
   sessions, with your sign-in, on your Claude plan. There is no API key, nothing is added to any
   conversation, and no new session starts. With no session open, nothing is called.
-- **Name suggestions** (its one use so far):
+- **Name suggestions:**
   - When a new session (started after you switched the helper on) has replied once and still
     has Claude Code's own name (such as `agent-tracker-9c`), its sidebar offers one:
     **Name it `login-bug`?** ✓ Rename · ✎ Edit · ✕.
@@ -383,11 +438,30 @@ view.
 - **What it sends:** the session reads its own first three messages and the start of Claude's
   first reply (about 2,000 characters) and sends them to Haiku itself, as it sends its whole
   conversation to its own model. The dashboard only ever sees the name.
+- **Animal lines:** with it ticked, Haiku writes what the animals on screen say about what is
+  happening ("not my fault (it was deploy-bot)" from the ostrich after a failed deploy).
+  - **When:** a batch when something happens (a deploy fails or goes through, a harvest, a merge,
+    someone new), at most once every 5 minutes, and one every 30 minutes for idle chatter; only
+    while a dashboard shows a world with its animals (and for up to 10 minutes after). Ticking it
+    again asks at once. Each batch is one call, counted in the daily limit.
+  - **What it sends:** the dashboard's facts only: agent and repo names (the names the dashboard
+    shows, which Claude Code may take from a conversation's title), each agent's state, a word for
+    what it is doing (editing, running, searching…), how many are waiting or working, which kinds of
+    animal are on screen, what just happened, and which built-in world it is (`farm` or `factory`,
+    so the lines are in its words; your own worlds and the starter aren't named). Never code, file
+    paths, commands, branches or anything else said in a conversation. One of your open sessions
+    (idle ones first, taking turns) makes the call.
+  - **What the animals say:** each fresh line once, before their own; what you click (Pet, Feed…)
+    keeps its own line. A world of yours that can't see what agents say gets only the lines with no
+    names in them.
+  - It needs mod 0.9.0 in a session (`/reload-plugins`). While the robot dog or the robot vacuum
+    is on screen (and 10 minutes after) it needs 0.9.1: older mods aren't asked, so no lines come
+    until a session has it. ✨ Helper says when no session can run it.
 - **A daily limit** (200 to start, 1 to 2,000) caps the calls. The dialog shows today's count and
   the last error, and says when today's limit is reached (it resets at midnight). **Switch off**
   asks for nothing more at once; a call already under way finishes, and its answer is dropped.
-- It needs mod 0.8.0 in the session. For a session started before you updated, run
-  `/reload-plugins` in it.
+- Names need mod 0.8.0 in the session, animal lines 0.9.0 (0.9.1 for the robot dog and the robot
+  vacuum). For a session started before you updated, run `/reload-plugins` in it.
 
 ### Model, effort and permission mode
 
@@ -403,7 +477,9 @@ Each terminal session's bar shows its **permission mode**, its **model** (e.g. *
   its context.
 - **Restart in…** another permission mode (ask first, accept edits, plan, auto, or bypass
   permissions). The session ends and resumes straight away in a new terminal window, and the
-  conversation carries on.
+  conversation carries on. With several Claude accounts it also offers **Move to another account**:
+  the same, on the account you pick, in the mode the session is in (see
+  [Several Claude accounts](#several-claude-accounts)).
 
 Switching and side questions need mod 0.5.0 or newer, and Compact 0.6.0. For a session started
 before you updated, run `/reload-plugins` in it.
@@ -430,9 +506,14 @@ before you updated, run `/reload-plugins` in it.
   - **Range**: the last 30 days, or **All time**. The list says how many it shows of how many, and
     the sort and range are kept for next time.
   - Each past session shows its folder, branch, model, length, and when it started and was last
-    active, and 📝 with a count when it has notes you haven't used.
+    active, and 📝 with a count when it has notes you haven't used. A session resumed in another
+    folder is listed once, as it is now.
   - You pick the permission mode, model and effort. Model and effort apply to that session only
     (`--model`, `--effort`), not your defaults.
+  - With several Claude accounts, you also pick the **Account**: **As each last ran** (the default),
+    or one for whatever you start or resume. Each choice shows how much of its limits it has used.
+    Each past session and folder shows the account it last ran on, and the filters include
+    **Account**.
   - It opens a new Terminal or iTerm window (the `terminal` setting), and the window closes when
     Claude exits.
 - **⑂ Fork** on any message in the conversation (in the side panel or ⤢ Read all; it shows when you
@@ -441,7 +522,7 @@ before you updated, run `/reload-plugins` in it.
   - On one of Claude's replies, the new session has the conversation up to and including that reply.
   - On one of your messages, it has the conversation up to just before it, and your message waits in
     its prompt box, so you can change it and send it. That is how you try a different answer.
-  - You pick the permission mode, model and effort; they start as the original session's.
+  - You pick the permission mode, model and effort, and the account when you have several; they start as the original session's.
   - The new session is named after the original, with "(fork)". It is a session of its own: resume
     it later from ＋ Session like any other.
   - It gets a copy of your notes on the original, which from then on are its own.
@@ -449,6 +530,104 @@ before you updated, run `/reload-plugins` in it.
 - **End session** stops Claude cleanly after you confirm and closes its terminal window. You can
   resume the conversation later.
 - A stale background session can be **removed** (`claude rm`).
+
+### Several Claude accounts
+
+Claude Code keeps its login, settings and history in one config folder: `~/.claude`, or the folder
+`CLAUDE_CONFIG_DIR` names. Give each Claude account its own folder and you can use them side by
+side, each logged in, with no logging out and in. Agentville then shows them all, and lets you
+start, resume or move a session on the account you pick.
+
+#### Setting up a second account
+
+The examples call the accounts `work` (the `~/.claude` you have now) and `home` (a new
+`~/.claude-home`). Use your own names.
+
+1. **An alias for each account**, in `~/.zshrc` (or `~/.bashrc`):
+
+   ```bash
+   alias claude-work='env -u CLAUDE_CONFIG_DIR claude'              # ~/.claude
+   alias claude-home='CLAUDE_CONFIG_DIR="$HOME/.claude-home" claude' # ~/.claude-home
+   ```
+
+   Then `source ~/.zshrc`. Plain `claude` stays on `~/.claude`.
+
+2. **Share what both should have.** Before its first start, link your instructions, settings,
+   skills and commands into the new folder, so both accounts work the same way (in a folder that
+   already has them, move those aside first). The settings carry the Agentville mod
+   (`CLAUDE_CODE_PLUGIN_DIRS`), so the new account's sessions can be answered from the dashboard
+   and report their limits:
+
+   ```bash
+   mkdir -p ~/.claude-home
+   for f in CLAUDE.md settings.json settings.local.json skills commands agents; do
+     [ -e ~/.claude/$f ] && ln -s ~/.claude/$f ~/.claude-home/$f
+   done
+   ```
+
+   Don't link `.claude.json` (it holds the folder's login and its MCP servers) or `plugins`
+   (plugins your organization syncs belong to its account).
+
+3. **Share the history, to move conversations between accounts.** Link the new account's
+   `projects` and `file-history` folders to yours, before it has made either:
+
+   ```bash
+   ln -s ~/.claude/projects ~/.claude-home/projects
+   ln -s ~/.claude/file-history ~/.claude-home/file-history
+   ```
+
+   Every account then sees every conversation (Claude Code's own `/resume` list and project memory
+   too), a conversation can go on under another account with the same id, and ↺ Restore still
+   finds its checkpoints. Skip this to keep the accounts' work fully apart: then a session resumes
+   only on the account that ran it.
+
+4. **Log in.** Run `claude-home`, type `/login` and sign in with the other account. `/status` shows
+   which account a session is on. From now on, each alias opens on its own account, and both can
+   run at once.
+
+5. **MCP servers and plugins**, if you want them in the new account too, are added there:
+
+   ```bash
+   CLAUDE_CONFIG_DIR="$HOME/.claude-home" claude mcp add -s user <name> -- <command…>
+   CLAUDE_CONFIG_DIR="$HOME/.claude-home" claude plugin install <plugin>@<marketplace>
+   ```
+
+6. **Name them in Agentville** (optional), in `config.json`:
+   `"accounts": { "~/.claude": "work", "~/.claude-home": "home" }`. Without names, `~/.claude` is
+   `main` and the others go by their suffix (`home`). Agentville finds a new `~/.claude-<name>`
+   folder with a login in it within a minute, and `config.json` is read again when you save it:
+   no restart needed. The top bar then shows a block for each account.
+
+Use the same path every time: the login is kept in the macOS keychain under the folder's exact
+path, so `~/.claude-home/` with a slash, or another way to reach the same folder, asks you to log
+in again. The aliases are for terminals. The VS Code extension and the desktop app sign in on their
+own.
+
+#### Using several accounts
+
+- **Which accounts.** `~/.claude` is the first. Every `~/.claude-<name>` folder with a login in it
+  is another. `config.json`'s `accounts` can add any other folder.
+- **What you see.** The top bar shows a plan block for each account, with its email and how many
+  sessions it has open on hover, or "Signed out" (checked again each minute until you log in).
+  Every agent carries its account's tag. The farm gives the second account a silo of its own, left
+  of the barn (see [The farm](#the-farm)).
+- **Starting.** ＋ Session, ⑂ Fork and Restart in… let you pick the account, each choice with how
+  much of its limits it has used. A new session starts on the account its folder's last session
+  ran on, a resumed one on the account it last ran on, and a fork on the original's.
+- **Moving a conversation.** **Restart in… → Move to another account** ends a running session and
+  resumes it on the other account, in the same mode and under the same id. In ＋ Session, pick the
+  account and press **Resume** on a past one. This needs the shared history of step 3: without
+  it, ＋ Session greys out **Resume** for the accounts that can't see the conversation.
+- **The mod in each account.** Each account reads its own `settings.json`. If you didn't link it
+  (step 2), add the mod's `CLAUDE_CODE_PLUGIN_DIRS` to it too (see
+  [Load the mod](#3-load-the-mod-in-claude-code-recommended)). Without it, the account's sessions
+  can't be answered from the dashboard and its plan never shows.
+- **How it knows.** A running session is on the account whose `sessions/` folder lists it. An
+  ended one is on the account it last ran on, which Agentville remembers. One it never saw running
+  counts as the first account whose history holds it.
+- **What stays on the first account.** The ⚙ Claude Code dialog (plugins, MCP servers and
+  permission rules) shows the first account's. The ✨ Helper calls Haiku through whichever open
+  session it picks, so it counts against that session's account.
 
 ### Going back to an earlier point (↺ Restore)
 
@@ -534,8 +713,9 @@ The **⚙ Claude Code** button in the top bar opens your Claude Code setup in th
 
 ### Worlds
 
-A world is a way to draw what the dashboard knows; the farm is the built-in one. **World**, among
-the farm's buttons at the top, opens the list of worlds: pick one. A world that might draw no
+A world is a way to draw what the dashboard knows. Two come built in: **the farm** (the default;
+[The farm](#the-farm)) and **the robot factory** ([The robot factory](#the-robot-factory)). **World**,
+in a world's **Menu** (top right), opens the list of worlds: pick one. A world that might draw no
 buttons of its own — any world of yours, and a built-in one that draws itself — gets a small
 control from the page in a corner instead: **World ▾** for the list of worlds and **☰ List** for
 the list view, so it can't leave you with no way back. In the list view, the button beside **☰
@@ -564,8 +744,11 @@ something else. Built-in worlds always see everything.
 
 ![The list of worlds](docs/worlds.png)
 
-A world is a folder holding `world.json` and `world.js`. Yours go in `~/.agentville/worlds/<name>/`
-(the name is lowercase letters, digits and dashes, up to 40), or in the folder `worldsDir` names.
+**Your own worlds:** `npm run new-world -- <name>` copies the starter world into your worlds folder
+under that name and says what to do next (it refuses a taken or invalid name, and leaves nothing
+half-made). By hand: a world is a folder holding `world.json` and `world.js`. Yours go in
+`~/.agentville/worlds/<name>/` (the name is lowercase letters, digits and dashes, up to 40), or in
+the folder `worldsDir` names.
 Built-in worlds can't be replaced: a world of yours named like one is just another world, listed
 after it. A world with a problem (a `world.json` that can't be read, one made for a newer
 Agentville, a missing `world.js`) is listed with what is wrong. Files are served only from inside
@@ -575,9 +758,49 @@ unless that folder is your worlds folder, your home folder or one above either, 
 spelled. A folder with no `world.json` of its own serves nothing, and a broken link is listed with
 an error. `worldsDir` is read at startup (a change needs a restart); one that is your home folder or
 above it is ignored and the default is used. A world's names are shown as plain text, whatever they
-hold. How to write one is in [docs/worlds.md](docs/worlds.md). A world can have animals of its own
-(the `animals()` hook, from a library of twelve creatures), and lists in its `world.json` the shapes it
-already uses for data (`taken`), so its animals never look like them.
+hold. How to write one is in [docs/worlds.md](docs/worlds.md), a guide written for Claude Code to
+follow as much as for you: ask Claude to make you a world and point it there. A plain starter world
+(`web/worlds/starter/`, with a cat; [a picture](docs/starter.png)) is the template for your own; it
+isn't in the list. A world can have animals
+of its own (the `animals()` hook, from a library of fourteen creatures), and lists in its `world.json`
+the shapes it already uses for data (`taken`), so its animals never look like them.
+
+**Try a world on the test page:** `http://localhost:7777/worlds/test?world=farm` (or `?world=factory`,
+`?world=starter`, or `?world=u/<folder>` for one of yours). It shows the world playing a tour of
+made-up snapshots, one stop for each thing a world may show (every state, deploys, a compaction, a collision, the
+limits, night, privacy mode…), and `&stop=<name>` holds one stop at its own address, for a
+screenshot. The page has no token and no real data: requests get made-up answers, what the world
+asks the page to do is listed rather than done (but a GitHub link still opens, and motion is applied
+too), and the world's settings are kept in memory, so the
+dashboard's own settings in this browser (the world you chose, each world's settings, the **Can see
+what agents say** switches) are never read or written. The stop decides privacy mode, for every
+world. The error strip and the "didn't start" panel show here as on the dashboard. It doesn't reload
+when you save: reload the page. The stops are
+listed in [docs/worlds.md](docs/worlds.md#the-test-page-and-the-tour).
+
+**A picture of every stop:** `npm run world-shots -- <name>` (or `farm`, `factory`, `starter`) opens each stop
+of the tour in headless Chrome, on a server of its own with made-up data, and saves a picture of
+each in `.private/shots/` (`--stop <name>` for one stop, `--dir <folder>` for another place). The
+clock is frozen, so the same world gives the same pictures, which makes a change easy to compare.
+`new-world`, `check-world` and `world-shots` all take `--worlds <dir>`, to use a folder other than
+your worlds folder. If one of yours has a built-in world's name, `check-world` and `world-shots` use the
+built-in and say so; `u/<name>` reaches yours.
+
+**Check a world without a browser:** `npm run check-world -- <name>` (or `farm`, `factory`, `starter`) plays the
+same tour headless, a few frames a stop, and lists each exception with its stop, file and line, a
+hook that never returns (cut off after 2 seconds; it never hangs), a `world.json` problem, creatures
+that break the animals kit's rules (a kind in `taken`, a line over 40 characters, fewer than 2 or more
+than 4 actions…, and gags or play the kit would drop: a step or role it doesn't know, a spot the
+world's `spots()` doesn't have), and, as pointers rather than verdicts, the hooks left
+to their defaults, the checklist items it draws the same in two states ("deploy failed" draws the
+same as "deploy ok"), and outfit parts the people kit doesn't have. It exits 1 on a problem. It needs no server or token and
+reads none of your sessions: only the world's `world.js` and `world.json`, the SDK and the tour (and
+`config.json`, for where your worlds are). What it reports, and the checklist, are in
+[docs/worlds.md](docs/worlds.md#check-world-and-the-checklist). It runs the world's code on your Mac, contained (it can
+read only the SDK and the world's `world.js` and `world.json`, no other file of the world's, and can't
+write or start programs), but the world can still reach the network: check only worlds you'd trust
+([Privacy and security](#privacy-and-security)). A world whose `world.js` or `world.json` is a link out
+of its folder isn't run.
 
 **Your own worlds, open while you write them.** Saving a file in a world's folder (or in a built-in
 world's) reloads that world on screen, keeping its zoom and where you were looking, so you can
@@ -595,7 +818,8 @@ game's.
 ![The farm at night](docs/farm-night.png)
 
 **The layout.** Along the top are the barn, the silo and your farmhouse, with **your porch** in
-front of it (see "Porch life" below). Below them are the fields, one raised bed per repo, in a fenced grid that grows to 18
+front of it: a modern farmstead, with a black barn with a glass door, a black steel silo and a
+timber house with glass walls, its deck your porch (see "Porch life" below). At night their glass glows from inside. Below them are the fields, one raised bed per repo, in a fenced grid that grows to 18
 beds. A field keeps its bed: a new repo takes a free one (a worktree right after
 its repo, a project's repo beside the others), and nothing else moves. A repo that goes away
 leaves its bed empty, held for it for a day. An empty bed is fallow ground, a patch of darker
@@ -623,14 +847,14 @@ the pond and the shade tree, and a forest surrounds the farm.
   seconds to 4 minutes, then moves on: a nap curled up on the mat, a wash or a stretch there, a
   seat on the porch steps to watch the farm, a stroll on the lane before either end of the porch
   (where it sits, grooms, stretches or hops about after something only it can see), a sunbath up
-  on the roof above the door, or indoors (the door opens for it; then it is not about). It is
+  on the roof beside the flue, or indoors (the door opens for it; then it is not about). It is
   indoors about one time in four, and one ten minutes in four it is away altogether, sometimes
-  several in a row. What it does changes every few seconds. By night it is on its mat, under the
-  porch lamp, or indoors: nothing else lights it, and its eyes shine.
+  several in a row. What it does changes every few seconds. By night it is on its mat, before
+  the lit glass door, or indoors: nothing else lights it, and its eyes shine.
   It goes by the clock, so everyone looking sees the same cat in the same place. It walks by the
   steps and the lane, in front of whoever sits or stands on the porch, never through them, and
   it gets onto the roof from outside the house: along the lane to the market stall, a leap onto
-  the stall's awning, another over to the roof's edge, then along the shingles. For a leap it
+  the stall's awning, another over to the roof's low end, then up its slope. For a leap it
   crouches, goes up stretched, and lands low. When a farmer walks up to it, it runs: by day up to
   the roof that way, or to the far end of the lane when the farmer is in its way or it is dark.
   It stays there for 20 to 80 seconds, and for 2 to 6 minutes more it keeps off the mat and the
@@ -739,10 +963,13 @@ keep clear of the panel and the buttons too.
 Explore dog), an ostrich, a lion, a tiger, two cats (a grey one and a black one, whose eyes shine), two
 mice and a duck family (a mallard pair and three ducklings) live on the farm just for fun. They never
 stand for anything.
-- They wander the yard, graze and nap, and walk round the pond and the hammocks by the yard's path:
-  none is ever moved from one place to another. They keep off the lane by the porch (where farmers
-  waiting on you stand), out of the fields, the hay, crates and mailbox, the hammocks, and the henhouse and its run
-  (its hens are subagents). The ducks keep to the pond.
+- They wander the whole farm, graze and nap: the yard, the lanes and the porch, the meadow, around
+  the scarecrows, the barn and the market. None is ever moved from one place to another: one that
+  finds itself where it may not be walks out the short way. They never walk on a crop bed (its
+  crops, hay, crates and mailbox are the repo's state), into a building, onto the row where the tool
+  carts park, into the hammocks or the henhouse and its run (its hens are subagents), nor into the
+  cats' basket or under the trees at the wood's edge. The ducks keep to the pond.
+- Their lines wrap onto two lines when they need to, so a full 40-character line fits its bubble.
 - At night most sleep; the lion, the cats and the mice wander. With **Motion** off they doze where they are.
 - Now and then one says something in a small cream bubble with a dotted edge. It never covers a
   farmer's bubble or name: it moves aside or waits.
@@ -782,7 +1009,11 @@ stand for anything.
   request is merged and to meet a new farmer.
 - A farmer idle for three minutes or more sometimes plays with one: throws the sheepdog a stick, pets a
   goat, naps by the lion, has a cat chase a laser pointer. Two at most.
-- In winter they huddle together, the goats wear scarves and the ducks slide on the frozen pond.
+- In winter they huddle together, the goats wear scarves and the ducks slide on the frozen pond. They
+  follow the season you see, so a winter held with the **Season** switch brings the scarves too.
+- With ✨ Helper's **Animal lines** ticked, they also say lines Haiku wrote for what is happening
+  (a failed deploy, farmers waiting on you, a merge), each once, before their own ("✨ Helper and
+  suggested names").
 - The **Animals** switch hides them all (and brings back the pond's white duck); it is remembered.
   With it off, or **Motion** off, whatever they were up to stops where it is.
 
@@ -814,24 +1045,29 @@ can hold.
 | A blue pennant / a greenhouse | A branch other than main / a worktree, beside its repo |
 | Stones round some beds, with a sign | One project's repos, side by side |
 | The market stall | Open pull requests as crates, tagged by their checks. **Sold!** means one was merged |
-| The silo's grain / the season | Your plan's weekly usage / its 5-hour limit (winter when nearly used up). The tag at the silo's foot gives the week's figure, amber from 70% and red from 90% |
-| A second silo, left of the barn, under a slate dome | Codex's weekly usage, when both Claude Code and Codex have a reading (Claude's is under the red dome). With only one of them, it has the silo by the barn, under its own dome. Click a silo for both plans, their reset times, and Codex's plan and credits |
+| The silo's grain / the season | Your plan's weekly usage / its 5-hour limit (winter when nearly used up), unless the **Season** switch holds one: then the panel's season has a 📌 and your real 5-hour use beside it. The tag at the silo's foot gives the week's figure, amber from 70% and red from 90% |
+| A second silo, left of the barn | With two Claude accounts: each has its silo, its name on the tag, and the season follows the first account. With one account and Codex running here: Codex's weekly usage, under a slate blue dome (with a reading of Codex's only, it has the silo by the barn). Click a silo for each plan, its reset times, and Codex's plan and credits |
 | Eggs in the nest, a bone by the ramp | Subagents done within the hour, once their hen (or the dog) is home. Hover one for its result |
 | Hens in the run | Subagents whose farmer leads four already or is not out on the farm; and hens just back, pecking a moment before they go in |
 
 **Controls.**
 - **Top left, the panel.** The money spent and harvests, then waiting on you, working, your turn
-  and collisions (click one to open its first agent), then RAM, CPU and plan gauges and a
-  **needs you** button. Click its title to fold it away.
-- **Top right.** List, World (the list of worlds), ＋ Session, ⚙ Claude Code, Sidebar and the theme.
-- **Bottom.** Follow (keep the picked farmer in view), Resting (hide idle and stale farmers),
-  Bubbles, Sky (live, day or night), Motion, Bell, Help, and zoom.
+  and collisions (click one to open its first agent), then RAM, CPU and plan gauges (each account's
+  week and 5 hours when you have several) and a
+  **needs you** button. Click its title to fold it away. At 100% the farm sits beside the panel,
+  or below it when that leaves it bigger, so the panel never covers a silo or a building. In a
+  narrow window (the sidebar open) the farm is smaller then: **+** zooms in.
+- **Top right, Menu.** One button holds every other control. **Dashboard:** List, World (the list
+  of worlds), ＋ Session, ⚙ Claude Code, Sidebar, 📣 Broadcast and the theme. **On the farm:** Follow
+  (keep the picked farmer in view), Resting (hide idle and stale farmers), Bubbles, Animals, Sky
+  (live, day or night), Season (live, then spring, summer, autumn or winter held) and Motion. Then
+  Bell, Help and zoom. A switch or zoom leaves the menu open, to change several; a button that takes
+  you elsewhere shuts it, as do Esc and a click on the farm. Nothing lies along the farm's foot.
 - **Mouse.** ⌘/Ctrl + scroll or a pinch zooms, drag moves around, and a minimap appears while you
   are zoomed in.
 
-**Click things.** Click a farmer to open its sidebar, with Agent, Activity, Subagents (its
-subagents' cards, as in the list), Files and Diary tabs, or a field for a close-up of the files
-agents touched there. Click a farmer's speech bubble to read its whole conversation over the farm
+**Click things.** Click a farmer to open it in the sidebar (below), or a field for a close-up of
+the files agents touched there. Click a farmer's speech bubble to read its whole conversation over the farm
 (⤢ Read all, with search and a message box), the farmer picked in the sidebar behind it. A bubble
 waiting on you (a question or a permission prompt), or asking a question you can answer with a
 button, opens the sidebar instead, where you answer it. A bubble's tooltip says which: "click to read the whole conversation", or "click to open it in the sidebar".
@@ -842,15 +1078,158 @@ dialog over the farm, with Quote and the reply box as in the list. Click a build
 |---|---|
 | Barn | Start or resume a session (the new farmer comes out of the farmhouse) |
 | Farmhouse | Who is on your porch, with a button to open each, and the porch album |
-| Silo | Your plan's usage and when each limit resets |
+| Silo | Your plan's usage and when each limit resets (each account's, when you have several; Codex's too, when it runs here) |
 | Henhouse | The subagents and how each is going |
 | A hen, the dog | Its farmer's sidebar, on the Subagents tab (hover: its type and task) |
 | Notice board | Each project's CLAUDE.md and memory |
 | Market stall | The pull requests, with links |
 
+**The sidebar.** **Sidebar** (top right) opens one panel beside the farm, on the farmer you picked
+(or the first one at work). Top to bottom:
+- **Who.** The agent's name: click it for every agent, those that need you first, then working,
+  your turn, idle and stale, with what each asks or is doing. Type to find one by name, folder or
+  branch; ↑ ↓ and ↩ pick, Esc closes. **‹ ›** step through them in that order, the book opens the
+  diary and the last button hides the sidebar. Under the name: its state, its permission mode when it is
+  Bypass or Plan, its account, and **Session**; then its folder, branch, model and effort.
+- **Who else needs you.** A red line names the other agents waiting on you, longest waiting
+  first, with **Next ›** to open that one. Below it, a card for each, answered without leaving the
+  agent you are on: **Allow** or **Deny** a command, pick one of a question's options, **Yes** to a
+  yes or no question. **No…**, **Reply…** and questions with several parts open that agent instead.
+  The line folds the cards away, and that is remembered. Like every action button, a card's
+  buttons ignore clicks for a moment after a world swaps or raises part of the page.
+- **Its own question** or permission prompt, on every tab. It takes at most 40% of the sidebar's
+  height (a long one scrolls inside, and keeps its place as the page updates), so the chat always
+  has room. **Fold** shrinks it to one line that says what it asks, to read the whole chat before
+  you answer; a click on the line shows it again, and a new question always comes unfolded.
+- **Chat, Activity, Subagents, Files.** **Chat** has **Now** (the working line with ■ Stop, its
+  step, and its commands, folded until you open them), the conversation with the newest message at
+  the bottom, and one box with three modes. **⤢ Read the whole conversation** sits in a bar above
+  the chat, outside what scrolls, so it is always in view (with **Show less** beside it after Show
+  all). The chat
+  always goes to the newest message: when it opens, and whenever a new one comes, even if you had
+  scrolled up to read (with nothing new, it stays where you are). The three modes are
+  **Message**, **Side question** and **Note**. **Activity** has a filter: All, Commands, Edits,
+  Reads or Failed. **Subagents** has a card for each, and **Files** is its folder.
+- **Session** opens its settings: the model and effort (switched after its current turn), the
+  permission mode or account to restart it in, then Compact, Copy the resume command, the full
+  transcript and Show it in the list view, with **End session** set apart at the bottom.
+- **The diary** covers the tabs, with **Back** to the tab you were on.
+
 The light follows your clock: cloud shadows by day, and lit windows, lanterns and fireflies at
-night. The farm pauses when its tab is hidden, or while the list shows (it is kept as it was, diary
+night. The season follows your plan's 5-hour limit: spring while it is fresh (blossom), then summer,
+autumn (falling leaves), and winter (snow, a frozen pond) when it is nearly used up. The **Season**
+switch holds one instead: each click moves it on (live, spring, summer, autumn, winter, then live
+again), and it is remembered, as the sky is. It only holds the look: while a season is held, the
+panel shows it with a 📌 and your real 5-hour use (for example "winter 📌 · 5-hour 42%"), and its
+tooltip says it is held, not live, and what the live season would be.
+
+The farm pauses when its tab is hidden, or while the list shows (it is kept as it was, diary
 and all, for when you come back), and follows the system's reduce-motion setting.
+
+#### The robot factory
+
+The same live data as a bright, friendly workshop: every agent is a robot and every repo an
+assembly bay. Choose **Robot factory** in the list of worlds (**World**). Everything the dashboard
+knows has its picture here, and the panel, buttons, sidebar, zoom and clicks work as in any built-in
+world, in the factory's own words.
+
+![The robot factory: every agent a robot, every repo an assembly bay](docs/factory.png)
+
+**The layout.** Along the back wall, under tall windows that show the sky by your clock, stand
+the fabricator, the drone dock, a thermometer, **your desk**, the manuals shelf, the power-cell bank
+and the loading dock, with a walkway in front of them. Below are the bays, one per repo, inside a
+yellow and black safety line on a tiled floor, three across and up to 18, each keeping its place
+while you look (a repo that goes away leaves its bay empty for a day). A project's bays share a
+painted floor zone with a sign. Down the left side are the storage shelf, the charging pads, the open
+table, the sleep pods and the AGV rank. The conveyor runs along the bottom, and pneumatic tubes
+overhead come down to every bay.
+
+**The robots.** Each is put together from parts picked by its agent's id: a head (a dome, a box, a
+round one with an antenna, or a screen face), a body in the agent's colour in the list, and a drive
+(wheels, two legs or treads). The same agent is always the same robot. Codex agents are the
+slate-grey model line.
+
+**Reading the factory.** The **Help** button opens the full legend, including every tool a robot can
+hold.
+
+| You see | It means |
+|---|---|
+| A robot queued at the left of your desk, waving a red **!**, its beacon blinking red (and the red beacon over the desk) | It is waiting on you (a blueprint on the desk: a plan to approve) |
+| A robot at the right of your desk with a crate of finished parts | Its turn ended (a **?** bubble: it asked you something) |
+| A robot at a bay, holding a tool | It is working in that repo. The tool is its step: datapad = reading, scanner = searching, welder = editing, part printer = a new file, multimeter = tests, wrench = build, stamped crate = commit, cart up a ramp = push, rocket crate = deploy… |
+| A robot being built on a bay's bench | The context filling: the frame, then the wiring (30%), the plating (50%), the head (70%), and its eyes light up when it is nearly full (85%) |
+| **Built!**, and the finished robot rolling off on the conveyor | Its conversation was compacted, so a new frame goes on the bench |
+| A gear spinning over its head / a checklist screen beside it | It is thinking between steps / its task list (its name says e.g. 3/7) |
+| The beacon on its head | Green working, red blinking waiting on you, amber your turn, blue idle |
+| The light on its antenna | Its model: purple Opus, blue Sonnet, green Haiku, orange Fable |
+| Speed lines / hazard stripes round its waist / smoke | Fast mode / bypass permissions / a hot CPU |
+| A badge on its chest | What it has cost: copper from $1, silver from $10, gold from $50 |
+| Mini drones by a robot | Its subagents (a scanner drone sweeping a beam: an Explore one) |
+| Drones docked in the drone dock / circling over it, with **+N** | Subagents that finished lately / more running than their robots can lead |
+| A delivery drone flying out of a window and back | A web call (a fetch or a search), labelled with where it goes |
+| AGVs in the rank on the left | One for each MCP server your agents called in the last hour. While a robot calls one, its AGV drives over with the server's name and waits beside it until the call is done, and a few seconds more |
+| A capsule shooting through the tubes | One session messaging another |
+| Loose parts on the floor / boxed parts / a capsule at the bay's tube outlet | Uncommitted files / unpushed commits / commits behind |
+| The stack light: green with a **SHIPPED** flash / red with sparks / amber with turning gears / a grey pause | Last deploy passed / failed / running / Actions didn't run |
+| Hazard tape round a bay, pulsing | Two agents writing to the same repo (faster when it's serious) |
+| A blue flag on a bay's sign / a glass clean room | A branch other than main / a worktree, beside its repo's bay |
+| A part printer humming by a bench | A background command still running |
+| A robot asleep in a sleep pod | It will wake up by itself (`/loop`), with when |
+| On a charging pad, eyes shut / powered down and grey on the storage shelf | Idle / stale |
+| Crates on the loading dock, tagged by their checks | Open pull requests. **Shipped!** means one was merged: its crate rolls out of the door |
+| The power-cell bank's cells | Your plan's weekly usage: they drain as the week is used; its lamp turns amber from 70% and blinks red from 90% |
+| A second power-cell bank, left of the fabricator | With two Claude accounts: each has its bank, its name and week on the tag at its foot. The floor heat follows the first account |
+| The floor heat | Your plan's 5-hour limit (below) |
+
+**Floor heat and the Heat switch.** The floor heats up with your plan's 5-hour limit, on the
+thermometer by your desk and in the floor vents between the bays: cool while it is fresh (blue, the
+vents' fans turning slowly), then warm (the fans faster), hot (the fans racing, a shimmer over the
+vents) and steaming (steam from the vents, sparks off the machines) when it is nearly used up; a new
+window cools it again. The **Heat** switch, in the Menu (**On the floor**), holds a level
+instead: each click moves it on (live, cool, warm, hot, steaming, then live again), and it is
+remembered, as the sky is. It only holds the look: while a level is held, the panel shows it with a
+📌 and your real 5-hour use (for example "steaming 📌 · 5-hour 42%"), and its tooltip says it is held,
+not live. With no reading of your plan yet, the floor is warm.
+
+**Day and night.** The windows show the sky by your clock. At night the lights dim, and the desk
+lamp, the screens, the stack lights, the fabricator's glow and welding sparks glow.
+
+**Animals.** A robot dog, a robot vacuum and a cat live in the factory just for fun. They never stand
+for anything, and there are no drones among them (every drone here is data).
+- The dog trots about the walkway and the left side and rests now and then by the chargers; it
+  rolls over, runs to the loading dock when a pull request ships and to meet a new robot, and sleeps at
+  night with its standby light on. The vacuum roams the walkway and the left side too. The cat naps on
+  the conveyor and ambles along it. None of them goes into the bays, the queue at your desk or the AGV
+  rank.
+- Click one (or the belt, for the cat) for its menu: Pet, Oil or Fetch the dog; Pet or Empty the
+  vacuum; Pet or Feed the cat. The nearest robot that isn't waiting on you rolls over and does it.
+- Now and then the vacuum chases the cat off the belt, wedges itself in the storage shelf's corner and
+  beeps until a robot frees it. A robot idle for three minutes or more sometimes plays fetch with the
+  dog or pats the vacuum.
+- With ✨ Helper's **Animal lines** ticked, they say lines Haiku wrote, in the factory's words (the
+  robot dog and the vacuum need mod 0.9.1: "✨ Helper and suggested names").
+- The **Animals** switch hides them; it is remembered.
+
+**Controls and clicks.** The panel is top left (the money spent and the robots built, the floor
+heat, the counts and meters, **needs you**; at 100% the factory sits beside it or below it). Top
+right, the **Menu** holds every other control, as on the farm: the dashboard's buttons (List, World,
+＋ Session, ⚙ Claude Code, Sidebar, 📣 Broadcast, the theme), then **On the floor**: Follow, Resting
+(hide the robots charging and those powered down), Bubbles, Animals, Sky, Heat and Motion; then Bell,
+Help and zoom. Nothing lies along the factory's foot. Click a robot to open it
+in the sidebar, a bay (or its sign) for a close-up of the files agents touched there, a speech bubble
+for its conversation, and a building for the rest:
+
+| Building | Opens |
+|---|---|
+| Fabricator | Start or resume a session (the new robot rolls out of its door) |
+| Your desk | Who is waiting on you, with a button to open each |
+| Power-cell bank | Your plan's usage and when each limit resets (each account's, when you have several) |
+| Drone dock | The subagents and how each is going |
+| Manuals shelf | Each project's CLAUDE.md and memory |
+| Loading dock | The pull requests, with links |
+
+The factory pauses when its tab is hidden, or while the list shows, and follows the system's
+reduce-motion setting.
 
 ### Notifications and the bell
 
@@ -894,6 +1273,7 @@ The mod also does the dashboard's work inside the session:
 | `deployRepos` | Checkout path → `owner/repo` whose latest GitHub Actions run is shown, e.g. `{ "/Users/you/code/api": "you/api" }` |
 | `worldsDir` | Your own worlds, a folder each; `null` means `~/.agentville/worlds` (a leading `~` is your home; a relative one is under your home) |
 | `terminal` | Where sessions open: `"Terminal"` or `"iTerm"` |
+| `accounts` | Your Claude accounts' names, folder → name, e.g. `{ "~/.claude": "work", "~/.claude-home": "home" }`; a folder named here is an account even if it isn't a `~/.claude-*` folder ([Several Claude accounts](#several-claude-accounts)) |
 
 ## Commands
 
@@ -905,6 +1285,9 @@ The mod also does the dashboard's work inside the session:
 | `agent-tracker status` | Whether the service runs and the dashboard answers |
 | `agent-tracker open` | Opens the dashboard |
 | `agent-tracker logs` | The last lines of its logs |
+| `npm run new-world -- <name>` | Makes a world of your own from the starter, in your worlds folder, and says what to do next ([docs/worlds.md](docs/worlds.md#making-a-world)) |
+| `npm run world-shots -- <world>` | A picture of a world (`farm`, `factory`, `starter` or one of yours) at every stop of the test tour, in headless Chrome on made-up data, in `.private/shots/` (`--stop <name>` for one stop). Exits 1 if a stop didn't show |
+| `npm run check-world -- <world>` | Runs the test tour headless against a world (`farm`, `factory`, `starter` or one of yours): its exceptions with file and line, a hook that never returns, creatures (and their gags) that break the animals kit's rules, and pointers to what it may draw the same ([docs/worlds.md](docs/worlds.md#check-world-and-the-checklist)). Exits 1 on a problem. It runs the world's code contained (it can read only the SDK and the world's `world.js` and `world.json`), but the world can still reach the network: check only worlds you'd trust ([Privacy and security](#privacy-and-security)) |
 
 ## How it works
 
@@ -914,6 +1297,10 @@ The **collector** (`collector/`) is a Node program run by launchd. Every few sec
 - the transcripts under `~/.claude/projects/` (only the new bytes of each). When a session moves
   into a worktree, Claude Code moves its transcript to the worktree's folder, and the collector
   follows it there;
+- with several Claude accounts, the same for each account's folder (`~/.claude-<name>`): its
+  `sessions/` with `claude agents --json` run in its `CLAUDE_CONFIG_DIR`, and its `projects/`
+  unless it is a link to one already read. Every minute it looks for accounts again, and it asks
+  `claude auth status` whether each is signed in;
 - `ps`: processes, CPU and memory, and each session's start flags;
 - Codex's rollouts under `~/.codex/sessions/` (only the new bytes of each) and the thread names in
   `~/.codex/session_index.jsonl`, while a Codex process runs. Codex runs its threads in one shared
@@ -978,6 +1365,21 @@ and can do is in [docs/worlds.md](docs/worlds.md).
   asks for them by path (so keep nothing secret in a world's folder), and never from outside the
   world's own folder. The list of their names and the folder's path needs the token. The collector
   reads the folder; it never fetches a world from anywhere.
+- The world test page (`/worlds/test`) is served without the token and holds none: its snapshots
+  and answers are made up in the page, it never asks the collector for your sessions or files (its
+  content policy lets it fetch nothing at all), and it keeps a world's settings in memory, never in
+  the browser. Like the dashboard, it refuses to be shown in a frame.
+- `npm run check-world` runs a world's code on your Mac, on made-up snapshots, outside the sandboxed
+  frame. It runs it contained, in a Node of its own (Node's permission model): it can read only the
+  SDK and the world's `world.js` and `world.json` (no other file of the world's, so a link the world
+  ships in its folder leads nowhere), can't write or start programs, and gets none of your
+  environment, nor your terminal: what it prints, the world's words among it, is printed without
+  control characters (as `world-shots` prints a world's), so a world can't steer your terminal. A
+  world whose `world.js` or `world.json` is itself a link out of its folder is refused before
+  anything runs. It can still reach the network, and Node's containment is a seat belt rather than a
+  sandbox, so check only worlds you'd trust; look at any other world on the test page, in its frame.
+  A Node too old to contain it (before 22.13, or 23.0 to 23.4) gets a one-line refusal, never an
+  unconfined run.
 - **Open the worlds folder** (an action: token and same origin) makes your worlds folder and shows
   it in Finder (`open -a Finder <folder>`); it only shows it, and runs nothing in it. The page keeps your
   choice of world in this browser (`tracker-world`), and nothing else about it leaves the page.
@@ -1045,6 +1447,16 @@ and can do is in [docs/worlds.md](docs/worlds.md).
 - Which bed each repo's field has is kept in `state/beds.json` (the repos' folders and a number
   each), for a day after a repo was last seen. Every dashboard, a guest's too, gets that number
   with the repo.
+- With several Claude accounts, `state/session-accounts.json` keeps which account folder each
+  session last ran on (the 2,000 most recent). Your accounts' emails are read from their
+  `.claude.json` and kept in the local snapshot (`state/state.json`, which the mod reads) to show on
+  your own page; a world gets each account's name and plan, never
+  its email (a private world gets `account 1`, `account 2`). Agentville never reads or touches the
+  logins themselves: it starts `claude` with the account's `CLAUDE_CONFIG_DIR`, and asks
+  `claude auth status` whether each is signed in.
+- Messages waiting for a session's turn to end are kept under `state/held/` (the folder and its
+  files readable only by you). Nothing in them reaches the session until one goes out, and the
+  snapshot the page reads says only how many are waiting; the text is read with the token.
 - Your notes on a session are kept under `state/notes/` (the folder and its files readable only by
   you) until you delete them. They never leave your Mac, and nothing in one reaches the session
   until you use or send it. The snapshot the page reads every few seconds carries only how many
@@ -1052,7 +1464,13 @@ and can do is in [docs/worlds.md](docs/worlds.md).
 - The ✨ Helper is off by default. Switched on, it calls Haiku only through `$.model.complete` in
   your own sessions' Claude Code, never with a key of its own. A request file carries no
   prompt (the mod's instruction for each job is fixed), and for a name the session sends its own
-  first messages itself: the collector and the page see only the name. Its setting (with today's
+  first messages itself: the collector and the page see only the name. For animal lines the
+  collector sends the facts listed in "✨ Helper and suggested names" (names, states, a step word,
+  counts, events, the kinds of animal on screen, and `farm` or `factory` for those built-in worlds;
+  never paths, commands, branches or conversation text), and the page reports which animals a world
+  has (kinds and names; only the kinds reach Haiku) and, for the farm or the factory only, its key. The lines come back as plain text of 40 characters at
+  most; a world of yours that can't see what agents say gets only those with no names, by the names
+  it was sent (an agent gone since, or one renamed, too) and the names on the dashboard now. Its setting (with today's
   count) and what you chose for each session's name (renamed, edited, dismissed) are kept in
   `state/helper.json` and `state/names.json`, readable only by you. No world is told the helper's setting, a suggested name or a pending offer: a world gets only the fields in the scene (see [docs/worlds.md](docs/worlds.md)).
 - **↺ Restore** is the one thing that writes to Claude Code's own files. Once the session has ended,
@@ -1071,21 +1489,29 @@ and can do is in [docs/worlds.md](docs/worlds.md).
 | Problem | Try |
 |---|---|
 | The dashboard doesn't load | `agent-tracker status`, then `agent-tracker logs`. Check that nothing else uses the port |
-| A session shows "dashboard answers off" | Its mod isn't loaded. Check `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`, then type anything in the session or `/reload-plugins` |
+| A message waits and never goes out | It goes out when the session's turn ends, through its mod: the mod must be listening (📡 dashboard answers on). Press **⚡ Send now** to send it at once. A red line on the list says when the session didn't take it; it is tried again when the session next moves |
+| A session shows "dashboard answers off" | Its mod isn't loaded. Check `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` (or, for another account, in that account's own `settings.json`), then type anything in the session or `/reload-plugins` |
+| An account shows "No reading yet" | Its sessions report their limits through the mod: load the mod in that account too, then send a session on it a message |
 | "runs an older tracker mod" | `/reload-plugins` in that session, or resume it |
 | An idle farmer walks off to the animals, or has no hat | It is playing (idle three minutes or more) or a goat has its hat; it is the farm's fun, not the session. It comes back the moment it gets work or needs you. Switch **Animals** off to stop it all |
 | **■ Stop** on the working line, or **✕ Cancel** on a question, is greyed out | Both need mod 0.7.0: `/reload-plugins` in that session. Until then, press Esc in its terminal |
 | No cost, plan usage or working line | These come from the mod (0.4.0 or newer; the working line from 0.5.0) in a running session |
-| My world shows no bubbles and calls repos r1, r2… | It is in privacy mode: tick **Can see what agents say** for it in the list of worlds. Unticking later doesn't clear what the world saved while it could see; it gets its own saved settings back on start |
+| An account shows "Signed out" | Start a session on it (its alias, or ＋ Session with that account) and run `/login` there |
+| An account is missing | Its folder needs a login (`.claude.json` with your account) and must sit next to `~/.claude` as `~/.claude-<name>`, or be named in `config.json`'s `accounts` |
+| **Resume** is greyed out for an account | That account doesn't share the session's history: link its `projects` and `file-history` folders ([Several Claude accounts](#several-claude-accounts)) |
+| A second account asks you to log in again | Its folder is spelled differently from when you logged in (a trailing slash, or a link to it): use the same path every time |
+| My world shows no bubbles and calls its repos `repo 1`, `repo 2`… (and its agents `agent 1`…) | It is in privacy mode: tick **Can see what agents say** for it in the list of worlds. Unticking later doesn't clear what the world saved while it could see; it gets its own saved settings back on start |
 | No pull requests or deploy weather | `gh auth status`. Pull requests need a GitHub `origin`; Actions runs need the repo in `deployRepos` |
 | ＋ Session or End session does nothing | Allow the tracker to control Terminal or iTerm: System Settings → Privacy & Security → Automation |
 | **Browse…** or **📁 Folder** opens no window | Allow the tracker to control System Events: System Settings → Privacy & Security → Automation. A window may also be open behind others: pick or cancel it there |
 | ↺ Restore says its files could not be restored | Claude Code's file snapshots may be off (`/config` → file checkpointing, or `CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING`). The session was resumed as it was; restore the conversation only |
 | The bell is silent | Click the page once (browsers block sound until you do), and allow notifications |
-| A world says it "didn't start" | A world has 5 seconds to start. Past that, a panel replaces the (empty) world and gives the first error it reported, if any. Fix its `world.js` (or `world.json`) and save: it reloads by itself. Or press **Back to the farm**, **Show the list**, or **Try again** |
+| A world says it "didn't start" | A world has 5 seconds to start. Past that, a panel replaces the (empty) world and gives the first error it reported, if any. For a world you'd trust, run `npm run check-world -- <name>`: it names the file and line (it runs the world contained, reading only the SDK and the world's `world.js` and `world.json`, but the world can still reach the network; see [Privacy and security](#privacy-and-security)). Fix its `world.js` (or `world.json`) and save: it reloads by itself. Or press **Back to the farm**, **Show the list**, or **Try again** |
 | A world "tried to leave the page and was stopped" | A world may only draw in its own frame; this one tried to go to another page (a link, `location`). The page stops it the moment it starts to leave. Fix the world and save: it reloads by itself. Or press **Back to the farm** or **Show the list** |
+| My world looks wrong in one situation | Open the test page at that stop: `http://localhost:7777/worlds/test?world=u/<folder>&stop=…` (the stops are listed in [docs/worlds.md](docs/worlds.md#the-test-page-and-the-tour)). It has no live reload: reload the page after saving. Or take a picture of that stop: `npm run world-shots -- <folder> --stop …` |
 | A red strip over a world | The world reported an error after it started. It keeps drawing; **×** hides the strip. The page's console has the same message |
 | The farm stays empty, or says "not found" | The farm loads in a frame of its own from the collector (`/world/farm/`). After an update, restart the service (`agent-tracker restart`) and reload the page. The page's console says what a world reported, if anything |
+| The animals never say anything new | Tick **Animal lines** in ✨ Helper (the helper on). A session with mod 0.9.0 must be open (0.9.1 for the robot dog and the robot vacuum; `/reload-plugins` in it), and a world with animals on screen. ✨ Helper shows the last error and today's count |
 | **✨** says no name came, or the ✨ Helper shows a last error | No session is listening with mod 0.8.0 (`/reload-plugins` in it), today's limit is reached (it resets at midnight), or your organisation doesn't allow Haiku (the error says so) |
 
 ## Known limits
@@ -1132,18 +1558,23 @@ and can do is in [docs/worlds.md](docs/worlds.md).
 ```
 collector/   the collector: sources/, transcript/, derive/, server.mjs; its tests in test/
 web/         the dashboard: index.html, app.js, panels.js, scene.js, worlds.js…; worlds/ holds the
-             farm (worlds/farm/) and what every world's frame loads (worlds/sdk/)
+             farm (worlds/farm/), the robot factory (worlds/factory/), the starter (worlds/starter/),
+             the test page and its tour (worlds/test/) and what every world's frame loads (worlds/sdk/)
 mod/         the Claude Code mod: hooks/register.tsx; its tests in tests/
 bin/         the agent-tracker command and the launchd entry point
 launchd/     the service definition
-scripts/     end-to-end checks and the demo videos (their shared recorder in scripts/demo/)
-docs/        screenshots, and worlds.md: what a world gets from the dashboard and can do
+scripts/     end-to-end checks, the world tools (new-world, check-world, world-shots) and the demo
+             videos (their shared recorder in scripts/demo/)
+docs/        screenshots, and worlds.md: the guide to making a world, and what a world gets and can do
 ```
 
 ```bash
 npm test                    # collector and dashboard (node:test)
 npm run test:ui             # the dashboard, the farm and other worlds in headless Chrome, on a fixture
                             # (a probe world among them tries every way out of its frame)
+npm run kit-sheet           # redraw docs/kits.png, the picture of the people and props kits
+npm run world-shots -- <world>  # a picture of a world at every stop of its test tour (.private/shots/)
+npm run check-world -- <world>  # the test tour run headless against a world: exceptions, loops, creatures, pointers
 claude plugin test mod      # the Claude Code mod
 scripts/e2e-answer.sh       # answering and messaging real sessions
 npm start                   # run the collector in the foreground (stop the service first)

@@ -17,7 +17,7 @@ const WORLDS = [
 ];
 
 async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false, listFails = false, reveal = { ok: true, path: '/w' }, mounted = true } = {}) {
-  const posted = [], calls = [], listeners = {}, fetches = [], held = [], warnings = [], made = [], frames = [], timers = [], signals = [], windowPosts = [];
+  const posted = [], calls = [], listeners = {}, fetches = [], held = [], warnings = [], made = [], frames = [], timers = [], signals = [], windowPosts = [], bodies = [];
   // The page carries all traffic over a MessageChannel once the frame has loaded. The stub records what
   // the page posts over its port into `posted` (as frame.contentWindow.postMessage already does for the
   // one `start` message), and `from` (below) delivers the frame's messages back over that port.
@@ -73,7 +73,7 @@ async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false
         return new Promise(resolve => { ctx.releaseList = () => resolve({ ok: true, status: 200, json: async () => ({ worlds, folder: '/Users/sam/.agentville/worlds' }) }); });
       }
       if (url === '/api/worlds') return Promise.resolve({ ok: true, status: 200, json: async () => ({ worlds, folder: '/Users/sam/.agentville/worlds' }) });
-      fetches.push([url, init?.headers?.['x-tracker-token']]);
+      fetches.push([url, init?.headers?.['x-tracker-token']]); bodies.push([url, init?.body ?? null]);
       signals.push(init?.signal);
       const reply = { ok: true, status: 200, json: async () => ({ memory: [{ path: '/Users/sam/.claude/projects/x/memory/a.md' }], files: [] }) };
       return hold ? new Promise(resolve => held.push(() => resolve(reply))) : Promise.resolve(reply);
@@ -97,7 +97,7 @@ async function page({ stored = {}, hold = false, worlds = WORLDS, dialog = false
   /** The held file requests: the first one waiting is answered. */
   const answer = async () => { held.shift()?.(); await settle(); };
   return {
-    ctx, jump: ms => { clock.now += ms; }, farm, posted, calls, diary, stored, fetches, settle, wait, answer, timeouts: timers, warnings, made, host, options, worlds: window.AgentvilleWorlds, listeners, frames, dlg, els,
+    ctx, jump: ms => { clock.now += ms; }, farm, posted, calls, diary, stored, fetches, settle, wait, answer, bodies, timeouts: timers, warnings, made, host, options, worlds: window.AgentvilleWorlds, listeners, frames, dlg, els,
     setWorlds: list => { worlds = list; }, // what the collector lists from now on (a world saved, broken, mended)
     get frame() { return frames.at(-1); },
     // a message from the newest frame (one the page has let go of is still "the newest" here, and must be ignored)
@@ -145,6 +145,15 @@ test("the farm's old settings carry over once, and are never copied again over n
   assert.deepEqual(plain(worlds.loadPrefs('farm', fresh)), {});
   empty['tracker-farm-zoom'] = '2';
   assert.deepEqual(plain(worlds.loadPrefs('farm', fresh)), {}, 'migrated once, even with nothing to copy');
+});
+
+test('Broadcast is one of the buttons a world may press', async () => {
+  const p = await page();
+  p.calls.length = 0;
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'nav', what: 'broadcast' });
+  assert.deepEqual(p.calls, [['nav', 'broadcast']]);
 });
 
 test('what the frame may ask for is done; anything else is dropped', async () => {
@@ -1057,4 +1066,180 @@ test('a pick may name the sidebar’s Subagents tab (a hen was clicked), and no 
   q.from({ type: 'loaded' });
   q.from({ type: 'pick', agentId: 'a1', tab: 'files' });
   assert.deepEqual(q.calls.filter(c => c[0] === 'pick'), [['pick', 'a1', null]], 'another tab is not passed on');
+});
+
+/** The test page's mount: a fixed world, made-up answers, settings in memory; localStorage spied on. */
+async function testPage(extra = {}) {
+  const p = await page({ mounted: false });
+  const touched = [];
+  const real = p.ctx.localStorage;
+  // Every touch counts, not only calls: reading `length` (an empty store's keys()) is one too.
+  p.ctx.localStorage = new Proxy(real, { get: (t, k) => (typeof t[k] === 'function' ? (...a) => { touched.push([k, ...a]); return t[k](...a); } : (touched.push([k]), t[k])) });
+  // The harness answers the list of worlds without noting it: noted here, so "no list fetched" can fail.
+  const realFetch = p.ctx.fetch;
+  p.ctx.fetch = (url, init) => { if (url === '/api/worlds') p.fetches.push([url, init?.headers?.['x-tracker-token']]); return realFetch(url, init); };
+  const ready = [];
+  p.farm.mount(p.host, { ...p.options, token: undefined, world: { key: 'starter' }, memory: { prefs: { sky: 'night' } }, answer: act => ({ ok: true, status: 200, data: { made: act.what } }), onReady: () => ready.push(1), ...extra });
+  await p.settle();
+  return { ...p, touched, ready };
+}
+
+test('the test page: settings in memory only, never the dashboard\'s storage', async () => {
+  const p = await testPage();
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  assert.equal(p.posted.find(m => m.type === 'start').prefs.sky, 'night');
+  p.from({ type: 'store', key: 'zoom', value: '2' });
+  p.from({ type: 'ready' });
+  await p.settle();
+  assert.deepEqual(p.touched, [], 'localStorage was never read or written');
+});
+
+test('the test page: a fixed world, no list fetched, its frame at /world/<key>/', async () => {
+  const p = await testPage();
+  assert.equal(p.frame.src, '/world/starter/');
+  assert.ok(!p.fetches.some(([url]) => url === '/api/worlds'));
+});
+
+test("the test page: a request is answered by answer(), not the collector", async () => {
+  const p = await testPage();
+  p.farm.update(snap);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'request', id: 3, kind: 'repoTouched', repo: '/code/shop/web' });
+  await p.settle();
+  assert.deepEqual(p.fetches, []);
+  const reply = p.posted.find(m => m.type === 'reply' && m.id === 3);
+  assert.equal(reply.ok, true);
+  assert.equal(JSON.stringify(reply).includes('repoTouched'), true, 'the made-up answer came back');
+});
+
+test('the test page: private decides, whatever the can-see switch; onReady once', async () => {
+  const on = await testPage({ private: true });
+  on.farm.update(snap);
+  on.from({ type: 'loaded' });
+  assert.equal(on.posted.find(m => m.type === 'scene').scene.private, true, 'a built-in world, private because the stop says so');
+  on.from({ type: 'ready' });
+  on.from({ type: 'ready' });
+  assert.equal(on.ready.length, 1);
+  const off = await testPage({ private: false, world: { key: 'u/space' } });
+  off.farm.update(snap);
+  off.from({ type: 'loaded' });
+  assert.equal(off.posted.find(m => m.type === 'scene').scene.private, false, 'one of yours, shown in full because the stop says so');
+});
+
+test('cast from a world: library kinds, names of 30 or fewer made plain, 12 at most, a kind once', async () => {
+  const W = (await page()).worlds;
+  const check = m => W.checkMessage(m, { scene: { agents: [], repos: [] }, private: true, sentPaths: new Map(), inFlight: 0 });
+  assert.deepEqual(plain(check({ type: 'cast', animals: [{ kind: 'cow', name: 'Cow' }, { kind: 'cow', name: 'Again' }, { kind: 'dragon', name: 'D' }, { kind: 'cat', name: 'x'.repeat(31) }, { kind: 'duck', name: 'Ducks‮' }] })), { kind: 'cast', animals: [{ kind: 'cow', name: 'Cow' }, { kind: 'duck', name: 'Ducks' }] });
+  assert.equal(check({ type: 'cast', animals: Array.from({ length: 13 }, () => ({ kind: 'cat', name: 'Cat' })) }), null);
+  assert.equal(check({ type: 'cast', animals: 'cow' }), null);
+});
+
+test('namelessLines drops names (any case, a part of 4 or more, a branch), and short names only as whole words', async () => {
+  const W = (await page()).worlds;
+  const snap = { agents: [{ name: 'deploy-bot' }, { name: 'ui' }], repos: [{ name: 'api', branch: 'feature/login-fix' }] };
+  const lines = ['DEPLOY-BOT broke it', 'the deploy went fine', 'ui is waiting', 'quiet out here', 'the API is down', 'rapid grazing', 'login again?', 'moo.'].map(text => ({ kind: 'cow', when: 'idle', text }));
+  assert.deepEqual(plain(W.namelessLines(lines, snap)).map(l => l.text), ['quiet out here', 'rapid grazing', 'moo.']);
+});
+
+test('chatterFor: the batch for this world’s kinds, rechecked; private worlds get the nameless ones', async () => {
+  const W = (await page()).worlds;
+  const snap = { agents: [{ name: 'deploy-bot' }], repos: [], chatter: { at: 5, lines: [
+    { kind: 'cow', when: 'idle', text: 'deploy-bot again' }, { kind: 'cow', when: 'idle', text: 'moo' }, { kind: 'cat', when: 'idle', text: 'not this world' },
+    { kind: 'cow', when: 'dance', text: 'no' }, { kind: 'cow', when: 'idle', text: 'x'.repeat(41) }, { kind: 'cow', when: 'idle', text: 3 },
+  ] } };
+  const cast = [{ kind: 'cow', name: 'Cow' }];
+  assert.deepEqual(plain(W.chatterFor(snap, cast, false)).map(l => l.text), ['deploy-bot again', 'moo']);
+  assert.deepEqual(plain(W.chatterFor(snap, cast, true)).map(l => l.text), ['moo']);
+  assert.deepEqual(plain(W.chatterFor({ ...snap, chatter: null }, cast, false)), []);
+  assert.deepEqual(plain(W.chatterFor(snap, null, false)), [], 'no cast yet: nothing');
+});
+
+test('the page posts the world’s cast while Animal lines is ticked, and sends the world the helper’s batch (and an empty one when it goes)', async () => {
+  const p = await page();
+  const lines = [{ kind: 'cow', when: 'idle', text: 'moo from the helper' }, { kind: 'cat', when: 'idle', text: 'not on the farm' }];
+  p.farm.update({ ...snap, helper: { on: false, uses: { names: false, lines: false } }, chatter: null });
+  p.from({ type: 'loaded' });
+  p.from({ type: 'ready' });
+  p.from({ type: 'cast', animals: [{ kind: 'cow', name: 'Cow' }] });
+  await p.settle();
+  assert.equal(p.fetches.filter(f => f[0] === '/api/actions/animals').length, 0, 'unticked: the cast stays on the page');
+  assert.equal(p.posted.some(m => m.type === 'chatter'), false, 'no batch: nothing sent');
+  p.farm.update({ ...snap, helper: { on: true, uses: { names: false, lines: true } }, chatter: null });
+  await p.settle();
+  assert.deepEqual(p.fetches.filter(f => f[0] === '/api/actions/animals'), [['/api/actions/animals', 'tok']], 'ticked: the cast goes, with the token');
+  p.farm.update({ ...snap, helper: { on: true, uses: { names: false, lines: true } }, chatter: { at: 7, lines } });
+  assert.deepEqual(plain(p.posted.filter(m => m.type === 'chatter')), [{ type: 'chatter', lines: [lines[0]] }], 'the batch, for this world’s kinds');
+  p.farm.update({ ...snap, helper: { on: true, uses: { names: false, lines: true } }, chatter: { at: 7, lines } });
+  assert.equal(p.posted.filter(m => m.type === 'chatter').length, 1, 'the same batch is not sent again');
+  p.farm.update({ ...snap, helper: { on: true, uses: { names: false, lines: false } }, chatter: null });
+  assert.deepEqual(plain(p.posted.filter(m => m.type === 'chatter').at(-1)), { type: 'chatter', lines: [] }, 'gone: the world drops its lines');
+});
+
+test('the cast names its world only for a built-in world the helper has words for (farm, factory): never the starter, your own worlds or a private one', async () => {
+  const built = (key, name) => ({ key, builtIn: true, name, icon: '🧩', description: '', nouns: {}, preview: null, error: null });
+  const worlds = [...WORLDS, built('factory', 'Robot factory'), built('starter', 'Starter')];
+  const cast = [{ kind: 'cat', name: 'Cat' }];
+  const posts = async (key, stored = {}) => {
+    const p = await page({ worlds, stored: { 'tracker-world': key, ...stored } });
+    p.farm.update({ ...snap, helper: { on: true, uses: { names: false, lines: true } }, chatter: null });
+    p.from({ type: 'loaded' });
+    p.from({ type: 'ready' });
+    p.from({ type: 'cast', animals: cast });
+    await p.settle();
+    return { p, sent: () => p.bodies.filter(b => b[0] === '/api/actions/animals').map(b => JSON.parse(b[1])) };
+  };
+  assert.deepEqual((await posts('farm')).sent(), [{ cast, world: 'farm' }]);
+  assert.deepEqual((await posts('factory')).sent(), [{ cast, world: 'factory' }]);
+  assert.deepEqual((await posts('starter')).sent(), [{ cast }], 'the starter: no world');
+  assert.deepEqual((await posts('u/space')).sent(), [{ cast }], 'one of yours: no world');
+  assert.deepEqual((await posts('u/space', { 'tracker-world-cansee:u/space': 'on' })).sent(), [{ cast }], 'one of yours, even allowed to see: no world');
+  const { p, sent } = await posts('farm');
+  await p.farm.mount(p.host, { ...p.options, private: true }); // shown again, private (as the test page's private stop)
+  await p.settle();
+  assert.deepEqual(sent().at(-1), { cast }, 'private: no world');
+});
+
+test("the page's copies of the creature kinds, situations and worlds named for lines match the collector's (drift fails here)", async () => {
+  const src = readFileSync(fileURLToPath(new URL('../../web/worlds.js', import.meta.url)), 'utf8');
+  const listOf = name => JSON.parse(src.match(new RegExp(`const ${name} = (\\[[^\\]]*\\])`))[1].replaceAll("'", '"'));
+  const { CREATURE_KINDS, SITUATIONS, LINE_WORLDS } = await import('../sources/lines.mjs');
+  assert.deepEqual(listOf('CREATURE_KINDS'), CREATURE_KINDS);
+  assert.deepEqual(listOf('SITUATIONS'), SITUATIONS);
+  assert.deepEqual(listOf('LINE_WORLDS'), LINE_WORLDS);
+});
+
+test('chatterFor: a private world never gets a row the collector marked as naming someone (an agent gone since, a name before a rename)', async () => {
+  const W = (await page()).worlds;
+  const snap = { agents: [], repos: [], chatter: { at: 5, lines: [{ kind: 'cow', when: 'idle', text: 'welcome back, old friend', named: true }, { kind: 'cow', when: 'idle', text: 'moo' }] } };
+  assert.deepEqual(plain(W.chatterFor(snap, [{ kind: 'cow', name: 'Cow' }], true)).map(l => l.text), ['moo']);
+  assert.deepEqual(plain(W.chatterFor(snap, [{ kind: 'cow', name: 'Cow' }], false)).map(l => l.text), ['welcome back, old friend', 'moo']);
+});
+
+test('a world’s cast is taken once a second at most (the same again is ignored, a new one waits for the second to end), and none is posted while the list view shows', async () => {
+  const p = await page();
+  const on = { ...snap, helper: { on: true, uses: { names: false, lines: true } }, chatter: null };
+  p.farm.update(on);
+  p.from({ type: 'loaded' });
+  p.from({ type: 'ready' });
+  const posts = () => p.fetches.filter(f => f[0] === '/api/actions/animals').length;
+  p.from({ type: 'cast', animals: [{ kind: 'cow', name: 'Cow' }] });
+  await p.settle();
+  assert.equal(posts(), 1);
+  for (let i = 0; i < 20; i++) p.from({ type: 'cast', animals: [{ kind: 'cow', name: 'Cow' }] });
+  p.from({ type: 'cast', animals: [] }); // the Animals switch off…
+  p.from({ type: 'cast', animals: [{ kind: 'cat', name: 'Cat' }] }); // …and another cast, all within the second
+  await p.settle();
+  assert.equal(posts(), 1, 'a flood of casts posts nothing more at once');
+  p.wait(1100);
+  await p.settle();
+  assert.equal(posts(), 2, 'the newest is taken when the second is up');
+  p.farm.hide();
+  p.wait(1500);
+  p.from({ type: 'cast', animals: [{ kind: 'duck', name: 'Ducks' }] });
+  await p.settle();
+  assert.equal(posts(), 2, 'the list view shows: nothing is posted');
+  p.farm.mount(p.host, p.options);
+  await p.settle();
+  assert.equal(posts(), 3, 'shown again: the cast goes at once');
 });

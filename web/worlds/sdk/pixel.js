@@ -38,7 +38,7 @@ const ago = ms => {
   const m = Math.max(0, (Date.now() - ms) / 60_000);
   return m < 1 ? 'now' : m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 };
-const PXG = { ctx: null, T: 0, k: 1, lights: null, ext: null, W: 400 }; // ext: the world drawn, past the farm's own edges when the frame has room // the canvas being drawn now, the animation clock, device pixels per world pixel, lights to glow at night
+const PXG = { ctx: null, T: 0, k: 1, lights: null, ext: null, W: 400, season: null }; // ext: the world drawn, past the farm's own edges when the frame has room // the canvas being drawn now, the animation clock, device pixels per world pixel, lights to glow at night // season: the season to draw (the engine's, held by the Season switch or live), null before the first frame
 const px = (x, y, w, h, c) => { PXG.ctx.fillStyle = ink(c); PXG.ctx.fillRect(x, y, w, h); };
 const SC = 1; // one sprite pixel = one world pixel, the same pixels as the land
 const blink = (hz, n = 2) => Math.floor(PXG.T * hz) % n;
@@ -130,6 +130,13 @@ function drawCloud(x, y, w, [light, mid, dark]) {
   px(x + Math.round(w * 0.1), y + 1, b, 4, mid); px(x + Math.round(w * 0.36), y - 1, b + 2, 6, mid); px(x + Math.round(w * 0.66), y + 1, b - 2, 4, mid);
   px(x + Math.round(w * 0.14), y + 1, b - 4, 1, light); px(x + Math.round(w * 0.4), y - 1, b - 2, 1, light); px(x + Math.round(w * 0.7), y + 1, b - 5, 1, light);
   px(x + 2, y + 7, w - 4, 1, dark);
+}
+const shades = new Map();
+/** A colour made darker (k < 1) or lighter (k > 1). */
+function shade(hex, k) {
+  const key = hex + k;
+  if (!shades.has(key)) shades.set(key, `#${[1, 3, 5].map(i => Math.min(255, Math.round(parseInt(hex.slice(i, i + 2), 16) * k)).toString(16).padStart(2, '0')).join('')}`);
+  return shades.get(key);
 }
 /** Two colours mixed: t = 0 gives a, 1 gives b. */
 function blend(a, b, t) {

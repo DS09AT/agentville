@@ -1,0 +1,316 @@
+// A world run headless, for check-world and its tests: the SDK and a world's world.js in a node:vm context,
+// with a stand-in DOM and canvases that record what they draw. Each stop of the tour (web/worlds/test/tour.js)
+// is given to the world as the page would give it, frames are stepped by hand, and every exception is caught
+// with its file and line; a hook that never returns is cut off. The world's creatures (its animals() hook)
+// are checked against the animals kit's rules. No dependencies. A vm context keeps the world's names apart
+// from ours, not its reach: the command runs this contained (scripts/lib/contained.mjs).
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
+import { checkWorldJson } from '../../collector/worlds.mjs';
+import { oneLine } from './plain-text.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const WEB = join(ROOT, 'web');
+// The frame's scripts before world.js, in frame.html's order (the animals kit's when it is there); scene.js
+// too, for toScene and privateScene, as the page has them.
+const SDK = ['scene.js', 'brand.js', 'worlds/sdk/pixel.js', 'worlds/sdk/people.js', 'worlds/sdk/props.js', 'worlds/sdk/creatures.js', 'worlds/sdk/animals.js', 'worlds/sdk/grid.js', 'worlds/sdk/engine.js'].filter(f => existsSync(join(WEB, f)));
+const TOUR = join(WEB, 'worlds', 'test', 'tour.js');
+/** Every file a check reads besides the world's own folder: this module, what it imports, the SDK and the tour. */
+export const FILES = [fileURLToPath(import.meta.url), join(ROOT, 'collector', 'worlds.mjs'), join(ROOT, 'scripts', 'lib', 'plain-text.mjs'), ...SDK.map(f => join(WEB, f)), TOUR];
+const REQUIRED = ['W', 'slots', 'drawChar', 'bg', 'grid'];
+const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h.toString(36); };
+const NUMBERS = new Set(['offsetWidth', 'offsetHeight', 'clientWidth', 'clientHeight', 'scrollLeft', 'scrollTop', 'scrollWidth', 'scrollHeight', 'width', 'height', 'length', 'size']);
+
+// The animals kit's rules (docs/worlds.md, "Creatures"). The effects the engine draws for an action
+// (engine.js, showFx); the poses every creature is drawn in (creatures.js, its POSE_AS too, and
+// animals.js's stand and happy), and the duck's and the ostrich's own (the duck's slide is on ice);
+// the looks a kind has (the duck's, creatures.js); 40 characters a line (animals.js, LINE_MAX).
+// Copies: check-world.test.mjs fails when they drift.
+const FX = ['hearts', 'crumbs', 'dust', 'sparkle'];
+const POSES = ['stand', 'walk', 'run', 'eat', 'sleep', 'happy', 'yawn', 'startled', 'stretch', 'roll'];
+const POSES_OF = { duck: [...POSES, 'swim', 'dabble', 'slide'], ostrich: [...POSES, 'hide'] };
+const LOOKS_OF = { duck: ['drake', 'hen', 'duckling'], cat: ['grey', 'black'] };
+const LINE_MAX = 40, COUNT_MAX = 12, ACTIONS = [2, 4];
+// The habits a creature may have, and what it may do when something happens (animals.js, HABITS and react).
+const HABITS = ['climb', 'circles', 'hide', 'yawn', 'stretch', 'chaseTail', 'pounce', 'fetch', 'roll', 'laps', 'nap'];
+const REACTS = ['scatter', 'hop', 'gather', 'hide', 'run'];
+export const RULES = { FX, POSES, POSES_OF, LOOKS_OF, LINE_MAX, HABITS, REACTS };
+
+/**
+ * What a world's animals() returns (a list of creatures, or `{ cast, gags, play }`), held to the animals
+ * kit's rules. `problems` break them (the kit throws, drops a gag, or the rules say no); `pointers` are
+ * what it does its own way (an fx, pose or look it doesn't have: nothing, or the plain one; a gag that can
+ * never start), so they never fail a world. A line each, starting with the creature's kind (or the gag's
+ * id). `kinds`: the library's (CREATURES); `taken`: world.json's; `gagProblem`: the kit's own check of a
+ * gag (animals.js), none to skip gags; `spots`: what the world's spots() gives. Plain data in (functions
+ * and undefined are gone).
+ */
+export function creatureProblems(value, { kinds, taken = [], gagProblem = null, spots = {} }) {
+  const problems = [], pointers = [];
+  if (value == null) return { problems, pointers };
+  const cast = Array.isArray(value) ? value : Array.isArray(value?.cast) ? value.cast : null;
+  if (!cast) return { problems: ['animals(): it returns a list of creatures, or { cast: [...] }'], pointers };
+  const num = v => typeof v === 'number' && Number.isFinite(v), isObj = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+  cast.forEach((c, i) => {
+    if (!isObj(c)) { problems.push(`creature ${i + 1}: not an object { kind, actions, lines, … }`); return; }
+    const known = kinds.includes(c.kind), who = typeof c.kind === 'string' && c.kind ? c.kind : `creature ${i + 1}`;
+    const say = m => problems.push(`${who}: ${m}`), point = m => pointers.push(`${who}: ${m}`);
+    if (!known) say(`${c.kind === undefined ? 'no kind' : `no creature called ${JSON.stringify(c.kind)}`}: the library has ${kinds.join(', ')}`);
+    else if (taken.includes(c.kind)) say(`world.json's "taken" lists it: this world draws data in that shape, so its animals can't be one`);
+    if (c.count != null && !(Number.isInteger(c.count) && c.count >= 1 && c.count <= COUNT_MAX)) say(`count is ${JSON.stringify(c.count)}: a whole number from 1 to ${COUNT_MAX}`);
+    if ((c.looks != null || c.look != null) && known) {
+      const own = LOOKS_OF[c.kind] ?? [];
+      if (c.looks != null && !Array.isArray(c.looks)) say('looks is a list, one look per creature');
+      else for (const l of new Set([...(c.looks ?? []), ...(c.look != null ? [c.look] : [])])) if (!own.includes(l)) point(own.length ? `look ${JSON.stringify(l)} isn't one of the ${c.kind}'s (${own.join(', ')}): drawn as the ${own[0]}` : `look ${JSON.stringify(l)}: the ${c.kind} has no looks`);
+    }
+    const lines = isObj(c.lines) ? c.lines : {};
+    if (c.lines != null && !isObj(c.lines)) say('lines is { idle: [...], <key>: [...] }');
+    const actions = Array.isArray(c.actions) ? c.actions : [];
+    if (!c.visits && (actions.length < ACTIONS[0] || actions.length > ACTIONS[1])) say( // one that only visits has no menu: touch it and it is gone
+      `${actions.length} action${actions.length === 1 ? '' : 's'} in its menu; a creature has ${ACTIONS[0]} to ${ACTIONS[1]}`);
+    const poses = POSES_OF[c.kind] ?? POSES;
+    actions.forEach((a, k) => {
+      if (!isObj(a)) { say(`action ${k + 1}: not an object { label, fx?, pose?, line? }`); return; }
+      const labelled = typeof a.label === 'string' && a.label.trim() !== '', name = labelled ? `action ${JSON.stringify(a.label)}` : `action ${k + 1}`;
+      if (!labelled) say(`${name} has no label`);
+      if (a.fx != null && !FX.includes(a.fx)) point(`${name}: fx ${JSON.stringify(a.fx)} isn't one of ${FX.join(', ')}: nothing is drawn`);
+      if (a.pose != null && known && !poses.includes(a.pose)) point(`${name}: pose ${JSON.stringify(a.pose)} isn't one the ${c.kind} has (${poses.join(', ')}): it stands`);
+      if (a.line != null && !Object.hasOwn(lines, a.line)) say(`${name}: line ${JSON.stringify(a.line)} isn't a key of lines`);
+    });
+    for (const [key, list] of Object.entries(lines)) {
+      if (!Array.isArray(list)) { say(`lines.${key} is a list of lines`); continue; }
+      for (const t of list) if (String(t).length > LINE_MAX) say(`lines.${key} has a line of ${String(t).length} characters (${LINE_MAX} at most): ${JSON.stringify(String(t))}`);
+    }
+    if (c.home != null && !(isObj(c.home) && ['x', 'y', 'w', 'h'].every(k => num(c.home[k])))) say('home is { x, y, w, h }, in numbers');
+    if (c.bank != null && !(Array.isArray(c.bank) && c.bank.every(b => Array.isArray(b) && b.length === 2 && b.every(num)))) say('bank is a list of [x, y]');
+    if (c.habits != null && !Array.isArray(c.habits)) say('habits is a list');
+    else for (const h of c.habits ?? []) if (!HABITS.includes(h)) point(`habit ${JSON.stringify(h)} isn't one of ${HABITS.join(', ')}: it never does it`);
+    if (c.reacts != null && !isObj(c.reacts)) say('reacts is { <event kind>: what }');
+    else for (const [k, v] of Object.entries(c.reacts ?? {})) if (v !== null && !REACTS.includes(v)) point(`reacts.${k} is ${JSON.stringify(v)}, not one of ${REACTS.join(', ')} (or null): it does nothing`);
+  });
+  if (gagProblem && !Array.isArray(value)) gagRules(value, { cast, gagProblem, spots, problems, pointers });
+  return { problems, pointers };
+}
+
+/**
+ * The kit's gagProblem (animals.js), called as the world code it is: it runs in the world's context, so it goes
+ * through `call` (under the timeout), and only a string is taken back, on one line and cut (a world can patch what
+ * it uses). A world can still make its own gags pass: check-world helps its author, it isn't a gate. Null with no kit.
+ */
+export function guardedGagCheck(check, call) {
+  if (typeof check !== 'function') return null;
+  return gag => {
+    let why;
+    try { why = call(() => check(gag), 'checking its gags'); } catch { return "check-world couldn't check it: the kit's check didn't return"; }
+    if (typeof why === 'string') return oneLine(why, 160);
+    return why == null || why === false ? '' : 'it is written wrong';
+  };
+}
+
+/** The gags and play in `{ cast, gags, play }`: written as the kit reads them (its own gagProblem), their lines, their spots. */
+function gagRules(value, { cast, gagProblem, spots, problems, pointers }) {
+  const kindsInCast = new Set(cast.map(c => c?.kind)), seen = new Set();
+  for (const field of ['gags', 'play']) {
+    if (value[field] == null) continue;
+    if (!Array.isArray(value[field])) { problems.push(`animals(): ${field} is a list of ${field === 'gags' ? 'gags' : 'play gags'}`); continue; }
+    const noun = field === 'gags' ? 'gag' : 'play';
+    value[field].forEach((g, i) => {
+      const id = typeof g?.id === 'string' ? g.id : null, who = `${noun} ${id ?? i + 1}`;
+      const why = id ? gagProblem(g) : 'it has no id';
+      if (why) { problems.push(`${who}: ${why}`); return; }
+      if (seen.has(id)) problems.push(`${who}: another gag has the same id (a gag dropped drops both)`);
+      seen.add(id);
+      for (const [key, list] of Object.entries(g.lines ?? {})) for (const t of Array.isArray(list) ? list : []) if (String(t).length > LINE_MAX) problems.push(`${who}: lines.${key} has a line of ${String(t).length} characters (${LINE_MAX} at most): ${JSON.stringify(String(t))}`);
+      const used = new Set([g.needs.spot, ...g.steps.flatMap(st => [st.to, st.while]).filter(t => typeof t === 'string' && t.startsWith('spot:')).map(t => t.slice(5))].filter(Boolean));
+      for (const name of used) if (!Array.isArray(spots?.[name])) problems.push(`${who}: its spot ${JSON.stringify(name)} isn't in spots()`);
+      for (const k of Object.keys(g.needs)) if (!['farmer', 'chicken', 'spot'].includes(k) && !kindsInCast.has(k)) pointers.push(`${who}: it needs a ${k}, and the cast has none: it never starts`);
+      if (field === 'play' && g.needs.farmer !== 'idle') pointers.push(`${who}: no farmer in its needs: it plays out like a gag`);
+    });
+  }
+}
+
+/** A stand-in DOM: every element a Proxy that takes any call; a canvas's 2D context records its fills and images. */
+function stubDom(log) {
+  // A canvas's own ops identify it when drawn onto another (a sprite, the ground): hashed once per change, and
+  // kept only up to a cap (the main canvas, drawn every frame, would grow without end; nothing draws it elsewhere).
+  const OPS_MAX = 50_000, LOG_MAX = 500_000;
+  const sigOf = img => {
+    if (!img?.__ops) return '?';
+    if (img.__hashedLen !== img.__ops.length) { img.__hash = hash(JSON.stringify(img.__ops)); img.__hashedLen = img.__ops.length; }
+    return img.__hash;
+  };
+  const context = owner => new Proxy({ fillStyle: '#000000', globalAlpha: 1 }, {
+    get: (t, k) => {
+      const put = op => { if (owner.__ops.length < OPS_MAX) owner.__ops.push(op); if (log.length < LOG_MAX) log.push(op); else if (log.length === LOG_MAX) log.push(['…']); }; // a drawing loop can't fill the memory
+      if (k === 'fillRect') return (x, y, w, h) => put(['r', String(t.fillStyle), t.globalAlpha, x, y, w, h]);
+      if (k === 'clearRect') return (x, y, w, h) => put(['c', x, y, w, h]);
+      if (k === 'drawImage') return (img, ...a) => put(['i', sigOf(img), ...a.map(Number)]);
+      if (k === 'measureText') return () => ({ width: 0 });
+      if (k in t) return t[k];
+      return () => make(); // anything else (a gradient, a pattern, getImageData): a stand-in that takes any call
+    },
+    set: (t, k, v) => { t[k] = v; return true; },
+  });
+  const make = () => new Proxy(function () {}, {
+    get: (t, k) => {
+      if (k === Symbol.toPrimitive) return () => 0;
+      if (k === Symbol.iterator) return function* () {};
+      if (k === 'then') return undefined;
+      if (k === '__ops') return (t.__ops ??= []);
+      if (k === '__hash' || k === '__hashedLen') return t[k];
+      if (NUMBERS.has(k)) return t[k] ?? (k === 'offsetWidth' || k === 'width' ? 400 : k === 'offsetHeight' || k === 'height' ? 300 : 0);
+      if (k === 'getBoundingClientRect') return () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300, x: 0, y: 0 });
+      if (k === 'style') return (t[k] ??= { setProperty() {}, removeProperty() {}, getPropertyValue: () => '' }); // the engine sets a bubble's custom properties
+      if (k === 'dataset') return (t[k] ??= {});
+      if (k === 'classList') return { add() {}, remove() {}, toggle() {}, contains: () => false };
+      if (k === 'isConnected') return true;
+      if (k === 'hidden' || k === 'open') return t[k] ?? false;
+      if (k === 'getContext') return () => { t.__ops ??= []; return (t.__ctx ??= context(t)); };
+      if (k === 'querySelectorAll') return () => [];
+      return (t[k] ??= make());
+    },
+    set: (t, k, v) => { t[k] = v; return true; },
+    apply: () => make(),
+  });
+  return { make, document: Object.assign(make(), { hidden: false }) };
+}
+
+function tour() {
+  const g = {};
+  g.window = g;
+  vm.runInContext(readFileSync(TOUR, 'utf8'), vm.createContext(g));
+  return JSON.parse(JSON.stringify({ NOW: g.AgentvilleTour.NOW, stops: g.AgentvilleTour.stops, checks: g.AgentvilleTour.checks }));
+}
+
+export async function checkWorld({ dir, file = 'world.js', json = 'world.json', frames = 8, timeoutMs = 2000 } = {}) {
+  const out = { errors: [], defaults: [], same: [], unknown: [], creatures: [], notes: [], json: null, ran: 0 };
+  let taken = [];
+  try {
+    const j = JSON.parse(readFileSync(join(dir, json), 'utf8'));
+    out.json = checkWorldJson(j);
+    if (Array.isArray(j?.taken)) taken = j.taken;
+  } catch (err) { out.json = err.code === 'ENOENT' ? 'world.json is missing.' : `world.json can't be read: ${err.message}`; }
+  const worldPath = join(dir, file);
+  const at = (path, line, col) => `${path === worldPath ? file : relative(WEB, path)}:${line}${col ? `:${col}` : ''}`;
+  // Where an exception came from: world.js's line if it is in the stack, else the SDK's (never this harness's own).
+  const whereOf = err => {
+    const stack = String(err?.stack ?? '');
+    // Node puts the throw site first ("<file>:<line>\n<source>"): a world.js that doesn't parse, or a throw in
+    // world.js itself. When the throw site is the SDK's, the world.js line that called it wins, from the stack.
+    const top = stack.match(/^(\/[^\n]*?):(\d+)\n/);
+    if (top?.[1] === worldPath) return at(top[1], top[2]);
+    const found = [...stack.matchAll(/(?:\(|at )(\/[^()\n]*?):(\d+):(\d+)\)?$/gm)] // a path may hold spaces
+      .filter(m => m[1] === worldPath || m[1].startsWith(WEB + sep));
+    const f = found.find(m => m[1] === worldPath) ?? found[0];
+    return f ? at(f[1], f[2], f[3]) : '';
+  };
+  let doing = 'running world.js'; // what the world was doing, for a hook cut off (its stack names no line)
+  const timedOut = err => err?.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT';
+  const problem = err => ({ message: timedOut(err) ? `a hook didn't return within ${timeoutMs / 1000} s (a loop?), while ${doing}` : `${err?.name ?? 'Error'}: ${err?.message ?? err}`, where: whereOf(err) });
+
+  let worldCode;
+  try { worldCode = readFileSync(worldPath, 'utf8'); } catch { out.errors.push({ stop: '(loading)', message: `${file} is missing.`, where: '' }); return out; }
+  let worldScript;
+  try { worldScript = new vm.Script(worldCode, { filename: worldPath }); } catch (err) { out.errors.push({ stop: '(loading)', ...problem(err) }); return out; }
+  const sdk = SDK.map(f => new vm.Script(readFileSync(join(WEB, f), 'utf8'), { filename: join(WEB, f) }));
+  const { NOW, stops, checks } = tour(), sigs = new Map(), unknown = new Set();
+  let current = '(loading)', timeouts = 0, creaturesChecked = false;
+  const onRejection = err => { // once per stop: a promise that fails every frame is one problem
+    const e = { stop: current, message: `a promise failed: ${err?.message ?? err}`, where: whereOf(err) };
+    if (!out.errors.some(x => x.stop === e.stop && x.message === e.message && x.where === e.where)) out.errors.push(e);
+  };
+  process.on('unhandledRejection', onRejection);
+  try {
+    for (const stop of stops) {
+      current = stop.name;
+      // Each stop a task of its own, never inside a promise callback: a hook cut off there would leave Node's
+      // bookkeeping of async callbacks half done.
+      const r = await new Promise((resolve, reject) => setImmediate(() => { try { resolve(runStop(stop)); } catch (err) { reject(err); } }));
+      out.ran++;
+      for (const u of r.unknown ?? []) unknown.add(u);
+      if (r.defaults && !out.defaults.length) out.defaults = r.defaults;
+      if (r.error) {
+        out.errors.push({ stop: stop.name, ...r.error });
+        if (r.fatal) break;
+        if (r.timeout && ++timeouts >= 3) { out.errors.push({ stop: '(stopped)', message: "three stops had a hook that didn't return: the rest of the tour was skipped", where: '' }); break; }
+      } else sigs.set(stop.name, r.sig);
+      await new Promise(resolve => setImmediate(resolve)); // a promise the world left failing is reported against this stop
+    }
+  } finally {
+    process.off('unhandledRejection', onRejection);
+  }
+  for (const [item, a, b] of checks) if (sigs.has(a) && sigs.has(b) && sigs.get(a) === sigs.get(b)) out.same.push(`${item}: "${b}" draws the same as "${a}"`);
+  out.unknown = [...unknown].sort();
+  return out;
+
+  /**
+   * The world's creatures, once (the first stop that registers): what its animals() returns, read inside the
+   * vm under the timeout and as plain data, so neither a loop nor a getter can hang this. A hook that throws
+   * or never returns is left to the stops, which report it (the engine calls animals() as the world starts).
+   */
+  function checkCreatures(hooks, call, g, kitGagCheck) {
+    if (creaturesChecked || !hooks || typeof hooks.animals !== 'function') return;
+    creaturesChecked = true;
+    let value;
+    try { value = JSON.parse(call(() => JSON.stringify(hooks.animals() ?? null), 'giving its animals') ?? 'null'); } catch { return; }
+    let spots = {};
+    try { spots = typeof hooks.spots === 'function' ? JSON.parse(call(() => JSON.stringify(hooks.spots() ?? {}), 'giving its spots') ?? '{}') : {}; } catch { spots = {}; }
+    const gagProblem = guardedGagCheck(kitGagCheck, call);
+    const { problems, pointers } = creatureProblems(value, { kinds: Object.keys(g.CREATURES ?? {}), taken, gagProblem, spots });
+    out.creatures = problems;
+    out.notes.push(...pointers.map(p => `creatures: ${p}`));
+    const cast = Array.isArray(value) ? value : Array.isArray(value?.cast) ? value.cast : [];
+    if (typeof hooks.roam !== 'function' && cast.some(c => !c?.home)) out.notes.push("no roam(): its creatures aren't shown");
+  }
+
+  /** One stop in a fresh context: the SDK, the world, its start, the stop's snapshots, a few frames each; the last frame's drawing as a signature. */
+  function runStop(stop) {
+    const log = [], dom = stubDom(log), queued = [];
+    let seed = 7, now = 0;
+    const handlers = {};
+    const g = {
+      document: dom.document, console: { log() {}, info() {}, warn() {}, error() {} },
+      Math: Object.assign(Object.create(Math), { random: () => (seed = (seed * 16807) % 2147483647) / 2147483647 }),
+      Date: class extends Date { constructor(...a) { super(...(a.length ? a : [NOW])); } static now() { return NOW; } },
+      requestAnimationFrame: fn => queued.push(fn), cancelAnimationFrame() {}, setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
+      ResizeObserver: class { observe() {} disconnect() {} }, Image: class {}, Path2D: class {}, performance: { now: () => now },
+      addEventListener() {}, removeEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }), devicePixelRatio: 1,
+      getComputedStyle: () => ({ getPropertyValue: () => '' }), location: { origin: 'null', search: '' },
+      Agentville: { raw: (h, o) => { Object.assign(handlers, h); handlers.raw = !o?.engine; }, send() {} },
+    };
+    g.window = g;
+    // The world's promise callbacks run in each call, under its timeout: a chain of them that never ends is cut off too.
+    const ctx = vm.createContext(g, { microtaskMode: 'afterEvaluate' });
+    const call = (fn, what) => { doing = what; g.__job = fn; return vm.runInContext('__job()', ctx, { timeout: timeoutMs, filename: 'check-world' }); };
+    const unknownOf = () => [...(g.Agentville.people?.unknown ?? [])];
+    const fail = (err, fatal = false) => ({ error: problem(err), fatal, timeout: timedOut(err), unknown: unknownOf() });
+    try { for (const s of sdk) s.runInContext(ctx, { timeout: timeoutMs }); }
+    catch (err) { return { error: { message: `check-world couldn't load the SDK: ${err?.message ?? err}`, where: whereOf(err) }, fatal: true }; }
+    const kitGagCheck = g.gagProblem; // the kit's own, taken before world.js runs (it could put its own there)
+    vm.runInContext('(() => { const real = window.Agentville.world; if (real) window.Agentville.world = hooks => { window.__hooks = hooks; return real(hooks); }; })();', ctx);
+    doing = 'running world.js';
+    try { worldScript.runInContext(ctx, { timeout: timeoutMs }); } catch (err) { return fail(err, true); }
+    if (!handlers.start) return { error: { message: 'world.js never registered: it must call Agentville.world(hooks) or Agentville.raw(handlers).', where: file }, fatal: true };
+    const defaults = g.__hooks ? JSON.parse(JSON.stringify(vm.runInContext('Object.keys(withDefaults({ W: 1, slots() {}, drawChar() {}, bg() {} }))', ctx))).filter(k => !REQUIRED.includes(k) && !(k in g.__hooks)) : [];
+    checkCreatures(g.__hooks, call, g, kitGagCheck);
+    const prefs = { sky: stop.sky };
+    const opts = {
+      still: false, navState: () => ({}), request: () => new Promise(() => {}), // made-up answers are the test page's; here a request waits
+      onPickAgent() {}, onOpenDoc() {}, onShowRepos() {}, onStartSession() {}, onNav() {}, onBell() {}, onMotion() {}, onDiary() {},
+    };
+    const step = n => { for (let i = 0; i < n; i++) { now += 40; for (const fn of queued.splice(0)) call(() => fn(now), 'drawing a frame'); } };
+    try {
+      call(() => handlers.start({ el: dom.make(), opts, prefs: { get: k => prefs[k] ?? null, set: (k, v) => { prefs[k] = String(v); } } }), 'starting');
+      for (let i = 0; i < 2; i++) { // every stop runs the same number of frames, so two stops differ only by what they show
+        const snap = stop.frames[i];
+        if (snap) call(() => { const s = g.AgentvilleScene.toScene(snap); handlers.scene(stop.private ? g.AgentvilleScene.privateScene(s) : s); }, 'taking a scene');
+        step(frames);
+      }
+      log.length = 0;
+      step(1);
+    } catch (err) { return { ...fail(err), defaults }; }
+    return { sig: hash(JSON.stringify(log)), defaults, unknown: unknownOf() };
+  }
+}

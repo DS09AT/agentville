@@ -8,37 +8,18 @@
   /* ---------- the scene: what the farm draws, from the snapshot (pure, tested) ---------- */
 
   const SHIRT = ['#d9673a', '#4a7bd0', '#2fa57a', '#8a6fd8', '#d55181', '#c99a16', '#e05555', '#3c9c3c'];
-  const hashOf = id => {
-    let h = 0;
-    for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return h;
-  };
   // A farmer's shirt is its agent's colour: the scene's colorIndex (web/scene.js keeps the same list).
-  /** One of n choices for an id; each salt mixes the hash differently, so the choices don't move together. */
-  const pick = (id, salt, n) => {
-    let h = hashOf(id) ^ Math.imul(salt, 0x9e3779b1);
-    h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
-    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
-    return ((h ^ (h >>> 16)) >>> 0) % n;
-  };
+  const { hashOf, pick, lookFor, sprite: personSprite } = window.Agentville.people;
 
-  // What makes each farmer look like itself, besides its shirt: hat, hair, skin, overalls, an extra.
-  const HATS = ['straw', 'cap', 'beanie', 'bandana', 'none'];
+  // What makes each farmer look like itself, besides its shirt: farm clothes for the people kit (people.js),
+  // picked by the agent's id. A hat (straw, or a dyed one), overalls over the shirt, an extra; codex agents wear slate caps.
   const STRAW = [['#e9c46a', '#b5562f'], ['#e2c27a', '#3c5a99'], ['#f0d58c', '#2f6b2f'], ['#d4ad55', '#8e2b2b']]; // [hat, band]
   const DYED = [['#d64545', '#8e2b2b'], ['#4f9d4a', '#2f6b2f'], ['#4a74c9', '#2c4a85'], ['#8a5fc0', '#5a3b85'], ['#ece6d6', '#9a9488'], ['#3a3a40', '#c9a24a'], ['#e58a2e', '#9a5212']];
   const CODEX_CAPS = [['#5d7184', '#2a3644'], ['#4a7a8c', '#22404a'], ['#7a8a9c', '#3a4452'], ['#3f4f66', '#cfd8e3']]; // slate caps
-  const HAIR = ['#2b1d14', '#5a3a22', '#a0522d', '#d9b26a', '#9a9a9a'];
-  const SKIN = ['#f1c7a1', '#e0a878', '#c68a5a', '#9c6644', '#7d5236'];
   const OVERALLS = ['#3c5a99', '#6b4f2a', '#4a4a52', '#2f6b4f', '#7a3b5a'];
-  const EXTRAS = ['none', 'beard', 'glasses', 'cheeks'];
-  function lookOf(a) {
-    const hat = a.kind === 'codex' ? 'cap' : HATS[pick(a.id, 1, HATS.length)];
-    const colors = a.kind === 'codex' ? CODEX_CAPS[pick(a.id, 2, CODEX_CAPS.length)] : hat === 'straw' ? STRAW[pick(a.id, 2, STRAW.length)] : DYED[pick(a.id, 2, DYED.length)];
-    return {
-      hat, hatColor: colors[0], band: colors[1], hair: HAIR[pick(a.id, 3, HAIR.length)], skin: SKIN[pick(a.id, 4, SKIN.length)],
-      overalls: OVERALLS[pick(a.id, 5, OVERALLS.length)], extra: EXTRAS[pick(a.id, 6, EXTRAS.length)],
-    };
-  }
+  const FARMER = { hat: ['straw', 'cap', 'beanie', 'bandana', 'none'], hatColors: { straw: STRAW, '*': DYED }, top: 'shirt', bottom: 'overalls', bottomColors: OVERALLS, extra: ['none', 'beard', 'glasses', 'cheeks'] };
+  const CODEX = { ...FARMER, hat: 'cap', hatColors: CODEX_CAPS };
+  const lookOf = a => lookFor(a, a.kind === 'codex' ? CODEX : FARMER);
   // And each field, by its repo: what grows there and the colour of its fence. The branch is a pennant.
   const CROPS = ['wheat', 'corn', 'carrot', 'cabbage', 'sunflower', 'tomato', 'pumpkin'];
   const FENCES = ['#c98d4f', '#8a8f96', '#9c3b30', '#5f7f9a', '#6b8f4a', '#4e3626'];
@@ -58,6 +39,19 @@
     if (!w) return null;
     const p = w.reset ? 0 : w.percentUsed;
     return { fill: Math.max(0, Math.min(1, p / 100)), lamp: p >= 90 ? 'red' : p >= 70 ? 'amber' : null, label: `${Math.round(p)}%`, resetsAt: w.resetsAt ?? null };
+  }
+  const SILO_X = [92, 8]; // the first silo where it always stood; a second one left of the barn, before the trees
+  /**
+   * The silos, two at most: [{ x, name, silo, who, plan }]. One for each Claude account (with one account, the plan's, and no name on
+   * it), then Codex's, while it has a reading and there is room (`who`: 'claude' or 'codex'). With a reading of Codex's and none of
+   * Claude's, Codex's stands alone, by the barn.
+   */
+  function silosOf(scene) {
+    const accs = scene.accounts ?? [], codex = scene.codexPlan ? [{ name: 'Codex', plan: scene.codexPlan, who: 'codex' }] : [];
+    const claude = accs.length < 2 ? [{ name: null, plan: scene.plan, who: 'claude' }] : accs.slice(0, 2).map(a => ({ name: a.name, plan: a.plan, who: 'claude' }));
+    const all = codex.length && accs.length < 2 && !siloOf(scene.plan) ? codex : [...claude, ...codex].slice(0, 2);
+    if (all.length > 1 && !all[0].name) all[0].name = 'Claude';
+    return all.map((s, i) => ({ x: SILO_X[i], name: all.length > 1 || s.who === 'codex' ? s.name : null, silo: siloOf(s.plan), who: s.who, plan: s.plan ?? null }));
   }
 
   /**
@@ -321,62 +315,64 @@
     if (frost) for (let k = 0; k < 4; k++) f(x0 + 2, y0 + 3 + k * 8, 68, 1, '#f4f8fb'); // frost on bare soil
   }
   function hay(f, x, y) { f(x - 5, y - 4, 10, 6, '#c9a24a'); f(x - 5, y - 4, 10, 1, '#f4d58d'); f(x - 2, y - 4, 1, 6, '#a8703c'); f(x + 2, y - 4, 1, 6, '#a8703c'); f(x - 4, y + 2, 10, 1, '#3f7d3a'); }
-  /** The barn: a red front gable with white trim, its roof behind, a big door with a white X. */
+  /** The barn: black board-and-batten under a metal roof, a clerestory window, a six-pane glass door with a light either side. */
   function barn(f, X, Y, S) {
-    const W2 = 52, red = '#b23a2e', plank = '#9c3b30', trim = '#f4ecd8';
-    f(X + W2, Y + 18, 4, 50, S.shadow); f(X + 3, Y + 66, W2, 3, S.shadow); // shadow
-    shingles(f, X - 1, Y, W2 + 2, 22, 0, ['#2a1d14', '#5a1f19', '#6b2a22', '#9c3b30']); // the roof going back
-    f(X + 25, Y, 2, 22, '#5a1f19');
-    for (let j = 0; j <= 14; j++) { const half = Math.round((j * 25) / 14), y = Y + 10 + j; f(X + 26 - half, y, half * 2, 1, red); f(X + 25 - half, y, 2, 1, trim); f(X + 25 + half, y, 2, 1, trim); } // the gable
-    f(X + 1, Y + 24, W2 - 2, 42, red);
-    for (let x = X + 4; x < X + W2 - 2; x += 4) f(x, Y + 26, 1, 40, plank);
-    f(X + 1, Y + 24, W2 - 2, 2, trim); f(X + 1, Y + 24, 2, 42, trim); f(X + W2 - 3, Y + 24, 2, 42, trim); f(X + W2 - 1, Y + 24, 1, 42, '#5a1f19');
-    f(X + 21, Y + 13, 10, 8, trim); f(X + 22, Y + 14, 8, 6, '#5a1f19'); f(X + 23, Y + 18, 6, 2, '#e9c46a'); // the hay loft
-    const dx = X + 14, dy = Y + 38;
-    f(dx - 2, dy - 2, 28, 30, trim); f(dx, dy, 24, 28, '#6b2a22');
-    for (const lx of [dx, dx + 12]) for (let t = 0; t < 28; t++) { const k = Math.round((t * 11) / 27); f(lx + k, dy + t, 1, 1, trim); f(lx + 11 - k, dy + t, 1, 1, trim); } // the X braces
-    f(dx + 11, dy, 2, 28, trim); f(dx, dy, 24, 1, '#5a1f19');
-    f(X + 24, Y + 31, 4, 3, '#3a3a40'); f(X + 25, Y + 33, 2, 1, '#ffd43b'); // the lamp
-    if (S.snow) { f(X - 1, Y, W2 + 2, 3, '#ffffff'); for (let j = 0; j <= 14; j += 2) f(X + 24 - Math.round((j * 25) / 14), Y + 9 + j, 3, 1, '#ffffff'); }
+    const cx = X + 27, black = '#26262b', batten = '#34343b', glass = '#a9cde6', steel = '#121215', h = y => 1 + Math.round(((y - Y - 4) * 27) / 20);
+    f(cx + 29, Y + 22, 4, 46, S.shadow); f(cx - 23, Y + 67, 54, 3, S.shadow); // shadow
+    for (let y = Y + 3; y <= Y + 24; y++) { const hh = h(Math.max(Y + 4, y)); f(cx - hh - 2, y, hh * 2 + 5, 1, y < Y + 5 ? '#c3cbd2' : '#9aa1a9'); } // the metal roof's edge
+    for (let y = Y + 5; y <= Y + 24; y++) { const hh = h(y); f(cx - hh, y, hh * 2 + 1, 1, black); }
+    f(cx - 27, Y + 25, 55, 42, black); for (let x = cx - 26; x < cx + 28; x += 4) f(x, Y + 25, 1, 42, batten);
+    for (let y = Y + 9; y <= Y + 24; y++) { const hh = h(y) - 2; for (let x = cx - 26; x < cx + 28; x += 4) if (Math.abs(x - cx) < hh) f(x, y, 1, 1, batten); }
+    f(cx - 10, Y + 14, 21, 6, steel); f(cx - 9, Y + 15, 19, 4, glass); f(cx - 3, Y + 15, 1, 4, steel); f(cx + 3, Y + 15, 1, 4, steel); // the clerestory
+    f(cx - 16, Y + 32, 33, 35, steel); // the glass door: six panes in a steel frame
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) { const x = cx - 15 + i * 11, y = Y + 33 + j * 17; f(x, y, 9, 16, glass); for (let t = 0; t < 6; t++) f(x + 1 + t, y + 9 - t, 1, 1, '#d6ecf8'); }
+    for (const sx of [cx - 21, cx + 20]) { f(sx, Y + 35, 2, 3, steel); f(sx, Y + 38, 2, 1, '#ffe6a6'); } // the wall lights
+    if (S.snow) { for (let y = Y + 3; y <= Y + 24; y++) { const hh = h(Math.max(Y + 4, y)); f(cx - hh - 2, y, 3, 1, '#ffffff'); f(cx + hh, y, 3, 1, '#ffffff'); } f(cx - 2, Y + 2, 5, 2, '#ffffff'); }
   }
-  /** A silo: a metal cylinder with a dome (red: Claude's plan; slate: Codex's); the grain gauge in its front is drawn every frame. */
-  const DOMES = { claude: ['#5a1f19', '#e04a3a', '#b23a2e', '#9c3b30'], codex: ['#22303c', '#7a8a9c', '#5d7184', '#3f4f66'] }; // edge, lit, dome, shade
+  /** A silo: a matte black tower under a metal dome (steel: Claude's plan; slate blue: Codex's), with a catwalk; the grain gauge in its window is drawn every frame. */
+  const DOMES = { claude: ['#5f6b7a', '#e6eef5', '#aab2ba', '#8a939c'], codex: ['#22303c', '#bcd0e6', '#6f8fb3', '#4f6f93'] }; // edge, lit, dome, shade
   function silo(f, X, Y, S, [edge, lit, dome, shadeC] = DOMES.claude) {
     f(X + 20, Y + 16, 4, 58, S.shadow); f(X + 2, Y + 74, 20, 2, S.shadow);
-    f(X - 1, Y + 10, 22, 64, '#3a3a40'); f(X, Y + 10, 20, 64, '#9aa4ad'); f(X, Y + 10, 4, 64, '#c3cbd2'); f(X + 1, Y + 10, 1, 64, '#e6eef5'); f(X + 15, Y + 10, 5, 64, '#8a8f96'); f(X + 18, Y + 10, 2, 64, '#5f6b7a');
-    for (let y = Y + 16; y < Y + 72; y += 9) f(X, y, 20, 1, '#5f6b7a');
     for (let j = 0; j < 11; j++) { const half = Math.round(10 * Math.sqrt(1 - ((10 - j) / 10.5) ** 2)); f(X + 10 - half - 1, Y + j, half * 2 + 2, 1, edge); f(X + 10 - half, Y + j, half * 2, 1, j < 3 ? lit : dome); f(X + 10 + half - 4, Y + j, Math.min(4, half), 1, shadeC); }
-    if (S.snow) f(X + 3, Y, 14, 3, '#ffffff');
-    f(X + 6, Y + 20, 8, 48, '#3a3a40'); f(X + 5, Y + 19, 10, 1, '#5f6b7a'); // the gauge's window
-    f(X + 2, Y + 70, 16, 4, '#5f6b7a');
+    f(X - 1, Y + 10, 22, 64, '#121215'); f(X, Y + 10, 20, 64, '#26262b'); f(X + 1, Y + 10, 2, 64, '#3a3a42');
+    for (let x = X + 5; x < X + 20; x += 5) f(x, Y + 10, 1, 64, '#1d1d21');
+    f(X - 3, Y + 9, 26, 1, '#121215'); f(X - 3, Y + 12, 26, 1, '#121215'); f(X - 3, Y + 9, 1, 4, '#121215'); f(X + 22, Y + 9, 1, 4, '#121215'); // the catwalk
+    f(X + 5, Y + 19, 10, 50, '#121215'); f(X + 6, Y + 20, 8, 48, '#3a3f45'); // the gauge's window
+    f(X - 2, Y + 70, 24, 4, '#8d8f92'); f(X - 2, Y + 70, 24, 1, '#b9bbc0'); // its plinth
+    if (S.snow) { f(X + 3, Y, 14, 3, '#ffffff'); f(X - 3, Y + 8, 26, 1, '#ffffff'); }
   }
-  /** The farmhouse, top middle: a shingled roof, cream walls, lit windows, the porch in front. */
+  /** The string of lights under the farmhouse's eave: how low its wire hangs at x, sagging between hooks and following the roof. */
+  const eaveWire = (X, Y, W2, x) => Y + 20 + Math.round(3 * Math.sin((((x - X + 4) % 17) / 17) * Math.PI)) + Math.round(((x - X) * 8) / (W2 + 16));
+  /** Where each bulb hangs, just under the wire (drawn, and lit at night). */
+  const eaveBulbs = (X, Y, W2) => Array.from({ length: Math.ceil(W2 / 8) }, (_, i) => [X + i * 8, eaveWire(X, Y, W2, X + i * 8) + 1]);
+  /** The farmhouse, top middle: timber under one sloping roof, glass walls and a glass door, string lights, the deck (your porch) in front. */
   function house(f, X, Y, S, PORCH_Y) {
-    const W2 = 136, wallY = Y + 32;
-    f(X + W2, Y + 10, 4, PORCH_Y - Y - 2, S.shadow); f(X + 2, PORCH_Y + 4, W2, 2, S.shadow); // shadow
-    shingles(f, X, Y, W2, 30, 9, ['#2a1d14', '#5a1f19', '#9c3b30', '#b23a2e']);
-    f(X + 104, Y + 4, 10, 16, '#5a1f19'); f(X + 105, Y + 4, 8, 15, '#9c3b30'); f(X + 105, Y + 4, 2, 15, '#b23a2e'); for (let y = Y + 7; y < Y + 18; y += 3) f(X + 105, y, 8, 1, '#6b2a22'); f(X + 103, Y + 2, 12, 3, '#3a3a40'); f(X + 114, Y + 8, 2, 12, '#6b2a22'); // the chimney
-    if (S.snow) for (let j = 0; j < 8; j++) { const d = Math.round(((29 - j) * 9) / 29); f(X + d, Y + j, W2 - 2 * d, 1, j < 6 ? '#ffffff' : '#e6eef5'); }
-    f(X + 4, wallY, W2 - 8, PORCH_Y - wallY - 10, '#e8d8b0');
-    for (let y = wallY + 3; y < PORCH_Y - 10; y += 3) f(X + 4, y, W2 - 8, 1, '#d4c294');
-    f(X + 4, wallY, W2 - 8, 2, '#c9b48a'); f(X + 4, wallY, 2, PORCH_Y - wallY - 10, '#f4ecd8'); f(X + W2 - 6, wallY, 2, PORCH_Y - wallY - 10, '#c9b48a');
-    for (const wx of [X + 16, X + 100]) { // windows, shutters, a flower box
-      f(wx - 4, wallY + 4, 3, 14, '#2f6b2f'); f(wx + 21, wallY + 4, 3, 14, '#2f6b2f');
-      f(wx - 1, wallY + 3, 22, 16, '#6b4320'); f(wx, wallY + 4, 20, 14, '#5ab4ff'); f(wx + 1, wallY + 5, 7, 2, '#a9dcf7'); f(wx + 10, wallY + 4, 1, 14, '#6b4320'); f(wx, wallY + 10, 20, 1, '#6b4320');
-      f(wx - 1, wallY + 19, 22, 3, '#8b5a2b'); for (let i = 0; i < 5; i++) f(wx + 1 + i * 4, wallY + 18, 2, 1, S.flowers[i % Math.max(1, S.flowers.length)] ?? '#6b8f4a');
+    const W2 = 136, wood = '#c8a271', woodD = '#b08a5a', frame = '#1d1d21', glass = '#a9cde6';
+    f(X + W2 + 6, Y + 14, 4, PORCH_Y - Y - 6, S.shadow); f(X + 2, PORCH_Y + 6, W2, 2, S.shadow); // shadow
+    f(X + 112, Y - 2, 4, 18, '#8a8f96'); f(X + 111, Y - 4, 6, 2, '#5f6b7a'); f(X + 112, Y - 2, 1, 18, '#c3cbd2'); // the steel flue
+    if (S.snow) f(X + 111, Y - 5, 6, 1, '#ffffff');
+    f(X + 4, Y + 14, W2 - 8, PORCH_Y - 10 - (Y + 14), wood); for (let y = Y + 16; y < PORCH_Y - 10; y += 3) f(X + 4, y, W2 - 8, 1, woodD);
+    for (let x = X - 8; x < X + W2 + 8; x++) { const top = Y + 10 + Math.round(((x - X + 8) * 8) / (W2 + 16)); f(x, top, 1, 5, '#2a2a2e'); f(x, top + 5, 1, 1, '#3f3f45'); if (S.snow) f(x, top - 2, 1, 2, '#ffffff'); } // one sloping roof
+    for (const gx of [X + 10, X + 84]) { // the glass walls, over a timber skirt (lit at night above the heads of farmers on the porch)
+      const gy = Y + 26, gh = 20;
+      f(gx - 1, gy - 1, 43, gh + 2, frame); f(gx, gy, 42, gh, glass);
+      for (let x = gx + 10; x < gx + 42; x += 11) f(x, gy, 1, gh, frame);
+      for (let t = 0; t < 12; t++) { f(gx + 3 + t, gy + 15 - t, 1, 1, '#d6ecf8'); f(gx + 24 + t, gy + 15 - t, 1, 1, '#d6ecf8'); }
     }
-    f(X + 59, wallY + 3, 18, PORCH_Y - wallY - 13, '#6b4320'); f(X + 61, wallY + 5, 14, PORCH_Y - wallY - 15, '#8b5a2b'); f(X + 63, wallY + 7, 4, 6, '#7a5230'); f(X + 69, wallY + 7, 4, 6, '#7a5230'); f(X + 72, wallY + 14, 2, 2, '#f0b429'); // the door
-    f(X + 80, wallY + 6, 4, 4, '#3a3a40'); f(X + 81, wallY + 7, 2, 2, '#ffd43b'); // the porch lamp
-    // the porch: planks seen from above, its front edge, the steps down to the lane
-    f(X - 4, PORCH_Y - 10, W2 + 8, 12, '#a8703c'); f(X - 4, PORCH_Y - 10, W2 + 8, 1, '#6b4320');
-    for (let x = X - 1; x < X + W2 + 4; x += 6) f(x, PORCH_Y - 9, 1, 11, '#8b5a2b');
-    f(X - 4, PORCH_Y + 1, W2 + 8, 1, '#c98d4f'); f(X - 4, PORCH_Y + 2, W2 + 8, 3, '#6b4320'); f(X - 4, PORCH_Y + 5, W2 + 8, 1, '#2a1d14');
-    f(X + 58, PORCH_Y + 5, 20, 3, '#8b5a2b'); f(X + 58, PORCH_Y + 5, 20, 1, '#c98d4f'); f(X + 58, PORCH_Y + 8, 20, 1, '#4e3626');
+    f(X + 57, Y + 24, 22, PORCH_Y - 10 - Y - 24, frame); f(X + 59, Y + 26, 18, PORCH_Y - 10 - Y - 26, glass); f(X + 68, Y + 26, 1, PORCH_Y - 10 - Y - 26, frame); f(X + 66, Y + 38, 1, 6, '#c3cbd2'); // the glass door
+    for (let x = X - 4; x < X + W2 + 4; x++) f(x, eaveWire(X, Y, W2, x), 1, 1, '#3f3f45'); // the string
+    for (const [bx, by] of eaveBulbs(X, Y, W2)) f(bx, by, 2, 2, '#ffe08a');
+    // the deck: wide boards, a slim steel railing open at the steps, a planter of grasses at each end
+    f(X - 5, PORCH_Y - 10, W2 + 10, 12, '#8d7e6e'); for (let y = PORCH_Y - 8; y < PORCH_Y + 2; y += 3) f(X - 5, y, W2 + 10, 1, '#776a5c'); f(X - 5, PORCH_Y - 10, W2 + 10, 1, '#5e5348');
+    f(X - 5, PORCH_Y + 2, W2 + 10, 3, '#5e5348'); f(X - 5, PORCH_Y + 5, W2 + 10, 1, '#2a2a2e');
     // its two ends, told apart at a glance: a red runner where they wait on you, a straw rug where those who are done sit, a mat at the door between
-    for (const [x, w, mid, lit, dark] of [[X - 4, 63, '#9c3b30', '#c8584c', '#6b2a22'], [X + 80, 60, '#c9a24a', '#e9c46a', '#8a7140']]) {
+    for (const [x, w, mid, lit, dark] of [[X + 3, 55, '#9c3b30', '#c8584c', '#6b2a22'], [X + 79, 55, '#c9a24a', '#e9c46a', '#8a7140']]) {
       f(x, PORCH_Y - 7, w, 8, mid); f(x, PORCH_Y - 7, w, 1, lit); f(x, PORCH_Y, w, 1, dark); for (let i = 3; i < w - 2; i += 5) f(x + i, PORCH_Y - 5, 1, 4, dark);
     }
     f(X + 60, PORCH_Y - 4, 16, 5, '#6b8f4a'); f(X + 60, PORCH_Y - 4, 16, 1, '#8fb26a');
+    for (const [a, b] of [[X - 5, X + 56], [X + 80, X + W2 + 5]]) { f(a, PORCH_Y - 7, b - a, 1, frame); for (let x = a; x < b; x += 12) f(x, PORCH_Y - 7, 1, 8, frame); f(b - 1, PORCH_Y - 7, 1, 8, frame); }
+    f(X + 56, PORCH_Y + 5, 24, 3, '#8d7e6e'); f(X + 56, PORCH_Y + 8, 24, 1, '#5e5348'); // the steps
+    for (const px of [X - 4, X + W2 - 4]) { f(px, PORCH_Y - 5, 9, 5, '#3f3f45'); for (let i = 0; i < 4; i++) f(px + 1 + i * 2, PORCH_Y - 9 + (i % 2), 1, 4, S.snow ? '#e6eef5' : '#7fbf5a'); }
   }
   /** The henhouse and its run: a little coop, a ramp, a fence; hens and eggs are drawn every frame. */
   function henhouse(f, X, Y, S) {
@@ -408,7 +404,7 @@
   const W = 400, MAX_FIELDS = 18, COLW = 88, ROWH = 62, MIN_ROWS = 3, MAX_ROWS = 6;
   const PORCH_Y = 78, LANE = 87; // where farmers stand on the porch (and among the scarecrows); the lane in front of the buildings
   const CORR = [116, 218, 306]; // paths running down: the yard's, then the walkways between field columns
-  const HOUSE_DOOR = { x: 200, x0: 193, y0: 47, x1: 207, y1: 65 }; // the farmhouse's front door: where a new farmer comes out, and what opens for it
+  const HOUSE_DOOR = { x: 200, x0: 191, y0: 36, x1: 209, y1: 68 }; // the farmhouse's glass door (its panes): where a new farmer comes out, and what opens for it
   const MEADOW = [[28, 162], [74, 166], [40, 186], [86, 186]]; // where farmers working outside any repo stand
   const NAPS = [[97, 204], [97, 224]]; // hammocks by the pond: sessions that will wake up by themselves (/loop)
   const STALL = { x: 284, y: 48 }, BOARD = { x: 113, y: 62 }; // the market stall (pull requests), the notice board (memory)
@@ -460,64 +456,10 @@
   /* ---------- the farm theme: sprites, ground, weather, labels ---------- */
 
   const K = '#2a1d14';
-  // 14×16 farmer, front view, put together from its look. h hat · b hat band · r hair · s skin ·
-  // g glasses · p cheeks · C shirt · o overalls · P pole. The eyes are drawn on top (row 6, or 7 looking down).
-  const HEADS = {
-    straw: ['.....kkkk.....', '....kwwhhk....', '...khhhhhhk...', '..kbbbbbbbbk..', '.khhhhhhhhhhk.'],
-    cap: ['..............', '.....kkkk.....', '....kwwhhk....', '...khhhhhhk...', '...kbbbbbbbbk.'],
-    beanie: ['......kk......', '.....kbbk.....', '....kwwhhk....', '...khhhhhhk...', '...kbbbbbbk...'],
-    bandana: ['..............', '....kkkkkk....', '...kwwhhhhk...', '...khbhhbhkhk.', '...khhhhhhk.h.'],
-    none: ['..............', '....kkkkkk....', '...krrrrrrk...', '...krrrrrrk...', '...krrrrrrk...'],
-  };
-  // Four views: from the front (walking down or standing), from behind (walking up), and from the
-  // side (walking right; walking left is its mirror). The hat is the same from every side.
-  const FRONT_FACE = look => [
-    '...krssssrk...',
-    look.extra === 'glasses' ? '...kggkkggk...' : '...kssssssk...',
-    look.extra === 'beard' ? '...krssssrk...' : look.extra === 'cheeks' ? '...kpsssspk...' : '...kssssssk...',
-    look.extra === 'beard' ? '....krrrrk....' : '....kkkkkk....',
-  ];
-  const BACK_HEAD = ['...krrrrrrk...', '...krrrrrrk...', '...krrrrrrk...', '....kkkkkk....'];
-  const SIDE_FACE = look => [ // facing right: hair at the back, one eye (drawn later), a nose
-    '...krrsssssk..',
-    look.extra === 'glasses' ? '...krssggggk..' : '...krssssssk..',
-    look.extra === 'beard' ? '...krssrrrrrk.' : look.extra === 'cheeks' ? '...krsspssssk.' : '...krsssssssk.',
-    look.extra === 'beard' ? '....krrrrrk...' : '....kkkkkkk...',
-  ];
-  const HIPS = `...k${'o'.repeat(5)}Ok...`;
-  const FRONT_BODY = ['..kCCCCCCCck..', '.kCCoCCCCocck.', '.kCCooooooCck.', '.ks.oooooO.sk.', HIPS];
-  const BACK_BODY = ['..kCCCCCCCck..', '.kCCCoCCoCcck.', '.kCCooooooCck.', '.ks.oooooO.sk.', HIPS]; // straps cross on the back
-  const SIDE_BODY = ['...kCCCCCck...', '...kCCoCCck...', '...kCoooock...', '...kooooOok...', HIPS];
-  const LEGS = { s: ['...koo..ook...', '...kkk..kkk...'], a: ['...koo..ook...', '...kkk........'], b: ['...koo..ook...', '........kkk...'], p: ['......PP......', '......PP......'],
-    sit: ['..kooo..oook..', '..kkk....kkk..'] }; // seated: its knees apart
-  const SIDE_LEGS = { s: ['.....kook.....', '.....kkkk.....'], a: ['....ko..ok....', '...kk....kk...'], b: ['.....koko.....', '....kk..kk....'] };
-  /** A farmer's sprite rows: 14 wide, 16 tall, for a view (down, up, right, left) and a leg frame. */
-  function spriteRows(look, view = 'down', legs = 's') {
-    const head = HEADS[look.hat] ?? HEADS.straw;
-    if (view === 'left') return spriteRows(look, 'right', legs).map(r => [...r].reverse().join(''));
-    if (view === 'right') return [...head, ...SIDE_FACE(look), ...SIDE_BODY, ...(SIDE_LEGS[legs] ?? SIDE_LEGS.s)];
-    if (view === 'up') return [...head, ...BACK_HEAD, ...BACK_BODY, ...(LEGS[legs] ?? LEGS.s)];
-    return [...head, ...FRONT_FACE(look), ...FRONT_BODY, ...(LEGS[legs] ?? LEGS.s)];
-  }
-  const sprites = new Map();
-  function farmerSprite(look, color, scare, legs, up, view = 'down') {
-    if (scare) view = 'down';
-    const key = `${Object.values(look).join()}|${color}|${scare}|${legs}|${up}|${view}`;
-    if (sprites.has(key)) return sprites.get(key);
-    const pal = scare // a scarecrow keeps its farmer's hat and shape, in straw and sacking
-      ? { k: '#3a2a1a', h: '#c9a24a', w: '#e2c27a', b: '#7a5230', r: '#c9a24a', s: '#d8c48a', g: '#d8c48a', p: '#d8c48a', C: '#8b7a55', c: '#6b5a3a', o: '#6b5a3a', O: '#4e3626', P: '#6b4320' }
-      : { k: K, h: look.hatColor, w: shade(look.hatColor, 1.3), b: look.band, r: look.hair, s: look.skin, g: '#e6eef5', p: '#e58a8a', C: color, c: shade(color, 0.78), o: look.overalls, O: shade(look.overalls, 0.75), P: '#6b4320' };
-    for (const key of Object.keys(pal)) if (!'Cwc'.includes(key)) pal[key] = ink(pal[key]); // one palette; the shirt is the agent's colour, its light and shade made from it
-    const c = makeSprite(spriteRows(look, view, legs), pal);
-    if (up && view === 'down') { // one arm up, waving; or both (up: 2), stretching
-      const g = c.getContext('2d');
-      for (const at of up === 2 ? [x => x, x => 13 - x] : [x => x]) { // the left arm is the right one's mirror
-        g.clearRect(Math.min(at(11), at(12)), 11, 2, 2); g.fillStyle = color; g.fillRect(at(12), 5, 1, 6); g.fillStyle = pal.s; g.fillRect(at(12), 3, 1, 2); g.fillStyle = K; g.fillRect(at(13), 3, 1, 8);
-      }
-    }
-    sprites.set(key, c);
-    return c;
-  }
+  // A scarecrow keeps its farmer's hat and shape, in straw and sacking.
+  const SCARECROW = { k: '#3a2a1a', h: '#c9a24a', w: '#e2c27a', b: '#7a5230', r: '#c9a24a', s: '#d8c48a', g: '#d8c48a', p: '#d8c48a', C: '#8b7a55', c: '#6b5a3a', o: '#6b5a3a', O: '#4e3626', P: '#6b4320' };
+  /** A farmer's sprite: the people kit's (people.js); a scarecrow faces you, on its pole. */
+  const farmerSprite = (look, color, scare, legs, up, view = 'down') => personSprite(look, color, { view: scare ? 'down' : view, legs, wave: up, palette: scare ? SCARECROW : null });
 
   const FAMILY_PIN = { opus: '#8a5fc0', sonnet: '#3d7be0', haiku: '#2fa57a', fable: '#f08a24' };
   // Small things drawn over a farmer in more than one place: sleep, a bird on its hat, music.
@@ -612,14 +554,14 @@
 
   /* ---------- the porch cat: where it is and what it does there, by the clock; its ways; how it looks (pure, tested) ---------- */
   // Its places, each clear of the farmers on the porch and of their name tags: the door mat, the porch steps (their left side: a pumpkin has
-  // the right in October), the lane before either end of the porch and at its far ends, the house's roof above the door, and indoors (not seen).
-  const CAT = { mat: [200, 77], step: [196, 86], laneL: [168, 89], laneR: [250, 89], farL: [142, 89], farR: [276, 89], roof: [198, 36], in: [200, 69] };
+  // the right in October), the lane before either end of the porch and at its far ends, the house's roof by its flue, and indoors (not seen).
+  const CAT = { mat: [200, 77], step: [196, 86], laneL: [168, 89], laneR: [250, 89], farL: [142, 89], farR: [276, 89], roof: [236, 26], in: [200, 70] }; // roof: up its slope, between the "Your porch" sign and the flue
   // Up to the roof it goes from outside the house, never through it: from the lane beside the market stall onto the stall's awning, from there
-  // over to the roof's edge, then along the shingles above the "Your turn" sign.
-  const CAT_UP = { foot: [279, 89], stall: [288, 48], edge: [265, 33], ridge: 32 }; // ridge: the row it walks on the shingles, above the "Your turn" sign
+  // over to the roof's low end, then up its slope.
+  const CAT_UP = { foot: [279, 89], stall: [288, 48], edge: [270, 28] }; // edge: the roof's low end; from there it walks up the slope
   const CAT_LANE = 89, CAT_BLOCK_MS = 600_000;
   // [out of 100, where, how]: by day, by night. How: 'nap', 'watch' (it sits and looks about) or 'awake' (it sits, grooms, stretches, plays).
-  // By night it keeps where the porch lamp shines (its mat) or stays indoors: nothing lights it elsewhere.
+  // By night it keeps to its mat, before the lit glass door, or stays indoors: nothing lights it elsewhere.
   const CAT_DAY = [[16, 'mat', 'nap'], [26, 'mat', 'awake'], [36, 'step', 'watch'], [48, 'laneL', 'awake'], [60, 'laneR', 'awake'], [74, 'roof', 'nap'], [100, 'in', null]];
   const CAT_NIGHT = [[40, 'mat', 'nap'], [52, 'mat', 'awake'], [100, 'in', null]];
   /** The stretch of time `now` is in: stretches of 40 s to 4 min, one after the other (cut at each ten minutes), each with a number of its own. */
@@ -656,13 +598,13 @@
     const walk = (tx, ty) => { if (Math.abs(tx - x) > 0.5 || Math.abs(ty - y) > 0.5) legs.push({ to: [tx, ty] }); [x, y] = [tx, ty]; };
     const leap = (to, w) => { legs.push({ jump: to, where: w }); [x, y] = to; where = w; };
     if (where === 'in') { if (goal === 'in') return []; legs.push({ out: true }); [x, y] = CAT.in; where = 'ground'; walk(M[0], M[1]); }
-    if (where === 'roof' && !up) { walk(x, Math.min(y, U.ridge)); walk(U.edge[0] - 6, U.ridge); walk(...U.edge); leap(U.stall, 'stall'); }
+    if (where === 'roof' && !up) { walk(...U.edge); leap(U.stall, 'stall'); }
     if (where === 'stall' && !up) leap(U.foot, 'ground');
     if (up) {
       if (where === 'roof') { walk(...CAT.roof); return legs; } // up already: over to its place
       if (where === 'ground') { if (y <= 80) walk(M[0], CAT_LANE); else walk(x, CAT_LANE); walk(U.foot[0], CAT_LANE); leap(U.stall, 'stall'); }
       if (where === 'stall') leap(U.edge, 'roof');
-      walk(U.edge[0] - 6, U.ridge); walk(CAT.roof[0] + 26, U.ridge); walk(...CAT.roof);
+      walk(...CAT.roof);
       return legs;
     }
     const toMat = () => { if (y > 80) { walk(x, CAT_LANE); walk(M[0], CAT_LANE); } walk(M[0], M[1]); };
@@ -788,13 +730,6 @@
   const BLUEPRINT = { prop: 'blueprint', verb: 'drawing up plans (plan mode)', spot: 0 };
   /** What a farmer does now: its step's tool; in plan mode, a blueprint. */
   const doing = f => (f.mode === 'plan' && f.state === 'working' ? BLUEPRINT : f.step || f.tool ? actionOf(f.step, f.tool) : null);
-  const shades = new Map();
-  /** A colour made darker (k < 1) or lighter (k > 1). */
-  function shade(hex, k) {
-    const key = hex + k;
-    if (!shades.has(key)) shades.set(key, `#${[1, 3, 5].map(i => Math.min(255, Math.round(parseInt(hex.slice(i, i + 2), 16) * k)).toString(16).padStart(2, '0')).join('')}`);
-    return shades.get(key);
-  }
   // The seed packet on each field's fence: a 5×6 picture of its crop.
   const SEED_ICONS = {
     wheat: ['..y..', '.yyy.', '..y..', '.yyy.', '..g..', '..g..'],
@@ -1033,11 +968,8 @@
         if (blink(1.5)) { rp(12, 6, 1, 3, '#ffd43b'); rp(11, 7, 3, 1, '#ffd43b'); } // the knack of it
         return;
       }
-      case 'blueprint': { // plan mode: drawing up plans, a pencil moving over the sheet
-        rp(1, 9, 11, 6, '#2c4a85'); rp(1, 9, 11, 1, '#3d7be0'); rp(3, 10, 1, 5, '#a9dcf7'); rp(1, 12, 11, 1, '#a9dcf7'); rp(7, 11, 3, 2, '#a9dcf7');
-        rp(8 + blink(3) * 2, 7, 1, 3, '#f0b429'); rp(8 + blink(3) * 2, 10, 1, 1, '#1b1420');
-        return;
-      }
+      case 'blueprint': // plan mode: drawing up plans (the props kit's)
+        window.Agentville.props.draw('blueprint', rp, T); return;
       case 'clipboard': // planning: a chore list being ticked
         rp(1, 9, 5, 6, '#a8703c'); rp(2, 10, 3, 4, '#fff4d6'); rp(3, 9, 1, 1, '#9aa4ad'); rp(2, 11, 3, 1, '#9aa0a6'); rp(2, 13, 2, 1, '#9aa0a6');
         if (blink(2)) rp(4, 13, 1, 1, '#2fa57a');
@@ -1086,9 +1018,29 @@
     bell: ['....k....', '...kyk...', '..kyyyk..', '..kyyyk..', '..kyyyk..', '.kyyyyyk.', 'kkkkkkkkk', '...kyk...', '....k....'],
     winter: ['....b....', '.b..b..b.', '..b.b.b..', '...bbb...', 'bbbbbbbbb', '...bbb...', '..b.b.b..', '.b..b..b.', '....b....'],
     animals: ['.k.k.k...', '.k.k.k...', '.........', 'k.kkk.k..', '.kkkkk...', '.kkkkk...', '..kkk....', '.........', '.........'],
+    menu: ['.........', 'kkkkkkkkk', 'kkkkkkkkk', '.........', 'kkkkkkkkk', 'kkkkkkkkk', '.........', 'kkkkkkkkk', 'kkkkkkkkk'],
+    broadcast: ['.......k.', '.....kkk.', 'k..kkyyk.', 'kkkyyyyk.', 'kkyyyyyk.', 'kkkyyyyk.', 'k..kkyyk.', '....k.kk.', '....kk...'],
   };
-  // Agentville's mark (the farmhouse, from brand.js), for the farm's panel.
-  const brandSvg = () => (typeof window !== 'undefined' && window.Agentville?.svg ? window.Agentville.svg({ size: 18, cls: 'px-logo' }) : ''); // brand.js, loaded in the frame after the bridge
+  // The farm's words and colours in the engine's panel and buttons (panelHud): its stats line, its tooltips, its cream and wood.
+  const FARM_WORDS = {
+    place: 'farm', agent: 'farmer', agents: 'farmers',
+    costTip: "What the sessions on the farm have cost so far (each one's purse; from the mod)", costIcon: 'coin',
+    compactedWord: 'harvested', compactedTip: "Harvests: each time a session's conversation was compacted", compactedIcon: 'basket',
+    textColor: '#fff3d6', shadowColor: '#2a1d14', dimColor: '#c9b48a', labelColor: '#a9c79a', brandColor: '#ffe8a3', toolColor: '#4e3626', toolStateColor: '#8b5a2b',
+    sideTip: "Show the selected farmer's answer box, activity and files beside the farm",
+    followTip: 'Keep the farmer you picked in the middle of the view (zooms in); dragging the view turns it off',
+    followFirstTip: 'Pick a farmer first, then Follow keeps it in view',
+    restingTip: 'Idle farmers (under the tree) and stale ones (scarecrows): show them, or hide them to keep the farm to the agents at work',
+    bubblesTip: 'Speech bubbles with what each farmer last said. × hides one; its 💬 shows it again',
+    animalsTip: 'Animals on the farm, just for fun: click one to pet or feed it (or the pond, for the ducks). They never stand for anything',
+    skyTip: 'The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night',
+    seasonSwitchTip: "The season: live follows your plan's 5-hour limit (spring while it is fresh, winter when it is nearly used up); or hold one: spring, summer, autumn or winter. The panel's 📌 shows your real 5-hour use meanwhile",
+    motionTip: 'Walking and animation on the farm',
+    helpTip: 'How to read the farm',
+    zoomTip: 'Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in',
+    zoomAllTip: 'Show the whole farm',
+    menuTip: "The dashboard's buttons, the farm's switches, the bell, help and zoom", menuHead: 'ON THE FARM',
+  };
   const ICON_PAL = { k: '#4e3626', w: '#ffffff', y: '#f0b429', s: '#f4ecd8', r: '#e04a3a', g: '#3f9b3a', o: '#c8681a', b: '#a9dcf7' };
   const iconUrls = new Map();
   /** HTML for one of the farm's pixel icons (none without a DOM). */
@@ -1102,7 +1054,7 @@
 
   // The porch has two ends with the door between them: on the left those who wait on you, on their feet; on the right those
   // whose turn has ended, in a seat. Three places each, as before; the rest are counted on a "+N" sign.
-  const PORCH_SPOTS = { desk: [136, 158, 180], turn: [220, 242, 264] }; // 22 apart: a bubble clears its neighbour's hat
+  const PORCH_SPOTS = { desk: [142, 163, 184], turn: [216, 237, 258] }; // 21 apart: a bubble clears its neighbour's hat; clear of the glass door and of the deck's planters
   const MINUTE = 60_000;
   // The longer one waits on you, the more it wants you; the longer its turn has been over, the more it settles in.
   // [from this many minutes, what it is doing], the latest first.
@@ -1193,7 +1145,9 @@
     let L = layoutFor([]);
     let seenCompactions = null, seenMerged = null, seenWeather = null; // what the last scene had, so news can be told
     let scene = { fields: [], farmers: [] };
-    let season = 'summer';
+    let season = 'summer'; // the live season, from your 5-hour limit: the panel and its tooltip say it
+    // The season to draw: the engine's (the Season switch may hold one), else the live one. What is drawn or emitted by season reads this.
+    const shown = () => PXG.season ?? season;
     // The porch (porch life, above): as it is just now, the album of what was seen there, and what is new in it since the last scene.
     let night = false, keep = null, cheerUntil = 0, porchAt = 0, porch = porchNow([], 0);
     // Someone in the doorway (the door stands open), someone walking up to the door or over its mat (the cat makes way): when, by the frame clock.
@@ -1311,7 +1265,7 @@
         for (const box of bedStanding(bedLegs(s), w.i, w.t)) bed(clipTo(px, box), s, f.worktree ? '#9aa4ad' : f.fence ?? '#c98d4f', f.soil ?? '#7a5230', false);
         return;
       }
-      bed(px, s, f.worktree ? '#9aa4ad' : f.fence ?? '#c98d4f', f.soil ?? '#7a5230', season === 'winter' && st.kind !== 'grow');
+      bed(px, s, f.worktree ? '#9aa4ad' : f.fence ?? '#c98d4f', f.soil ?? '#7a5230', shown() === 'winter' && st.kind !== 'grow');
       const tally = fieldTally(s.key), now = Date.now();
       drawFresh(s, tally, now);
       // what was made and cleared here: a staked seedling for each new file (six at most), a stump for each deletion (four at most)
@@ -1362,8 +1316,10 @@
       for (let i = 0; i < Math.min(4, Math.ceil(f.ahead / 4)); i++) { const x = cx - 30 + (i % 2) * 8, yy = y - 6 - Math.floor(i / 2) * 6; px(x, yy, 7, 6, '#8b5a2b'); px(x, yy, 7, 1, '#c98d4f'); px(x + 3, yy, 1, 6, '#6b4320'); px(x, yy + 6, 7, 1, '#4e3626'); }
       for (let i = 0; i < Math.min(4, Math.ceil(f.dirty / 3)); i++) { const x = cx + 12 + (i % 3) * 9, yy = y - 6 - Math.floor(i / 3) * 6; px(x, yy, 8, 6, '#e9c46a'); px(x, yy, 8, 1, '#f4d58d'); px(x + 2, yy, 1, 6, '#c9a24a'); px(x + 5, yy, 1, 6, '#c9a24a'); px(x, yy + 6, 8, 1, '#8a7140'); }
     }
-    function seasonTip() {
+    /** The panel's season tooltip: live, how it follows the 5-hour limit; held (the Season switch), that it is held and what the live one would be. */
+    function seasonTip(mode = 'live') {
       const w = scene.plan?.windows?.find(x => x.kind === 'five_hour');
+      if (mode !== 'live') return `Held at ${mode} by the Season switch, not live. The live season would be ${season} (your plan's 5-hour limit: ${w ? (w.reset ? 'just reset' : `${Math.round(w.percentUsed)}% used`) : 'no reading yet'}). The switch goes back to live after winter`;
       return `The season follows your plan's 5-hour limit${w ? `: ${w.reset ? 'just reset' : `${Math.round(w.percentUsed)}% used`}` : ' (no reading yet: summer)'}. Spring while it is fresh, then summer and autumn; winter when it is nearly used up`;
     }
     /* --- comings and goings: a field is built by the farmer it is for and packed up by the last to leave it; whoever leaves goes back into the farmhouse --- */
@@ -1483,11 +1439,11 @@
         if (s && henReady && !frozen) note(back, h.by, { ...s, dog: h.dog });
       }
       const of = list => (list.every(s => s.type === 'Explore') ? ['the dog', 'dogs'] : ['a hen', 'hens']);
-      for (const [by, list] of called) events.push({ id: by, by: 'The henhouse', log: list.length > 1 ? `whistles for ${list.length} ${of(list)[1]}` : `whistles for ${of(list)[0]}${list[0].label ? `: ${clip(list[0].label, 50)}` : ''}` });
+      for (const [by, list] of called) events.push({ id: by, who: 'The henhouse', log: list.length > 1 ? `whistles for ${list.length} ${of(list)[1]}` : `whistles for ${of(list)[0]}${list[0].label ? `: ${clip(list[0].label, 50)}` : ''}` });
       for (const [by, list] of back) {
         const bad = list.filter(s => s.state === 'failed'), good = list.filter(s => s.state === 'done');
-        if (good.length) events.push({ id: by, by: 'The henhouse', log: good.length > 1 ? `${good.length} of its ${of(good)[1]} head home, each with ${good[0].dog ? 'a bone' : 'an egg to lay'}` : `its ${good[0].dog ? 'dog trots home with a bone' : 'hen heads home to lay an egg'}${good[0].result || good[0].label ? `: ${clip(good[0].result || good[0].label, 60)}` : ''}` });
-        if (bad.length) events.push({ id: by, by: 'The henhouse', log: bad.length > 1 ? `${bad.length} of its ${of(bad)[1]} flutter home: they failed` : `its ${bad[0].dog ? 'dog slinks' : 'hen flutters'} home: it failed${bad[0].label ? ` (${clip(bad[0].label, 50)})` : ''}` });
+        if (good.length) events.push({ id: by, who: 'The henhouse', log: good.length > 1 ? `${good.length} of its ${of(good)[1]} head home, each with ${good[0].dog ? 'a bone' : 'an egg to lay'}` : `its ${good[0].dog ? 'dog trots home with a bone' : 'hen heads home to lay an egg'}${good[0].result || good[0].label ? `: ${clip(good[0].result || good[0].label, 60)}` : ''}` });
+        if (bad.length) events.push({ id: by, who: 'The henhouse', log: bad.length > 1 ? `${bad.length} of its ${of(bad)[1]} flutter home: they failed` : `its ${bad[0].dog ? 'dog slinks' : 'hen flutters'} home: it failed${bad[0].label ? ` (${clip(bad[0].label, 50)})` : ''}` });
       }
       henReady = true;
       return events;
@@ -1549,13 +1505,6 @@
         else drawHen(creaturePainter(x, y, face), pose, T, { codex: h.codex, scarf: f?.shirt ?? '#e04a3a' });
       }
     }
-    const SILO_X = [92, 10], SILO_Y = 6; // the silo by the barn; a second one left of the barn, when both Claude Code and Codex run here
-    /**
-     * The silos standing now: [{ who: 'claude' | 'codex', name, x, plan, ...siloOf(plan) }]. One plan: it has the silo by the
-     * barn (its dome in its colour). Both: Claude's is by the barn, Codex's left of it. None: the silo by the barn stands empty.
-     */
-    const silos = () => [['claude', 'Claude', scene.plan], ['codex', 'Codex', scene.codexPlan]].filter(([, , plan]) => siloOf(plan))
-      .map(([who, name, plan], i) => ({ who, name, x: SILO_X[i], plan, ...siloOf(plan) }));
     /* --- the porch: its seats, whoever sits in them and what they are at (porch life, above, says who and what) --- */
     /** The porch album, for the farmhouse's dialog: how much of what the porch can show was seen in this browser, by name; the rest stays a surprise. */
     const albumHtml = () => { const all = Object.keys(ALBUM), got = all.filter(k => album.has(k)); return `<p class="muted"><b>Porch album:</b> ${got.length} of ${all.length} seen${got.length ? `: ${esc(got.map(k => ALBUM[k]).join(' · '))}` : ''}${got.length < all.length ? `. ${all.length - got.length} still to find` : '. All of it!'}</p>`; };
@@ -1585,16 +1534,16 @@
      * runner; the door swung in against its left post. By night the lamp is lit and its light falls out onto the porch.
      */
     function openDoor() {
-      const { x0, y0, x1, y1 } = HOUSE_DOOR, w = x1 - x0, lit = night;
-      px(x0, y0, w, 12, lit ? '#f4d58d' : '#d9c9a0'); for (let x = x0 + 3; x < x1; x += 3) px(x, y0, 1, 12, lit ? '#e9c46a' : '#cbb98a'); // the wall, its paper in stripes
-      px(x0, y0 + 9, w, 3, lit ? '#b98a4a' : '#9c7a4a'); px(x0, y0 + 9, w, 1, '#6b4320'); // the wainscot
-      px(x0 + 8, y0 + 2, 4, 4, '#6b4320'); px(x0 + 9, y0 + 3, 2, 2, '#5ab4ff'); px(x0 + 9, y0 + 4, 2, 1, '#6cc04a'); // a picture
-      px(x0 + 3, y0 + 3, 3, 1, '#6b4320'); px(x0 + 3, y0 + 4, 3, 2, '#e9c46a'); px(x0 + 2, y0 + 6, 5, 1, '#c9a24a'); // a straw hat on its hook
-      px(x0 + 12, y0 + 1, 1, 3, '#6b4320'); px(x0 + 11, y0 + 4, 3, 2, lit ? '#fff3a6' : '#e8dcc4'); // a lamp
-      px(x0, y0 + 12, w, y1 - y0 - 12, '#a8703c'); for (let x = x0 + 2; x < x1; x += 4) px(x, y0 + 12, 1, y1 - y0 - 12, '#8b5a2b'); // floorboards
-      px(x0 + 4, y0 + 13, 6, y1 - y0 - 13, '#9c3b30'); px(x0 + 4, y0 + 13, 6, 1, '#c8584c'); // a runner
-      px(x0, y0, 2, y1 - y0, '#8b5a2b'); px(x0 + 2, y0, 1, y1 - y0, '#6b4320'); // the door, swung in
-      if (lit) PXG.lights?.push([HOUSE_DOOR.x, y0 + 10, 15, null]);
+      const { x0, y0, x1, y1 } = HOUSE_DOOR, w = x1 - x0, lit = night, fy = y0 + 21; // fy: where the floor begins
+      px(x0, y0, w, fy - y0, lit ? '#f4d58d' : '#d9c9a0'); for (let x = x0 + 3; x < x1; x += 3) px(x, y0, 1, fy - y0, lit ? '#e9c46a' : '#cbb98a'); // the wall, its paper in stripes
+      px(x0, fy - 4, w, 4, lit ? '#b98a4a' : '#9c7a4a'); px(x0, fy - 4, w, 1, '#6b4320'); // the wainscot
+      px(x0 + 10, y0 + 4, 5, 5, '#6b4320'); px(x0 + 11, y0 + 5, 3, 3, '#5ab4ff'); px(x0 + 11, y0 + 7, 3, 1, '#6cc04a'); // a picture
+      px(x0 + 4, y0 + 7, 3, 1, '#6b4320'); px(x0 + 4, y0 + 8, 3, 2, '#e9c46a'); px(x0 + 3, y0 + 10, 5, 1, '#c9a24a'); // a straw hat on its hook
+      px(x0 + 15, y0 + 1, 1, 3, '#6b4320'); px(x0 + 14, y0 + 4, 3, 2, lit ? '#fff3a6' : '#e8dcc4'); // a lamp
+      px(x0, fy, w, y1 - fy, '#a8703c'); for (let x = x0 + 2; x < x1; x += 4) px(x, fy, 1, y1 - fy, '#8b5a2b'); // floorboards
+      px(x0 + 5, fy + 1, 8, y1 - fy - 1, '#9c3b30'); px(x0 + 5, fy + 1, 8, 1, '#c8584c'); // a runner
+      px(x0, y0, 3, y1 - y0, '#a9cde6'); px(x0 + 3, y0, 1, y1 - y0, '#1d1d21'); px(x1 - 3, y0, 3, y1 - y0, '#a9cde6'); px(x1 - 4, y0, 1, y1 - y0, '#1d1d21'); // the glass door's two leaves, slid apart
+      if (lit) PXG.lights?.push([HOUSE_DOOR.x, y0 + 14, 15, null]);
     }
     /** The porch cat's moment: it makes way for anyone at the door or the mat, waits at the corner, and comes back when it has been quiet for 4 s. */
     /** Is the cat curled up on its mat (then a lap may borrow it)? */
@@ -1684,10 +1633,10 @@
       const rank = stageRank('turn', p.stage), at = doingOnPorch(f, p);
       const drink = (x, y) => { // a mug that steams; a glass of lemonade in summer
         saw('drink');
-        if (season === 'summer') { rp(x, y, 2, 3, '#ffd43b'); rp(x, y, 2, 1, '#fff3a6'); } else { rp(x, y, 2, 2, '#f4ecd8'); rp(x + 2, y, 1, 1, '#f4ecd8'); rp(x + blink(2), y - 2 - blink(2), 1, 1, '#e6eef5'); }
+        if (shown() === 'summer') { rp(x, y, 2, 3, '#ffd43b'); rp(x, y, 2, 1, '#fff3a6'); } else { rp(x, y, 2, 2, '#f4ecd8'); rp(x + 2, y, 1, 1, '#f4ecd8'); rp(x + blink(2), y - 2 - blink(2), 1, 1, '#e6eef5'); }
       };
       saw(at);
-      if (rank >= 4 || (rank >= 1 && season === 'winter')) { saw('blanket'); rp(2, 11, 10, 4, '#b23a2e'); rp(2, 12, 10, 1, '#e9c46a'); for (const x of [4, 8]) rp(x, 11, 1, 4, '#7a2a22'); } // over its knees: after three hours, or at once in winter
+      if (rank >= 4 || (rank >= 1 && shown() === 'winter')) { saw('blanket'); rp(2, 11, 10, 4, '#b23a2e'); rp(2, 12, 10, 1, '#e9c46a'); for (const x of [4, 8]) rp(x, 11, 1, 4, '#7a2a22'); } // over its knees: after three hours, or at once in winter
       (SITTING[at] ?? SITTING.rest)(rp, T, { t: porch.surprise?.t ?? 0, drink });
       if (rank >= 2 && !HOLDS_DRINK.has(at)) drink(-2, 10); // set down on the arm of its seat
     }
@@ -1710,7 +1659,7 @@
         px(px0, py - 5, 6, 5, '#f08a24'); px(px0, py - 5, 6, 1, '#ffb347'); px(px0 + 2, py - 6, 1, 1, '#3f9b3a'); px(px0 + 2, py - 4, 1, 4, '#c8681a');
         if (new Date().getDate() === 31) { px(px0 + 1, py - 3, 1, 1, '#ffd43b'); px(px0 + 4, py - 3, 1, 1, '#ffd43b'); px(px0 + 1, py - 1, 4, 1, '#ffd43b'); }
       }
-      if (seasonal === 'lights') { saw('lights'); for (let x = 134, i = 0; x < 268; x += 5, i++) px(x, 41 + (i % 2), 1, 1, ['#e04a3a', '#ffd43b', '#6cc04a', '#5ab4ff'][(i + blink(1.5, 4)) % 4]); } // along the eaves in December
+      if (seasonal === 'lights') { saw('lights'); eaveBulbs(132, 10, 136).forEach(([bx, by], i) => px(bx, by, 2, 2, ['#e04a3a', '#ffd43b', '#6cc04a', '#5ab4ff'][(i + blink(1.5, 4)) % 4])); } // in December the eave's string of lights is in colours
       if (sur?.key === 'peek' && typeof CREATURES === 'object') { // your front door opens and the unicorn looks out (the door: name tags never cover it)
         saw('peek');
         openDoor();
@@ -1722,20 +1671,25 @@
         CREATURES.mouse.draw(creaturePainter(mx, y, -1), 'run', T);
       }
     }
-    /** The silo's grain and lamp, the pond's ripples and duck, the henhouse's eggs and hens: each frame. */
+    const seasonIcon = s => (s === 'summer' ? 'day' : s);
+    /**
+     * The silos' grain and lamps (a second silo is drawn here too, in front of the corner's trees: a second account's, or Codex's under
+     * its slate blue dome), the pond's ripples and duck, the henhouse's eggs and hens: each frame.
+     */
     function drawScenery() {
       const T = PXG.T;
-      for (const s of silos()) {
-        const X = s.x, h = Math.round(46 * s.fill);
-        if (s.who !== 'claude' || X !== SILO_X[0]) { // any but Claude's by the barn (that one is part of the land)
-          silo(px, X, SILO_Y, SEASONS[season] ?? SEASONS.summer, DOMES[s.who]);
-          if (X === SILO_X[0]) noticeBoard(px, BOARD.x, BOARD.y, SEASONS[season] ?? SEASONS.summer); // the notice board stands before the silo by the barn: drawn again after it
+      for (const { x, silo: g, who } of silosOf(scene)) {
+        if (x !== SILO_X[0] || who === 'codex') { // any but the first account's by the barn (that one is part of the land)
+          silo(px, x, 6, SEASONS[shown()] ?? SEASONS.summer, DOMES[who]);
+          if (x === SILO_X[0]) noticeBoard(px, BOARD.x, BOARD.y, SEASONS[shown()] ?? SEASONS.summer); // the notice board stands before the silo by the barn: drawn again after it
         }
-        if (h) { px(X + 7, 73 - h, 6, h, '#e9c46a'); px(X + 7, 73 - h, 6, 1, '#f4d58d'); }
-        for (const t of [0.25, 0.5, 0.75]) px(X + 13, 73 - Math.round(46 * t), 1, 1, '#c3cbd2');
-        if (s.lamp && (s.lamp === 'amber' || blink(2))) { px(X + 8, 3, 4, 3, s.lamp === 'red' ? '#e04a3a' : '#f0b429'); PXG.lights?.push([X + 10, 6, 8, [X + 8, 3, 4, 3]]); }
+        if (!g) continue;
+        const h = Math.round(46 * g.fill);
+        if (h) { px(x + 7, 73 - h, 6, h, '#e9c46a'); px(x + 7, 73 - h, 6, 1, '#f4d58d'); }
+        for (const t of [0.25, 0.5, 0.75]) px(x + 13, 73 - Math.round(46 * t), 1, 1, '#c3cbd2');
+        if (g.lamp && (g.lamp === 'amber' || blink(2))) { px(x + 8, 3, 4, 3, g.lamp === 'red' ? '#e04a3a' : '#f0b429'); PXG.lights?.push([x + 10, 6, 8, [x + 8, 3, 4, 3]]); }
       }
-      if (season !== 'winter') { // ripples, and a duck paddling round the pond
+      if (shown() !== 'winter') { // ripples, and a duck paddling round the pond
         for (let i = 0; i < 2; i++) { const ph = (T * 0.5 + i * 0.5) % 1, r = Math.round(ph * 6); PXG.ctx.globalAlpha = 0.6 * (1 - ph); px(30 - r, 208 + i * 5, r * 2 + 1, 1, '#a9dcf7'); }
         PXG.ctx.globalAlpha = 1;
         if (!PXG.animals) { // with the animals on, the duck family lives here instead (FARM_ANIMALS)
@@ -1744,7 +1698,7 @@
         }
       } else if (blink(1.5)) px(36, 206, 2, 1, '#ffffff'); // ice glints
       if (PXG.animals) { // the animals' things in the yard: a trough and its bucket, a woodpile and a rock to climb
-        px(TROUGH.x - 6, TROUGH.y - 3, 12, 3, '#8b5a2b'); px(TROUGH.x - 5, TROUGH.y - 3, 10, 1, season === 'winter' ? '#d8eef8' : '#5ab4ff');
+        px(TROUGH.x - 6, TROUGH.y - 3, 12, 3, '#8b5a2b'); px(TROUGH.x - 5, TROUGH.y - 3, 10, 1, shown() === 'winter' ? '#d8eef8' : '#5ab4ff');
         if (!PXG.taken?.has('bucket')) { px(TROUGH.x + 8, TROUGH.y - 4, 3, 4, '#8a93a0'); px(TROUGH.x + 8, TROUGH.y - 4, 3, 1, '#c3cbd2'); } // unless the ostrich is wearing it
         for (let i = 0; i < 3; i++) px(WOODPILE.x - 6 + i * 1, WOODPILE.y - 2 - i * 2, 12 - i * 3, 2, i % 2 ? '#a8703c' : '#8b5a2b');
         const rock = rockAt(); px(rock.x - 4, rock.y - 3, 8, 3, '#8c96a0'); px(rock.x - 3, rock.y - 4, 6, 1, '#aab3bb');
@@ -1806,8 +1760,8 @@
       px(pony - 3 + step, y - 1, 1, 2, '#6b4320'); px(pony + 1 - step, y - 1, 1, 2, '#6b4320'); px(pony - dir * 4, y - 4, 1, 2, '#4e3626');
     }
     const FIREFLIES = [[20, 150], [60, 160], [92, 176], [30, 232], [74, 196], [50, 252], [100, 250], [14, 262], [88, 140], [96, 214], [240, 92], [330, 70]];
-    // The farm's animals (sdk/animals.js): just for fun, never data. They walk the yard (not the lane:
-    // it runs along the porch, where farmers waiting on you stand), never the fields (their crops are context), the hay, crates or mailbox (git), the carts' rank (MCP),
+    // The farm's animals (sdk/animals.js): just for fun, never data. They walk the whole farm, but never
+    // on a crop bed (its crops, hay, crates and mailbox are the repo's state), into a building, onto the carts' row (MCP),
     // the hammocks or the henhouse. No chickens (subagents), and the dog is a sheepdog (the Explore dog is
     // data). The ducks keep to the pond and its bank.
     const POND = { x: 12, y: 199, w: 60, h: 22 }; // the water (the pond's oval, a little inside its bank)
@@ -1908,7 +1862,7 @@
         season = seasonOf(next.plan);
         porchAt = 0; // who is on the porch may have changed
         if (events.some(e => e.kind === 'merged')) cheerUntil = Date.now() + 6000;
-        for (const key of found.splice(0)) events.push({ at: [PORCH_SPOTS.turn[1], PORCH_Y - 34], text: 'New!', cls: 'good', by: 'The porch', log: `${ALBUM[key]}: seen for the first time (${album.size} of ${Object.keys(ALBUM).length} in the album)` });
+        for (const key of found.splice(0)) events.push({ at: [PORCH_SPOTS.turn[1], PORCH_Y - 34], text: 'New!', cls: 'good', who: 'The porch', log: `${ALBUM[key]}: seen for the first time (${album.size} of ${Object.keys(ALBUM).length} in the album)` });
         return events;
       },
       /** The engine's handles: this world's own settings, kept in the browser (the album). */
@@ -1945,6 +1899,7 @@
         : [b.x + (k % 2 ? 1 : -1) * (7 * SC + 4) + Math.sin(T * 1.3 + k) * 3, b.y + 2 - (k > 1 ? 4 * SC : 0)]),
       startText: n => `Morning: <b>${n}</b> farmer${n === 1 ? '' : 's'} on the farm`,
       arriveText: 'comes out of the farmhouse',
+      nouns: { agent: 'farmer', agents: 'farmers', repo: 'field', repos: 'fields', place: 'farm' },
       tag: tagText,
       /** A tag on the porch has its place's width (the places are 22 apart); anywhere else it is as wide as its name. */
       tagSlot: f => ((f.state === 'waiting' || f.state === 'turn') && !f.nap ? PORCH_SPOTS.turn[1] - PORCH_SPOTS.turn[0] : null),
@@ -1989,64 +1944,12 @@
         return `${doing(f)?.verb ?? 'working'} in the ${fieldByKey(f.field)?.name ?? ''} field`;
       },
       /**
-       * The farm's controls, laid over it so it fills the window: top left, the panel with what the
-       * dashboard's top bar and count cards say; top right, the dashboard's own buttons; along the
-       * bottom, below the fields' fence, a slim row of switches and zoom.
+       * The farm's controls, laid over it so it fills the window: the engine's panel and buttons
+       * (panelHud) in the farm's words. Top left, the panel with what the dashboard's top bar and
+       * count cards say; top right, one Menu holding the dashboard's own buttons, the farm's
+       * switches, the bell, help and zoom.
        */
-      hud({ still, zoom = 1, saysOn = true, skyMode = 'live', follow = false, canFollow = false, restingHidden = null, bell = false, nav = {}, panelOpen = true, animals = null }) {
-        const need = scene.farmers.filter(a => a.state === 'waiting' || a.question).length;
-        const spent = scene.farmers.reduce((t, a) => t + (a.cost ?? 0), 0), harvested = scene.farmers.reduce((t, a) => t + (a.compactions ?? 0), 0);
-        const ch = scene.chrome ?? {}, c = ch.counts ?? {};
-        const w = t => pxt(t, '#fff3d6', '#2a1d14'), dim = t => pxt(t, '#c9b48a', null), label = t => pxt(t, '#a9c79a', null);
-        const gb = mb => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
-        const bar = (ratio, tone) => `<span class="px-bar"><i class="${tone}" style="width:${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%"></i></span>`;
-        const tone = r => (r >= 0.8 ? 'bad' : r >= 0.5 ? 'warn' : 'ok');
-        const kpi = (state, glyph, cls, name, n, sub, hot, title) => `<button type="button" class="px-kpi${hot ? ' hot' : ''}"${state && n ? ` data-farm-state="${state}"` : ' disabled'} title="${esc(title)}"><span class="px-kpi-ico ${cls}">${pxt(glyph, '#ffffff', null)}</span><span class="px-kpi-n">${w(String(n ?? 0))}</span><span class="px-kpi-l">${label(name)}${sub ? `<br>${dim(sub)}` : ''}</span></button>`;
-        const ramRatio = ch.ram?.totalMb ? ch.ram.usedMb / ch.ram.totalMb : 0, cpuRatio = (ch.cpu?.used ?? 0) / ((ch.cpu?.cores || 1) * 100);
-        const windows = scene.plan?.windows ?? [], win = kind => windows.find(x => x.kind === kind), pctOf = x => (x ? (x.reset ? 0 : Math.round(x.percentUsed)) : null);
-        const five = pctOf(win('five_hour')), week = pctOf(win('seven_day')), codexWeek = pctOf(scene.codexPlan?.windows?.find(x => x.kind === 'seven_day'));
-        const tool = (attr, icon, name, state, title, disabled = false) => `<button type="button" ${attr}${disabled ? ' disabled' : ''} title="${esc(title)}">${iconImg(icon)}${pxImg(name, '#4e3626', null)}${state ? pxImg(state, '#8b5a2b', null) : ''}<span class="px-sr">${esc(state ? `${name}: ${state}` : name)}</span></button>`;
-        const navBtn = (what, icon, name, title, pressed) => `<button type="button" data-farm-nav="${what}" title="${esc(title)}"${pressed === undefined ? '' : ` aria-pressed="${pressed}"`}>${iconImg(icon)}${pxImg(name, '#4e3626', null)}<span class="px-sr">${esc(name)}</span></button>`;
-        return `<div class="px-stats${panelOpen ? '' : ' folded'}">
-            <button type="button" class="px-brand" data-farm-panel title="${panelOpen ? 'Fold this panel away' : 'Show the counts and meters'}" aria-expanded="${panelOpen}">${brandSvg()}${pxt('AGENTVILLE', '#ffe8a3', '#2a1d14')}<i class="px-live${nav.live === false ? ' off' : ''}" title="${nav.live === false ? 'Disconnected from the collector: retrying' : 'Live'}"></i>${pxt(panelOpen ? '-' : '+', '#c9b48a', null)}</button>
-            <div class="px-line"><span title="What the sessions on the farm have cost so far (each one's purse; from the mod)"><b class="coin"></b>${w(`$${spent.toFixed(2)}`)}</span><span title="Harvests: each time a session's conversation was compacted"><b class="basket"></b>${w(`${harvested} harvested`)}</span><span class="px-season" title="${esc(seasonTip())}">${iconImg(season === 'summer' ? 'day' : season)}${w(season)}</span></div>
-            <div class="px-kpis">
-              ${kpi('waiting', '!', 'k-wait', 'waiting on you', c.waiting, c.waiting ? `oldest ${ago(ch.oldestWaiting ?? Date.now())}` : 'all clear', c.waiting > 0, 'Agents waiting on you (a question or a permission): click for the first')}
-              ${kpi('working', '>', 'k-work', 'working', c.working, ch.subagentsRunning ? `${ch.subagentsRunning} with subagents` : `${ch.agents ?? 0} agents tracked`, false, 'Agents at work: click for the first')}
-              ${kpi('turn', '<', 'k-turn', 'your turn', c.yourTurn, `${ch.asking ? `${ch.asking} ask you · ` : ''}${c.idle ?? 0} idle · ${c.stale ?? 0} stale`, ch.asking > 0, "Agents whose turn ended: it's yours. Click for the first")}
-              ${kpi(null, '⚠', 'k-collide', 'collisions', c.collisions, c.collisions ? 'two in one repo' : 'none', c.collisions > 0, 'Two agents writing one repo')}
-            </div>
-            <div class="px-gauges">
-              <span class="px-gauge" title="Memory used by the agents, of this Mac's">${label('RAM')}${bar(ramRatio, tone(ramRatio))}${w(gb(ch.ram?.usedMb ?? 0))}${ch.ram?.totalMb ? dim(`of ${gb(ch.ram.totalMb)}`) : ''}</span>
-              <span class="px-gauge" title="${esc(`CPU used by the agents: ${Math.round(ch.cpu?.used ?? 0)}% of one core, ${ch.cpu?.cores ?? 1} cores`)}">${label('CPU')}${bar(cpuRatio, tone(cpuRatio))}${w(`${Math.round(cpuRatio * 100)}%`)}${dim('of this Mac')}</span>
-              ${five !== null ? `<span class="px-gauge" title="Your plan's 5-hour limit (from the mod)">${label('5H')}${bar(five / 100, tone(five / 100))}${w(`${five}%`)}${dim('5-hour limit')}</span>` : ''}
-              ${week !== null ? `<span class="px-gauge" title="Your plan's weekly limit (from the mod)">${label('WEEK')}${bar(week / 100, tone(week / 100))}${w(`${week}%`)}${dim('this week')}</span>` : ''}
-              ${codexWeek !== null ? `<span class="px-gauge" title="Codex's weekly limit (from its sessions)">${label('CODEX')}${bar(codexWeek / 100, tone(codexWeek / 100))}${w(`${codexWeek}%`)}${dim('this week')}</span>` : ''}
-              ${ch.collector ? `<span class="px-gauge" title="The tracker itself">${dim(`tracker ${ch.collector.cpu ?? 0}% CPU · ${ch.collector.rssMb ?? 0} MB`)}</span>` : ''}
-            </div>
-            ${(ch.errors ?? []).map(e => `<div class="px-err">⚠ ${esc(e)}</div>`).join('')}
-            ${need ? `<button type="button" class="px-need" data-farm-need title="Open the first agent that needs you">${pxt(`${need} need${need > 1 ? '' : 's'} you`, '#ffffff', '#5a1f19')}</button>` : ''}
-          </div>
-          <div class="px-nav">
-            ${navBtn('list', 'list', 'LIST', 'Back to the list view')}
-            ${navBtn('worlds', 'world', 'WORLD', 'Choose a world')}
-            ${navBtn('session', 'plus', 'SESSION', 'Start a new Claude Code session in a folder, or resume a past one')}
-            ${navBtn('setup', 'gear', 'CLAUDE CODE', 'Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules')}
-            ${navBtn('side', 'side', 'SIDEBAR', "Show the selected farmer's answer box, activity and files beside the farm", Boolean(nav.side))}
-            ${navBtn('theme', nav.theme === 'light' ? 'day' : nav.theme === 'auto' ? 'live' : 'night', String(nav.theme ?? 'dark').toUpperCase(), 'Theme: dark, light, or auto (as macOS is): click to change')}
-          </div>
-          <div class="px-tools">
-              ${tool('data-farm-follow', 'follow', 'Follow', follow ? 'on' : 'off', canFollow ? 'Keep the farmer you picked in the middle of the view (zooms in); dragging the view turns it off' : 'Pick a farmer first, then Follow keeps it in view', !canFollow)}
-              ${tool('data-farm-resting', 'resting', 'Resting', restingHidden === null ? 'shown' : `hidden (${restingHidden})`, 'Idle farmers (under the tree) and stale ones (scarecrows): show them, or hide them to keep the farm to the agents at work')}
-              ${tool('data-farm-bubbles', 'bubbles', 'Bubbles', saysOn ? 'on' : 'off', 'Speech bubbles with what each farmer last said. × hides one; its 💬 shows it again')}
-              ${animals === null ? '' : tool('data-farm-animals', 'animals', 'Animals', animals ? 'on' : 'off', 'Animals on the farm, just for fun: click one to pet or feed it (or the pond, for the ducks). They never stand for anything')}
-              ${tool('data-farm-sky', skyMode, 'Sky', skyMode, 'The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night')}
-              ${tool('class="px-motion" data-farm-motion', still ? 'pause' : 'play', 'Motion', still ? 'off' : 'on', 'Walking and animation on the farm')}
-              ${tool('data-farm-bell', 'bell', 'Bell', bell ? 'on' : 'off', 'A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)')}
-              ${tool('class="px-info" data-farm-help aria-label="How to read the farm"', 'help', 'Help', '', 'How to read the farm')}
-              <span class="px-zoombar" title="Zoom the farm inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in"><button type="button" data-farm-zoom="-1" aria-label="Zoom out">${pxt('-', '#4e3626', null)}</button><button type="button" data-farm-zoom="0" title="Show the whole farm">${pxt(`${Math.round(zoom * 100)}%`, '#4e3626', null)}</button><button type="button" data-farm-zoom="1" aria-label="Zoom in">${pxt('+', '#4e3626', null)}</button></span>
-          </div>`;
-      },
+      hud: p => panelHud({ ...p, scene, season, iconImg, seasonIcon, seasonTip }, FARM_WORDS),
       bg(f, season, ext) { drawLand(f, L, season, ext); },
       ground() { drawScenery(); L.ST.forEach(drawPlot); L.ST.forEach(drawPiles); drawHens(PXG.T); }, // the hens last: on the beds they scratch in
       season: () => season,
@@ -2058,13 +1961,10 @@
       dens: () => [[BASKET.x, BASKET.y - 1], [mossAt().x, mossAt().y]],
       /** Is a gag's spot free now: a hammock is taken while anyone naps (the nappers have the hammocks). */
       spotFree: name => (name === 'hammock' ? !scene.farmers.some(f => f.nap) : true),
-      /**
-       * Where the animals may walk: the yard, down to the fence's foot (not the lane, along the porch where farmers wait on you),
-       * and a stretch of its path beside the hammocks: the pond and the hammocks lie right across the yard, and this is the way round them.
-       */
-      roam: () => [{ x: 4, y: 100, w: 100, h: Math.max(20, L.GRID.y1 - 104) }, { x: 104, y: 184, w: 17, h: 60 }],
-      /** What they keep off in there: the pond (the ducks' own), the hammocks, the henhouse and its run, the shade tree's trunk, the cats' basket, the trees and moss at the wood's edge. */
-      avoid: () => [{ x: 8, y: 194, w: 70, h: 32 }, { x: 84, y: 196, w: 24, h: 34 }, { x: 0, y: 95, w: 106, h: 44 }, { x: 60, y: L.GRID.y1 - 26, w: 14, h: 12 }, { x: BASKET.x - 10, y: BASKET.y - 6, w: 20, h: 9 }, woodAt()], // the run's hens are subagents; the basket and the wood's edge are the cats'
+      /** Where the animals may walk: the whole farm (its crop beds and buildings are kept off by fieldAt and buildingAt). */
+      roam: () => [{ x: 4, y: 14, w: W - 8, h: L.H - 18 }],
+      /** What they keep off besides: the pond (the ducks' own), the hammocks, the henhouse and its run, the shade tree's trunk, the row where the tool carts park, the cats' basket, the trees and moss at the wood's edge. */
+      avoid: () => [{ x: 8, y: 194, w: 70, h: 32 }, { x: 84, y: 196, w: 24, h: 34 }, { x: 0, y: 95, w: 106, h: 44 }, { x: 60, y: L.GRID.y1 - 26, w: 14, h: 12 }, { x: 300, y: 78, w: 98, h: 16 }, { x: BASKET.x - 10, y: BASKET.y - 6, w: 20, h: 9 }, woodAt()], // the run's hens are subagents; the carts are MCP servers
       /** Particles a farmer gives off: dust when walking; splashes, clods, sparks, chips from its tool. */
       emit(f, b, dt, add) {
         const tend = tending(f), dir = tend?.dir ?? 1, ox = dir > 0 ? b.x - 7 * SC : b.x + 7 * SC - 34 * SC, oy = b.y - 16 * SC, T = PXG.T; // ox: so that ox + 17 is where the tool meets the soil, either way it faces
@@ -2086,10 +1986,11 @@
       /** The farm's own particles: smoke from the chimney while agents work; petals, leaves or snow by the season. */
       ambient(dt, add) {
         for (const h of hens.values()) if (h.failed && h.moving && !h.dog && Math.random() < dt * 9) add({ x: h.x + rand(-2, 2), y: h.y - 4, vx: rand(-6, 6), vy: rand(-9, -3), g: 14, life: 1.1, max: 1.1, size: 1, color: h.codex ? '#b5763a' : '#ffffff', sway: 3 }); // a flustered hen loses feathers
-        if (season === 'spring' && Math.random() < dt * 3) add({ x: rand(46, 88), y: rand(228, 260), vx: rand(3, 9), vy: rand(5, 9), g: 0, life: 3, max: 3, size: 1, color: '#f4b6c2', sway: 3 });
-        if (season === 'autumn' && Math.random() < dt * 4) add({ x: rand(44, 90), y: rand(228, 262), vx: rand(2, 8), vy: rand(6, 11), g: 0, life: 3.2, max: 3.2, size: 1, color: ['#c8681a', '#e9a23b', '#b5562f'][Math.floor(rand(0, 3))], sway: 4 });
+        const seen = shown(); // the season you see, held or live
+        if (seen === 'spring' && Math.random() < dt * 3) add({ x: rand(46, 88), y: rand(228, 260), vx: rand(3, 9), vy: rand(5, 9), g: 0, life: 3, max: 3, size: 1, color: '#f4b6c2', sway: 3 });
+        if (seen === 'autumn' && Math.random() < dt * 4) add({ x: rand(44, 90), y: rand(228, 262), vx: rand(2, 8), vy: rand(6, 11), g: 0, life: 3.2, max: 3.2, size: 1, color: ['#c8681a', '#e9a23b', '#b5562f'][Math.floor(rand(0, 3))], sway: 4 });
         const e = PXG.ext ?? { x0: 0, x1: W, y0: 0, y1: L.H };
-        if (season === 'winter' && Math.random() < dt * 28 * ((e.x1 - e.x0) / W)) add({ x: rand(e.x0, e.x1), y: e.y0 - 2, vx: rand(-2, 2), vy: rand(9, 16), g: 0, life: (e.y1 - e.y0) / 10, max: (e.y1 - e.y0) / 10, size: rand(1, 1.6), color: '#ffffff', sway: 2, alpha: 0.9 });
+        if (seen === 'winter' && Math.random() < dt * 28 * ((e.x1 - e.x0) / W)) add({ x: rand(e.x0, e.x1), y: e.y0 - 2, vx: rand(-2, 2), vy: rand(9, 16), g: 0, life: (e.y1 - e.y0) / 10, max: (e.y1 - e.y0) / 10, size: rand(1, 1.6), color: '#ffffff', sway: 2, alpha: 0.9 });
         if (scene.farmers.some(a => a.state === 'working') && Math.random() < dt * 2.2) {
           add({ x: 241 + rand(-1, 1), y: 11, vx: rand(2, 6), vy: rand(-8, -5), g: 0, life: 2.6, max: 2.6, size: 2, grow: 1.4, color: '#c3cbd2', alpha: 0.55 });
         }
@@ -2103,9 +2004,21 @@
         PXG.ctx.globalAlpha = 1;
       },
       /** Lights that glow at night: [x, y, reach, the lit shape]. */
+      /** At night: the barn's glass door and the house's glass glow from inside, a pane at a time (their frames stay dark), with the barn's wall lights and the bulbs under the eave. */
       lights() {
         const coop = hens.size ? [[15, 117, 8, [13, 115, 5, 4]], [33, 117, 8, [31, 115, 5, 4]]] : []; // the henhouse's windows, while hens are out: someone is up
-        return [[62, 54, 11, [61, 47, 2, 1]], [158, 56, 16, [148, 46, 20, 14, true]], [242, 56, 16, [232, 46, 20, 14, true]], [213, 66, 20, [213, 49, 2, 2]], ...coop];
+        const pane = ([x, y, w, h]) => [x + (w >> 1), y + (h >> 1), 0, [x, y, w, h]];
+        // lit panes stay above the heads of the farmers on the porch and at the barn door: the night paints them over whatever stands in front
+        const barnPanes = [48, 59, 70].map(x => [x, 47, 9, 16]); // the door's upper row; its lower row glows from the light around it
+        const clerestory = [[54, 29, 6, 4], [61, 29, 5, 4], [67, 29, 6, 4]];
+        const glass = [[142, 10], [153, 10], [164, 10], [175, 9], [216, 10], [227, 10], [238, 10], [249, 9]].map(([x, w]) => [x, 36, w, 20]).concat([[191, 36, 9, 18], [201, 36, 8, 18]]);
+        return [
+          [63, 62, 22, null], [63, 31, 9, null], [163, 52, 22, null], [200, 52, 14, null], [237, 52, 22, null],
+          ...[...barnPanes, ...clerestory, ...glass].map(pane),
+          [43, 53, 8, [42, 52, 2, 1]], [84, 53, 8, [83, 52, 2, 1]],
+          ...eaveBulbs(132, 10, 136).map(([x, y]) => [x + 1, y + 1, 3, [x, y, 2, 2]]),
+          ...coop,
+        ];
       },
       /** A field's record for its close-up: what was done there in all, and the last half hour stretch by stretch, newest first. Plain HTML. */
       fieldNotes(key) {
@@ -2123,12 +2036,12 @@
       /** By day, butterflies and birds, and cloud shadows drift over the farm; at night, fireflies over the yard. */
       weather(sky) {
         night = sky.phase === 'night';
-        const T = PXG.T, e = PXG.ext ?? { x0: 0, x1: W, y0: 0, y1: L.H }, EW = e.x1 - e.x0 + 160;
-        if (sky.light > 0.5 && (season === 'spring' || season === 'summer')) [[40, 160, '#ffffff'], [80, 150, '#ffd43b'], [60, 186, '#f08a24']].forEach(([bx, by, c], i) => {
+        const T = PXG.T, e = PXG.ext ?? { x0: 0, x1: W, y0: 0, y1: L.H }, EW = e.x1 - e.x0 + 160, seen = shown(); // the season you see, held or live
+        if (sky.light > 0.5 && (seen === 'spring' || seen === 'summer')) [[40, 160, '#ffffff'], [80, 150, '#ffd43b'], [60, 186, '#f08a24']].forEach(([bx, by, c], i) => {
           const x = Math.round(bx + Math.sin(T * 0.5 + i * 2.1) * 22 + Math.sin(T * 1.7 + i) * 4), y = Math.round(by + Math.sin(T * 0.8 + i * 1.3) * 10 + Math.sin(T * 3 + i) * 2), open = blink(6 + i);
           px(x - (open ? 2 : 1), y, open ? 2 : 1, 2, c); px(x + 1, y, open ? 2 : 1, 2, c); px(x, y, 1, 2, '#1b1420');
         });
-        if (sky.light > 0.4 && season !== 'winter') { // birds on the fields' fence, now and then off to another post
+        if (sky.light > 0.4 && seen !== 'winter') { // birds on the fields' fence, now and then off to another post
           const posts = [[150, 88], [196, 88], [246, 88], [276, 88], [330, 88], [372, 88], [128, 140], [396, 180]];
           for (let i = 0; i < 3; i++) {
             const cycle = (T + i * 7.3) / 14, seg = Math.floor(cycle), ph = cycle - seg, [ax, ay] = posts[(seg * 3 + i * 5) % posts.length], [bx, by] = posts[((seg + 1) * 3 + i * 5) % posts.length];
@@ -2154,9 +2067,9 @@
       /** The building at a farm point, if any: each opens something. */
       buildingAt(x, y) {
         const at = ([x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
-        return [['barn', [36, 12, 88, 80]], ...silos().slice(1).map(s => ['silo', [s.x, 4, s.x + 20, 80]]), ['silo', [92, 4, 112, 80]], ['board', [111, 58, 128, 82]], ['house', [132, 8, 268, 66]], ['stall', [STALL.x - 1, STALL.y - 1, STALL.x + 29, STALL.y + 34]], ['henhouse', [6, 96, 100, 136]]].find(([, box]) => at(box))?.[0] ?? null;
+        return [['barn', [36, 12, 88, 80]], ...silosOf(scene).map(({ x }) => ['silo', [x, 4, x + 20, 80]]), ['board', [111, 58, 128, 82]], ['house', [132, 8, 268, 66]], ['stall', [STALL.x - 1, STALL.y - 1, STALL.x + 29, STALL.y + 34]], ['henhouse', [6, 96, 100, 136]]].find(([, box]) => at(box))?.[0] ?? null;
       },
-      buildingTip: k => ({ barn: 'The barn: start a new session or resume one (the new farmer comes out of the farmhouse)', silo: 'The silo: your plan\'s usage (with Codex running too, a second one stands left of the barn)', board: 'The notice board: what your projects remember (CLAUDE.md and memory)', house: 'The farmhouse: who is on your porch', stall: 'The market stall: pull requests', henhouse: 'The henhouse: subagents' })[k] ?? '',
+      buildingTip: k => ({ barn: 'The barn: start a new session or resume one (the new farmer comes out of the farmhouse)', silo: "The silo: your plan's usage (a silo for each of your Claude accounts, when you have two; with one, Codex's stands left of the barn when it runs here)", board: 'The notice board: what your projects remember (CLAUDE.md and memory)', house: 'The farmhouse: who is on your porch', stall: 'The market stall: pull requests', henhouse: 'The henhouse: subagents' })[k] ?? '',
       /** What a building shows when clicked: { title, html }. */
       dialog(k) {
         if (k === 'house') {
@@ -2164,13 +2077,13 @@
           return { title: 'Your porch', html: list.length ? `<ul class="px-dl">${list.map(f => `<li><button type="button" class="act" data-farm-pick="${esc(f.id)}">Open</button><span><b>${esc(f.name)}</b> ${esc(f.state === 'waiting' ? (f.planAsk ? 'has a plan for you to approve' : `needs you: ${f.ask}`) : f.question ? `asks: ${f.question}` : `finished${f.reply ? `: ${f.reply}` : ''}`)}</span></li>`).join('')}</ul>${albumHtml()}` : `<p class="muted">Nobody is waiting on you.</p>${albumHtml()}` };
         }
         if (k === 'silo') {
-          const name = w => ({ five_hour: '5-hour limit', seven_day: 'Weekly limit' })[w.kind] ?? w.kind, all = silos(), many = all.length > 1;
-          const meter = w => { const pct = w.reset ? 0 : Math.round(w.percentUsed); return `<div class="px-meter"><b>${esc(name(w))}</b><span class="bar"><i style="width:${Math.min(100, pct)}%"></i></span><span>${w.reset ? 'just reset' : `${pct}% used`}${w.resetsAt ? ` · resets ${esc(new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : ''}</span></div>`; };
-          const extra = s => [s.plan.planType && `${s.plan.planType} plan`, s.plan.credits != null && `${Math.round(s.plan.credits).toLocaleString()} credits left`].filter(Boolean).join(' · ');
-          const part = s => `${many || s.who !== 'claude' ? `<p><b>${esc(s.name)}</b>${extra(s) ? ` <span class="muted">${esc(extra(s))}</span>` : ''}</p>` : ''}${s.plan.windows.map(meter).join('')}`;
-          return { title: many ? 'The silos: your plans' : 'The silo: your plan', html: all.length
-            ? `${all.map(part).join('')}<p class="muted">The grain is the week; the season is Claude's 5-hour limit (winter when it is nearly used up).${scene.plan ? '' : " No reading of Claude's plan yet: it comes from the mod in a running Claude Code session."}</p>`
-            : "<p class=\"muted\">No reading of a plan yet: Claude's comes from the mod in a running session, Codex's from its own sessions.</p>" };
+          const name = w => ({ five_hour: '5-hour limit', seven_day: 'Weekly limit' })[w.kind] ?? w.kind;
+          const meters = ws => ws.map(w => { const pct = w.reset ? 0 : Math.round(w.percentUsed); return `<div class="px-meter"><b>${esc(name(w))}</b><span class="bar"><i style="width:${Math.min(100, pct)}%"></i></span><span>${w.reset ? 'just reset' : `${pct}% used`}${w.resetsAt ? ` · resets ${esc(new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : ''}</span></div>`; }).join('');
+          const all = silosOf(scene), many = all.length > 1;
+          const extra = s => [s.plan?.planType && `${s.plan.planType} plan`, s.plan?.credits != null && `${Math.round(s.plan.credits).toLocaleString()} credits left`].filter(Boolean).join(' · ');
+          if (many) return { title: 'The silos: your plans', html: all.map(s => `<h4>${esc(s.name)}${extra(s) ? ` <span class="muted">${esc(extra(s))}</span>` : ''}</h4>${s.plan?.windows?.length ? meters(s.plan.windows) : `<p class="muted">No reading yet: it comes from ${s.who === 'codex' ? "Codex's own sessions" : 'the mod in a session running on it'}.</p>`}`).join('') + `<p class="muted">Each silo's grain is its plan's week. The season follows ${esc(all[0].who === 'codex' ? 'Codex' : all[0].name)}'s 5-hour limit (winter when it is nearly used up).</p>` };
+          const one = all[0], ws = one?.plan?.windows ?? [];
+          return { title: one?.who === 'codex' ? "The silo: Codex's plan" : 'The silo: your plan', html: ws.length ? `${extra(one) ? `<p class="muted">${esc(extra(one))}</p>` : ''}${meters(ws)}<p class="muted">The grain is the week; the season is the 5-hour limit (winter when it is nearly used up).</p>` : "<p class=\"muted\">No reading of a plan yet: Claude's comes from the mod in a running session, Codex's from its own sessions.</p>" };
         }
         if (k === 'henhouse') {
           const subs = scene.subagents ?? [];
@@ -2419,10 +2332,10 @@
           if (f.dirty > 0) lab(s.cx + 25, s.rowTop + 3 - Math.ceil(Math.min(f.dirty, 12) / 9) * 6, cnt(`+${f.dirty}`), 'cnt', `${f.dirty} uncommitted file${f.dirty === 1 ? '' : 's'}`);
         }
         if (!ST.length) lab(262, 150, pxt('No fields yet: no agent has touched a repo in the last 30 minutes', '#fff3d6', '#4e3626'), 'zone');
-        const all = silos();
-        for (const s of all) { // each silo's week at its foot; with two, whose it is
-          const text = all.length > 1 ? `${s.name} ${s.label}` : s.label;
-          lab(s.x + 10, 80, s.lamp === 'red' ? pxt(text, '#ffffff', null) : cnt(text), `cnt${s.lamp ? ` silo-${s.lamp}` : ''}`, `${s.name}'s silo: its plan's weekly limit, ${s.label} used${s.resetsAt ? `, resets ${new Date(s.resetsAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`);
+        for (const { x, name, silo } of silosOf(scene)) { // its week's figure at its foot; with two accounts, its account's name too
+          const text = name ? `${name} ${silo?.label ?? '–'}` : silo?.label;
+          if (!text) continue;
+          lab(x + 10, 80, silo?.lamp === 'red' ? pxt(text, '#ffffff', null) : cnt(text), `cnt${silo?.lamp ? ` silo-${silo.lamp}` : ''}`, `The silo${name ? ` of ${name}` : ''}: ${silo ? `${name ? 'its' : 'your'} plan's weekly limit, ${silo.label} used${silo.resetsAt ? `, resets ${new Date(silo.resetsAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}` : 'no reading of its plan yet'}`);
         }
         const eggs = eggsOf(), out = [...hens.values()].filter(h => h.phase !== 'home').length;
         if (out || eggs.length) lab(70, 103, cnt([out && `${out} out`, eggs.length && `${eggs.length} egg${eggs.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ')), 'cnt', 'The henhouse: subagents at work now (its hens, out on the farm or waiting in the run), and those that finished within the hour (the eggs in the nest). Click the henhouse for the list');
@@ -2432,7 +2345,7 @@
         lab(60, L.GRID.y1 + 4, sign('SHADE TREE'), 'zone'); lab(200, 21, sign('YOUR PORCH'), 'zone'); lab(356, 18, sign('SCARECROWS'), 'zone');
         for (const g of L.groups) { const [r, cols] = rowsOfGroup(g)[0]; lab(174 + Math.min(...cols) * COLW + 44, 100 + r * ROWH - 1, sign(clip(g.name, 16)), 'zone proj', `The ${g.name} project: its repos side by side`); }
         const open = scene.fields.flatMap(fl => fl.prs?.open ?? []);
-        if (open.length) lab(STALL.x + 14, STALL.y + 32, cnt(`${open.length} PR${open.length === 1 ? '' : 's'}`), 'cnt', `Open pull requests: ${open.slice(0, 6).map(pr => `#${pr.number} ${pr.title}`).join(' · ')}${open.length > 6 ? ' …' : ''}. Click the stall for them all`);
+        if (open.length) lab(STALL.x + 14, STALL.y + 32, cnt(`${open.length} PR${open.length === 1 ? '' : 's'}`), 'cnt', `Open pull requests: ${open.slice(0, 6).map(pr => `#${pr.number}${pr.title ? ` ${pr.title}` : ''}`).join(' · ')}${open.length > 6 ? ' …' : ''}. Click the stall for them all`);
         const plus = (x, y, n, what) => n > 0 && lab(x, y, cnt(`+${n} ${what}`), 'cnt');
         const over = n => (n > 0 ? ` +${n}` : ''); // those the porch has no place for
         lab(PORCH_SPOTS.desk[1], 33, sign(`WAITING ON YOU${over(overflow.desk)}`), 'zone', 'This end of the porch: agents that need you (a question, a plan, a permission). The longer one waits, the more it lets you know');
@@ -2457,7 +2370,7 @@
       <b>Carts by the road to town</b><span>a cart for each MCP server (Gmail, playwright, Chrome…) your agents called in the last hour, waiting in a row at the lane's end; while one calls it, its cart drives to that farmer, with the server's name, and waits beside it until the call is done</span>
       <b>Pumps, hammocks</b><span>a pump by a bed = a background command still running; a farmer in a hammock = a session that wakes up by itself (/loop, a scheduled wake-up), with when</span>
       <b>Market stall</b><span>a crate for each open pull request, its tag the checks (green pass, red failed, yellow running, grey draft); “Sold!” = one merged</span>
-      <b>Buildings</b><span>click the barn to start or resume a session, the farmhouse for who is on your porch (and the porch album), a silo for your plans' usage (Claude's under the red dome; Codex's under the slate one), the henhouse for subagents, the notice board for CLAUDE.md and memory, the stall for pull requests</span>
+      <b>Buildings</b><span>click the barn to start or resume a session, the farmhouse for who is on your porch (and the porch album), a silo for your plans' usage (a silo for each Claude account, when you have two; Codex's under the slate blue dome), the henhouse for subagents, the notice board for CLAUDE.md and memory, the stall for pull requests</span>
       <b>Farmers</b><span>one per agent; each has its own hat, hair and clothes, and its shirt is the agent's colour in the list. Hover one for its name; names always show for the farmer you picked and those on the porch</span>
       <b>Speech bubbles</b><span>what a farmer asked or last said; × hides one to a 💬 (click it to show the bubble again); a new message brings it back by itself. The Bubbles switch hides or shows them all</span>
       <b>Above a field</b><span>hay = uncommitted files, crates = unpushed commits, mailbox = behind the remote</span>
@@ -2465,8 +2378,8 @@
       <b>Hearts, crops</b><span>hearts = context left. Crops grow as the context fills: seeds, sprouts, young plants, in flower, ripening, then ripe with a sparkle (golden wheat, red tomatoes, sunflowers in bloom…) when it is nearly full. When the conversation is compacted, that's the harvest: the field starts again from seed. Hens = subagents (a brown hen: one of Codex's), the dog = an Explore subagent; each wears a kerchief in its farmer's colour</span>
       <b>Animals</b><span>cows, goats, a sheepdog (with a red bandana), an ostrich, a lion, a tiger, two cats (a grey one and a black one), two mice and the ducks on the pond live here just for fun: they never stand for anything. Click one, or the pond, to pet or feed it: the nearest farmer that isn't waiting on you walks over and does it. Now and then they get up to something: a goat steals a hat, the ostrich runs off with the bucket, the cow naps in an empty hammock, a cat hunts a mouse (or the mouse the cat). The cats sleep long in their basket or on the moss at the wood's edge, sometimes curled up together. And once in a while, for a few seconds, there is a unicorn. It is shy: don't touch it. They react to deploys, harvests and merges. Farmers idle for a while sometimes play with them. In winter they huddle, and the goats wear scarves. The Animals switch hides them</span>
       <b>Shade tree, scarecrows</b><span>idle agents nap under the tree (bottom left); stale ones stand as scarecrows (top right); the meadow by the henhouse is for agents outside any repo</span>
-      <b>Silo</b><span>its grain is your plan's weekly limit used (the % under it; when it resets on hover); its lamp turns amber from 70% and blinks red from 90%</span>
-      <b>Seasons</b><span>follow your plan's 5-hour limit: spring while it is fresh (blossom), then summer, autumn (falling leaves), and winter (snow) when it is nearly used up; a new window brings spring back</span>
+      <b>Silo</b><span>its grain is your plan's weekly limit used (the % under it; when it resets on hover); its lamp turns amber from 70% and blinks red from 90%. With two Claude accounts, each has a silo (the second left of the barn), its name on the tag at its foot</span>
+      <b>Seasons</b><span>follow your plan's 5-hour limit: spring while it is fresh (blossom), then summer, autumn (falling leaves), and winter (snow) when it is nearly used up; a new window brings spring back. The Season switch holds one instead (each click moves it on, then back to live): the panel then shows the season with a 📌 and your real 5-hour use, and the animals follow the season you see</span>
       <b>At a bed</b><span>a working farmer walks the rows (hoe = editing, seed bag = a new file, rake = lint, sickle = deleting, can = other commands) or round the frame (spyglass = searching, almanac = reading). The slate in the bed's corner counts the steps taken there, the band under the number is their mix (green = changing files, blue = reading and searching, yellow = tests and builds, orange = git and deploys, purple = planning, grey = other commands); hover it for the record in words. Along the front board: the last half hour, a tick a step, red = failed. Dark soil = just changed, a staked seedling = a new file, a stump = a deletion, the pennant at the front left = the last test run (green, red; amber while tests run), thistles = steps failing in a row</span>
       <b>Henhouse</b><span>a farmer whistles and a hen comes out of the henhouse: a subagent at work. It keeps beside its farmer, or scratches on the field by itself when it runs in the background (its farmer may sit on the porch meanwhile). Done, it walks home, pecks in the run a moment and lays an egg in the nest (hover it for the result); one that failed flutters home with no egg. Hens waiting in the run: more than four for one farmer, or their farmer is not out. Hover a hen for its task, click it for its farmer's subagents</span>
       <b>Pigeons</b><span>one agent messaging another (Claude Code's SendMessage between sessions): a pigeon flies the note from one farmer to the other, and the diary says what it said; the agents' conversations show it too</span>
@@ -2482,7 +2395,7 @@
   window.Agentville.world(makeFarm());
   // The farm's own pieces, for its tests (and the world tools to come).
   window.AgentvilleFarm = {
-    farmScene, makeFarm, actionOf, paint, growthStage, STAGES, skyAt, PALETTE, ink, spriteRows, walkFrame, stepParticles, seasonOf, siloOf, glyphOf, textWidth,
+    farmScene, makeFarm, actionOf, paint, growthStage, STAGES, skyAt, PALETTE, ink, walkFrame, stepParticles, seasonOf, siloOf, silosOf, glyphOf, textWidth,
     weatherOf, helpHtml, layoutFor, packedLayout, rowsOfGroup, cartRoute, cartGoal, cutMid, tagText, shortName, bedLegs, bedStanding, henRoute, drawHen, COOP,
     tallyOf, tallyLines, spanText, WORK_GROUPS,
     cat: { SPOTS: CAT, UP: CAT_UP, LANE: CAT_LANE, plan: catPlan, stretch: catStretch, legs: catLegs, leap: catLeap, draw: drawPorchCat },

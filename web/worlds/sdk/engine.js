@@ -19,8 +19,9 @@ const ACTIVE = new Set(['waiting', 'working', 'turn']);
 const enginePlan = plan => (plan ? { windows: plan.windows.map(w => ({ kind: w.kind, percentUsed: w.pct, resetsAt: w.resetsAt, reset: w.reset })) } : null);
 function engineScene(s) {
   return {
-    plan: enginePlan(s.plan),
-    codexPlan: s.codexPlan ? { ...enginePlan(s.codexPlan), planType: s.codexPlan.planType, credits: s.codexPlan.credits } : null,
+    plan: s.plan ? { windows: s.plan.windows.map(w => ({ kind: w.kind, percentUsed: w.pct, resetsAt: w.resetsAt, reset: w.reset })) } : null,
+    accounts: (s.accounts ?? []).map(a => ({ key: a.key, name: a.name, plan: a.plan ? { windows: a.plan.windows.map(w => ({ kind: w.kind, percentUsed: w.pct, resetsAt: w.resetsAt, reset: w.reset })) } : null })),
+    codexPlan: s.codexPlan ? { windows: s.codexPlan.windows.map(w => ({ kind: w.kind, percentUsed: w.pct, resetsAt: w.resetsAt, reset: w.reset })), planType: s.codexPlan.planType, credits: s.codexPlan.credits } : null, // Codex's own limits, in the plan's shape
     chrome: s.chrome,
     subagents: s.subagents,
     mail: s.mail,
@@ -31,19 +32,177 @@ function engineScene(s) {
   };
 }
 
-/** The HUD a world gets unless it draws its own: the dashboard's buttons, the sky, help and zoom. */
-function defaultHud({ zoom = 1, skyMode = 'live', still = false, nav = {}, animals = null }) {
+const SEASON_DEFAULTS = { switch: 'Season', spring: 'spring', summer: 'summer', autumn: 'autumn', winter: 'winter' }; // a world's seasonNames, unless it gives its own
+/**
+ * The HUD a world gets unless it draws its own: a Menu at the top right holding the dashboard's buttons,
+ * then the sky (and the season, in a world with seasons), motion, animals, help and zoom.
+ */
+function defaultHud({ zoom = 1, skyMode = 'live', seasonMode = 'live', seasons = false, still = false, nav = {}, animals = null, menuOpen = false, seasonNames = SEASON_DEFAULTS }) {
   const btn = (attr, label, title, pressed) => `<button type="button" ${attr} title="${esc(title)}"${pressed === undefined ? '' : ` aria-pressed="${pressed}"`}>${pxImg(label, '#4e3626', null)}<span class="px-sr">${esc(label)}</span></button>`;
-  return `<div class="px-nav">${btn('data-farm-nav="list"', 'List', 'The list of agents')}${btn('data-farm-nav="worlds"', 'World', 'Choose a world')}${btn('data-farm-nav="side"', 'Sidebar', 'The selected agent beside the map', Boolean(nav.side))}</div>
-    <div class="px-tools">${btn('data-farm-sky', `Sky: ${skyMode}`, 'Live follows your clock; or day, or night')}${btn('data-farm-motion', `Motion: ${still ? 'off' : 'on'}`, 'Walking and animation')}${animals === null ? '' : btn('data-farm-animals', `Animals: ${animals ? 'on' : 'off'}`, 'Animals that live here, just for fun: click one to pet or feed it', animals)}${btn('data-farm-help', 'Help', 'How to read this world')}
-      <span class="px-zoombar">${btn('data-farm-zoom="-1"', '-', 'Zoom out')}${btn('data-farm-zoom="0"', `${Math.round(zoom * 100)}%`, 'The whole world')}${btn('data-farm-zoom="1"', '+', 'Zoom in')}</span></div>`;
+  return `<div class="px-nav">${btn(`data-farm-menu aria-expanded="${menuOpen}"`, 'Menu', "The dashboard's buttons, the switches and zoom")}
+    <div class="px-menu" role="group" aria-label="Menu"${menuOpen ? '' : ' hidden'}>
+      <div class="px-menu-grid">${btn('data-farm-nav="list"', 'List', 'The list of agents')}${btn('data-farm-nav="worlds"', 'World', 'Choose a world')}${btn('data-farm-nav="side"', 'Sidebar', 'The selected agent beside the map', Boolean(nav.side))}${btn('data-farm-nav="broadcast"', 'Broadcast', 'Message several agents at once')}</div>
+      ${btn('data-farm-sky', `Sky: ${skyMode}`, 'Live follows your clock; or day, or night')}${seasons ? btn('data-farm-season', `${seasonNames.switch}: ${seasonMode === 'live' ? 'live' : seasonNames[seasonMode]}`, `Live follows this world's own seasons; or hold one: ${seasonNames.spring}, ${seasonNames.summer}, ${seasonNames.autumn} or ${seasonNames.winter}`) : ''}${btn('data-farm-motion', `Motion: ${still ? 'off' : 'on'}`, 'Walking and animation')}${animals === null ? '' : btn('data-farm-animals', `Animals: ${animals ? 'on' : 'off'}`, 'Animals that live here, just for fun: click one to pet or feed it', animals)}${btn('data-farm-help', 'Help', 'How to read this world')}
+      <span class="px-zoombar">${btn('data-farm-zoom="-1"', '-', 'Zoom out')}${btn('data-farm-zoom="0"', `${Math.round(zoom * 100)}%`, 'The whole world')}${btn('data-farm-zoom="1"', '+', 'Zoom in')}</span>
+    </div></div>`;
 }
 
+/**
+ * The farm's panel and buttons, for any world, in its own words: top left, the panel with what the
+ * dashboard's top bar and count cards say (cost, compactions, the season, the counts, the meters); top
+ * right, one Menu holding the dashboard's own buttons, the world's switches, the bell, help and zoom
+ * (open with `menuOpen`; the engine opens and shuts it). A world's hud can be
+ * `p => panelHud({ ...p, scene, season, iconImg, seasonIcon, seasonTip }, WORDS)`: `params` is the hud's
+ * state plus the world's engine `scene`, its live `season`, and its `iconImg(name)` (HTML for an icon),
+ * `seasonIcon(level)` (the icon's name) and `seasonTip(mode)` (the season's tooltip). `words` are the
+ * world's words and colours; any it leaves out are plain ones in its `place`, `agent` and `agents`
+ * (docs/worlds.md, "panelHud"). The buttons keep their data-farm-* attributes: the engine's clicks read them.
+ */
+function panelHud({ still, zoom = 1, saysOn = true, skyMode = 'live', seasonMode = 'live', seasons = true, seasonNames, follow = false, canFollow = false, restingHidden = null, bell = false, nav = {}, panelOpen = true, animals = null, menuOpen = false,
+  scene = { farmers: [] }, season = 'summer', iconImg = () => '', seasonIcon = s => s, seasonTip = () => '' }, words = {}) {
+  const names = { ...SEASON_DEFAULTS, ...seasonNames }, named = s => (Object.hasOwn(names, s) ? names[s] : s);
+  // A world's words can be wrong: not an object, a noun that is not a string, a tip of a megabyte. Nouns are short non-empty strings (cut to 40), other words are strings (cut to 300); else the plain ones.
+  const given = words && typeof words === 'object' && !Array.isArray(words) ? words : {};
+  const noun = (v, plain) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 40) : plain);
+  const place = noun(given.place, 'world'), agent = noun(given.agent, 'agent'), agents = noun(given.agents, 'agents');
+  words = {
+    costTip: `What the sessions in the ${place} have cost so far (from the mod)`, costIcon: 'coin',
+    compactedWord: 'compacted', compactedTip: "Each time a session's conversation was compacted", compactedIcon: 'basket',
+    textColor: '#fff3d6', shadowColor: '#2a1d14', dimColor: '#c9b48a', labelColor: '#a9c79a', brandColor: '#ffe8a3', toolColor: '#4e3626', toolStateColor: '#8b5a2b',
+    sideTip: `Show the selected ${agent}'s answer box, activity and files beside the ${place}`,
+    followTip: `Keep the ${agent} you picked in the middle of the view (zooms in); dragging the view turns it off`,
+    followFirstTip: `Pick one of the ${agents} first, then Follow keeps it in view`,
+    restingTip: `Idle and stale ${agents}: show them, or hide them to keep the ${place} to the ${agents} at work`,
+    bubblesTip: `Speech bubbles with what each ${agent} last said. × hides one; its 💬 shows it again`,
+    animalsTip: `Animals in the ${place}, just for fun: click one to pet or feed it. They never stand for anything`,
+    skyTip: 'The light: live follows your clock (dawn, day, dusk, night); or hold it at day or night',
+    seasonSwitchTip: `${names.switch}: live follows your plan's 5-hour limit; or hold one: ${names.spring}, ${names.summer}, ${names.autumn} or ${names.winter}. The panel's 📌 shows your real 5-hour use meanwhile`,
+    motionTip: `Walking and animation in the ${place}`,
+    helpTip: `How to read the ${place}`,
+    zoomTip: `Zoom the ${place} inside its frame (or ⌘/Ctrl + scroll, or pinch); drag to move around when zoomed in`,
+    zoomAllTip: `Show the whole ${place}`,
+    menuTip: `The dashboard's buttons, the ${place}'s switches, the bell, help and zoom`,
+    menuHead: `IN THE ${String(place).toUpperCase()}`,
+    ...Object.fromEntries(Object.entries(given).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, v.slice(0, 300)])),
+  };
+  // In an attribute: & < > " escaped, an apostrophe left as it is (the farm's tooltips have them).
+  const attr = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const brand = typeof window !== 'undefined' && window.Agentville?.svg ? window.Agentville.svg({ size: 18, cls: 'px-logo' }) : ''; // Agentville's mark (brand.js, loaded in the frame after the bridge)
+  const need = scene.farmers.filter(a => a.state === 'waiting' || a.question).length;
+  const spent = scene.farmers.reduce((t, a) => t + (a.cost ?? 0), 0), compacted = scene.farmers.reduce((t, a) => t + (a.compactions ?? 0), 0);
+  const ch = scene.chrome ?? {}, c = ch.counts ?? {};
+  const w = t => pxt(t, words.textColor, words.shadowColor), dim = t => pxt(t, words.dimColor, null), label = t => pxt(t, words.labelColor, null);
+  const gb = mb => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
+  const bar = (ratio, tone) => `<span class="px-bar"><i class="${tone}" style="width:${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%"></i></span>`;
+  const tone = r => (r >= 0.8 ? 'bad' : r >= 0.5 ? 'warn' : 'ok');
+  // a count card; its glyph is white on the stylesheet's badge
+  const kpi = (state, glyph, cls, name, n, sub, hot, title) => `<button type="button" class="px-kpi${hot ? ' hot' : ''}"${state && n ? ` data-farm-state="${state}"` : ' disabled'} title="${esc(title)}"><span class="px-kpi-ico ${cls}">${pxt(glyph, '#ffffff', null)}</span><span class="px-kpi-n">${w(String(n ?? 0))}</span><span class="px-kpi-l">${label(name)}${sub ? `<br>${dim(sub)}` : ''}</span></button>`;
+  const ramRatio = ch.ram?.totalMb ? ch.ram.usedMb / ch.ram.totalMb : 0, cpuRatio = (ch.cpu?.used ?? 0) / ((ch.cpu?.cores || 1) * 100);
+  const windows = scene.plan?.windows ?? [], win = kind => windows.find(x => x.kind === kind), pctOf = x => (x ? (x.reset ? 0 : Math.round(x.percentUsed)) : null);
+  const five = pctOf(win('five_hour')), week = pctOf(win('seven_day')), accs = scene.accounts ?? [];
+  const tool = (attrs, icon, name, state, title, disabled = false) => `<button type="button" ${attrs}${disabled ? ' disabled' : ''} title="${esc(title)}">${iconImg(icon)}${pxImg(name, words.toolColor, null)}${state ? `<span class="px-mi-s">${pxImg(state, words.toolStateColor, null)}</span>` : ''}<span class="px-sr">${esc(state ? `${name}: ${state}` : name)}</span></button>`;
+  const head = text => `<div class="px-menu-h">${pxt(text, words.toolStateColor, null)}</div>`; // a heading in the menu
+  const navBtn = (what, icon, name, title, pressed) => `<button type="button" data-farm-nav="${what}" title="${esc(title)}"${pressed === undefined ? '' : ` aria-pressed="${pressed}"`}>${iconImg(icon)}${pxImg(name, words.toolColor, null)}<span class="px-sr">${esc(name)}</span></button>`;
+  return `<div class="px-stats${panelOpen ? '' : ' folded'}">
+            <button type="button" class="px-brand" data-farm-panel title="${panelOpen ? 'Fold this panel away' : 'Show the counts and meters'}" aria-expanded="${panelOpen}">${brand}${pxt('AGENTVILLE', words.brandColor, words.shadowColor)}<i class="px-live${nav.live === false ? ' off' : ''}" title="${nav.live === false ? 'Disconnected from the collector: retrying' : 'Live'}"></i>${pxt(panelOpen ? '-' : '+', words.dimColor, null)}</button>
+            <div class="px-line"><span title="${attr(words.costTip)}"><b class="${attr(words.costIcon)}"></b>${w(`$${spent.toFixed(2)}`)}</span><span title="${attr(words.compactedTip)}"><b class="${attr(words.compactedIcon)}"></b>${w(`${compacted} ${words.compactedWord}`)}</span>${seasons ? `<span class="px-season" title="${esc(seasonTip(seasonMode))}">${seasonMode === 'live' ? `${iconImg(seasonIcon(season))}${w(named(season))}` : `${iconImg(seasonIcon(seasonMode))}${w(named(seasonMode))} 📌 ${dim(five !== null ? `· 5-hour ${five}%` : '· no 5-hour reading')}`}</span>` : ''}</div>
+            <div class="px-kpis">
+              ${kpi('waiting', '!', 'k-wait', 'waiting on you', c.waiting, c.waiting ? `oldest ${ago(ch.oldestWaiting ?? Date.now())}` : 'all clear', c.waiting > 0, 'Agents waiting on you (a question or a permission): click for the first')}
+              ${kpi('working', '>', 'k-work', 'working', c.working, ch.subagentsRunning ? `${ch.subagentsRunning} with subagents` : `${ch.agents ?? 0} agents tracked`, false, 'Agents at work: click for the first')}
+              ${kpi('turn', '<', 'k-turn', 'your turn', c.yourTurn, `${ch.asking ? `${ch.asking} ask you · ` : ''}${c.idle ?? 0} idle · ${c.stale ?? 0} stale`, ch.asking > 0, "Agents whose turn ended: it's yours. Click for the first")}
+              ${kpi(null, '⚠', 'k-collide', 'collisions', c.collisions, c.collisions ? 'two in one repo' : 'none', c.collisions > 0, 'Two agents writing one repo')}
+            </div>
+            <div class="px-gauges">
+              <span class="px-gauge" title="Memory used by the agents, of this Mac's">${label('RAM')}${bar(ramRatio, tone(ramRatio))}${w(gb(ch.ram?.usedMb ?? 0))}${ch.ram?.totalMb ? dim(`of ${gb(ch.ram.totalMb)}`) : ''}</span>
+              <span class="px-gauge" title="${esc(`CPU used by the agents: ${Math.round(ch.cpu?.used ?? 0)}% of one core, ${ch.cpu?.cores ?? 1} cores`)}">${label('CPU')}${bar(cpuRatio, tone(cpuRatio))}${w(`${Math.round(cpuRatio * 100)}%`)}${dim('of this Mac')}</span>
+              ${accs.length > 1 ? accs.map((a, i) => { // with two or more Claude accounts: each one's week, and its 5 hours beside it; one with no name is "account N", as the private scene names it
+                const ws = a.plan?.windows ?? [], f5 = pctOf(ws.find(x => x.kind === 'five_hour')), wk = pctOf(ws.find(x => x.kind === 'seven_day')), name = typeof a.name === 'string' && a.name ? a.name : `account ${i + 1}`;
+                const num = /^account (\d+)$/.exec(name)?.[1]; // a numbered one (the private scene's) reads ACC N: cut to six letters, two would both be ACCOUN
+                return `<span class="px-gauge" title="${esc(`Your ${num ? `account ${num}` : `${name} account`}: ${wk === null ? 'no weekly reading' : `${wk}% of its week`}, ${f5 === null ? 'no 5-hour reading' : `${f5}% of its 5 hours`} (from the mod)`)}">${label(num ? `ACC ${num}` : name.toUpperCase().slice(0, 6))}${bar((wk ?? 0) / 100, tone((wk ?? 0) / 100))}${w(wk === null ? '–' : `${wk}%`)}${dim(`week · 5h ${f5 === null ? '–' : `${f5}%`}`)}</span>`;
+              }).join('') : `${five !== null ? `<span class="px-gauge" title="Your plan's 5-hour limit (from the mod)">${label('5H')}${bar(five / 100, tone(five / 100))}${w(`${five}%`)}${dim('5-hour limit')}</span>` : ''}
+              ${week !== null ? `<span class="px-gauge" title="Your plan's weekly limit (from the mod)">${label('WEEK')}${bar(week / 100, tone(week / 100))}${w(`${week}%`)}${dim('this week')}</span>` : ''}`}
+              ${ch.collector ? `<span class="px-gauge" title="The tracker itself">${dim(`tracker ${ch.collector.cpu ?? 0}% CPU · ${ch.collector.rssMb ?? 0} MB`)}</span>` : ''}
+            </div>
+            ${(ch.errors ?? []).map(e => `<div class="px-err">⚠ ${esc(e)}</div>`).join('')}
+            ${need ? `<button type="button" class="px-need" data-farm-need title="Open the first agent that needs you">${pxt(`${need} need${need > 1 ? '' : 's'} you`, '#ffffff', '#5a1f19')}</button>` : ''}
+          </div>
+          <div class="px-nav">
+            <button type="button" data-farm-menu aria-expanded="${menuOpen}" title="${attr(words.menuTip)}">${iconImg('menu')}${pxImg('MENU', words.toolColor, null)}<span class="px-sr">Menu</span></button>
+            <div class="px-menu" role="group" aria-label="Menu"${menuOpen ? '' : ' hidden'}>
+              ${head('DASHBOARD')}
+              <div class="px-menu-grid">
+                ${navBtn('list', 'list', 'LIST', 'Back to the list view')}
+                ${navBtn('worlds', 'world', 'WORLD', 'Choose a world')}
+                ${navBtn('session', 'plus', 'SESSION', 'Start a new Claude Code session in a folder, or resume a past one')}
+                ${navBtn('setup', 'gear', 'CLAUDE CODE', 'Your Claude Code setup: plugins and skills (and what each costs in context), MCP servers, permission rules')}
+                ${navBtn('side', 'side', 'SIDEBAR', words.sideTip, Boolean(nav.side))}
+                ${navBtn('broadcast', 'broadcast', 'BROADCAST', 'Message several agents at once: all of them, or the ones you pick')}
+                ${navBtn('theme', nav.theme === 'light' ? 'day' : nav.theme === 'auto' ? 'live' : 'night', String(nav.theme ?? 'dark').toUpperCase(), 'Theme: dark, light, or auto (as macOS is): click to change')}
+              </div>
+              ${head(words.menuHead)}
+              ${tool('data-farm-follow', 'follow', 'Follow', follow ? 'on' : 'off', canFollow ? words.followTip : words.followFirstTip, !canFollow)}
+              ${tool('data-farm-resting', 'resting', 'Resting', restingHidden === null ? 'shown' : `hidden (${restingHidden})`, words.restingTip)}
+              ${tool('data-farm-bubbles', 'bubbles', 'Bubbles', saysOn ? 'on' : 'off', words.bubblesTip)}
+              ${animals === null ? '' : tool('data-farm-animals', 'animals', 'Animals', animals ? 'on' : 'off', words.animalsTip)}
+              ${tool('data-farm-sky', skyMode, 'Sky', skyMode, words.skyTip)}
+              ${seasons ? tool('data-farm-season', seasonIcon(seasonMode === 'live' ? season : seasonMode), names.switch, seasonMode === 'live' ? 'live' : named(seasonMode), words.seasonSwitchTip) : ''}
+              ${tool('class="px-motion" data-farm-motion', still ? 'pause' : 'play', 'Motion', still ? 'off' : 'on', words.motionTip)}
+              <div class="px-menu-sep"></div>
+              ${tool('data-farm-bell', 'bell', 'Bell', bell ? 'on' : 'off', 'A chime, and a desktop notice when the page is in the background, whenever an agent starts waiting on you (in the list view too)')}
+              ${tool(`class="px-info" data-farm-help aria-label="${attr(words.helpTip)}"`, 'help', 'Help', '', words.helpTip)}
+              <div class="px-menu-zoom">${pxt('ZOOM', words.toolStateColor, null)}<span class="px-zoombar" title="${attr(words.zoomTip)}"><button type="button" data-farm-zoom="-1" aria-label="Zoom out">${pxt('-', words.toolColor, null)}</button><button type="button" data-farm-zoom="0" title="${attr(words.zoomAllTip)}">${pxt(`${Math.round(zoom * 100)}%`, words.toolColor, null)}</button><button type="button" data-farm-zoom="1" aria-label="Zoom in">${pxt('+', words.toolColor, null)}</button></span></div>
+            </div>
+          </div>`;
+}
+
+/**
+ * How big the world is at 100% in a frame of fw × fh (CSS pixels), and the frame's spare room round it
+ * (whole world pixels: more land). A panel lying over the frame's top left (`panel`: its width and height
+ * with its margin, in CSS pixels; null for none) never covers the world: it sits beside the panel or
+ * below it, whichever leaves it bigger. With room to spare, beside it rather than in the middle. Below
+ * it, the world also keeps clear of the switches along the bottom (`tools`: their height with their
+ * margin); beside it, they lie over the land at its foot, as they always have.
+ */
+function fitClear(fw, fh, W, H, panel, tools = 0) {
+  const pw = panel?.w ?? 0, ph = panel?.h ?? 0, tall = fh > 60;
+  const scale = (w, h) => Math.max(0.5, Math.min(6, w / W, tall ? h / H : Infinity));
+  // a world pixel over, so that rounding the spare room to whole pixels never puts it back under the panel
+  const beside = pw ? Math.max(0.5, Math.min(scale(fw - 2, fh - 2), (fw - 2 - pw) / (W + 1))) : scale(fw - 2, fh - 2);
+  const below = tall && ph ? Math.min(scale(fw - 2, fh - 2), (fh - 2 - ph - tools) / (H + 1)) : 0;
+  const fit = Math.max(beside, below);
+  const spareW = Math.max(0, (fw - 2) / fit - W), spareH = tall ? Math.floor(Math.max(0, (fh - 2) / fit - H)) : 0;
+  const left = pw / fit, top = ph / fit, foot = tools / fit;
+  const isBelow = below > beside;
+  const l = Math.floor(isBelow ? spareW / 2 : spareW <= 0 ? 0 : spareW >= left ? left + (spareW - left) / 2 : spareW);
+  const t = isBelow ? Math.min(spareH, Math.ceil(top + Math.max(0, spareH - top - foot) / 2)) : Math.floor(spareH / 2);
+  return { fit, pad: { l, r: Math.floor(spareW) - l, t, b: spareH - t } };
+}
+
+/**
+ * What the world is fitted clear of: the panel and the switches as they stand (`now`: { w, h, tools },
+ * CSS pixels) against what was kept before (null on a new fit). The same object while `now` fits inside
+ * it, so the world keeps its size as the panel's figures come and go; more when the panel outgrows it
+ * (an error line, an account's row). Beside the panel, room is kept for a longer figure.
+ */
+function holdHud(kept, now) {
+  if (kept && now.w <= kept.w && now.h <= kept.h && now.tools <= kept.tools) return kept;
+  const room = w => (w ? w + 24 : 0);
+  return kept ? { w: Math.max(kept.w, room(now.w)), h: Math.max(kept.h, now.h), tools: Math.max(kept.tools, now.tools) } : { w: room(now.w), h: now.h, tools: now.tools };
+}
+
+const BOARD_TITLE = 'The notice board: what your projects remember';
 /** A world's hooks, with the engine's default for each one it leaves out (docs/worlds.md, "Hooks"). */
 function withDefaults(h) {
   if (!(h.W > 0)) throw new Error('A world needs its width, W (in world pixels).');
   for (const need of ['slots', 'drawChar', 'bg']) if (typeof h[need] !== 'function') throw new Error(`A world needs a ${need}() hook.`);
-  const nouns = { agent: 'agent', agents: 'agents', repo: 'repo', repos: 'repos', ...h.nouns };
+  const nouns = { agent: 'agent', agents: 'agents', repo: 'repo', repos: 'repos', place: 'world', ...h.nouns };
+  const given = h.seasonNames && typeof h.seasonNames === 'object' && !Array.isArray(h.seasonNames) ? h.seasonNames : {};
+  const seasonNames = Object.fromEntries(Object.entries(SEASON_DEFAULTS).map(([k, word]) => {
+    const v = typeof given[k] === 'string' ? given[k].trim().slice(0, 24) : '';
+    return [k, v || word];
+  }));
+  // The notice board's dialog title (what a world's 'board' building opens): a string with words in it, cut to 80; else today's.
+  const boardTitle = (typeof h.boardTitle === 'string' ? h.boardTitle.trim().slice(0, 80).trim() : '') || BOARD_TITLE;
   // The default grid is centred on W, from the config merged over 3 × 88 × 62: columns centred, a
   // fence half a column wider each side (kept inside 0..W) unless the world gives cx0 or a fence itself.
   const g = h.grid ?? {};
@@ -70,11 +229,14 @@ function withDefaults(h) {
     labels: lab => { for (const s of out.layout().ST) lab(s.cx, s.rowTop + 50, pxt(cutMid(fields.find(f => f.key === s.key)?.name ?? '', 16)), 'zone'); },
     fieldAt: () => null, buildingAt: () => null, buildingTip: () => '', dialog: () => null, boardSessions: () => [],
     help: () => `<div class="px-key"><b>${esc(nouns.agents)}</b><span>one for each agent working on this Mac</span><b>${esc(nouns.repos)}</b><span>one for each repo an agent works in</span></div>`,
-    ...h, grid,
+    ...h, grid, nouns, seasonNames, boardTitle,
     // the fields are always recorded here (the default labels read them), whoever's setScene runs
     setScene(next) { fields = next.fields; return ownSetScene ? ownSetScene.call(h, next) : []; },
   };
   if (!Array.isArray(out.corridors) || !out.corridors.length || !out.corridors.every(Number.isFinite)) throw new Error("A world's corridors are the x positions of its paths (at least one).");
+  // A world has seasons when it gives its own season(): the default above is none, and gets no Season switch.
+  // Not a hook (a world can't set it), and not enumerable, so check-world's list of hooks left to their defaults leaves it out.
+  Object.defineProperty(out, 'hasSeasons', { value: typeof h.season === 'function', enumerable: false });
   return out;
 }
 
@@ -92,6 +254,7 @@ window.Agentville.world = hooks => {
     },
     scene(s) { view.update(th.fromScene(s)); field.refresh(); },
     select(id) { view.select(id ?? null); },
+    chatter(lines) { view?.chatter(lines); },
   }, { engine: true }); // its HUD has the dashboard's buttons: the page adds no corner control
 };
 
@@ -131,10 +294,16 @@ function makePixelView(th, prefs) {
   // The sky: live (your clock), or held at day or night.
   const SKIES = ['live', 'day', 'night'];
   let skyMode = SKIES.includes(prefs.get('sky')) ? prefs.get('sky') : 'live';
+  // The season, in a world with seasons: live (the world's own season(): the farm's follows your 5-hour limit), or held at one.
+  const SEASONS = ['live', 'spring', 'summer', 'autumn', 'winter'];
+  let seasonMode = SEASONS.includes(prefs.get('season')) ? prefs.get('season') : 'live';
+  /** The season drawn now: the one held, else the world's own (a world without seasons always its own). */
+  const seasonNow = () => (seasonMode === 'live' || !th.hasSeasons ? th.season() : seasonMode);
   let bgSeason = null;
   let follow = false; // keep the picked farmer in the middle of the view
   let restingShown = prefs.get('resting') !== 'hidden'; // idle and stale farmers on the farm, or not
   let bellOn = prefs.get('bell') === 'on';
+  let hudMenu = false; // the HUD's Menu (the dashboard's buttons, the switches and zoom): open or shut
   let panelOpen = prefs.get('panel') !== 'folded'; // the farm's panel: counts and meters, or folded to its title // a chime and a desktop notice when an agent starts waiting (the page rings it)
   const moverEls = new Map(); // labels that move: key → element
   let dlg = null, mini = null; // the buildings' dialog; the minimap shown while zoomed in
@@ -142,6 +311,8 @@ function makePixelView(th, prefs) {
   const resting = f => f.state === 'idle' || f.state === 'stale';
   let glide = null; // a zoom easing in: { from: scale, start, ox, oy }
   let pad = { l: 0, r: 0, t: 0, b: 0 }; // the frame's spare room, in world pixels: more forest all round
+  let hudKept = null; // the panel's size and the switches' height the farm is fitted clear of (holdHud); null: measure afresh
+  let refit = 0; // a fit waiting for the next frame: the panel outgrew what was kept for it
   const extOf = () => ({ x0: -pad.l, x1: th.W + pad.r, y0: -pad.t, y1: th.layout().H + pad.b });
   const skyNow = () => skyAt(skyMode === 'day' ? new Date(2000, 0, 1, 12) : skyMode === 'night' ? new Date(2000, 0, 1, 23) : new Date());
   let wheel = 0;
@@ -161,6 +332,7 @@ function makePixelView(th, prefs) {
   const animalSays = new Map(); // creature id → its bubble element
   let stillAt = 0; // when the animals were last drawn still: their lines keep time with motion off
   if (typeof window !== 'undefined' && window.Agentville) window.Agentville.animalsNow = () => (kit ? kit.list() : []); // read-only: where they are (the browser test)
+  if (typeof window !== 'undefined' && window.Agentville) window.Agentville.freshLinesNow = () => (kit ? kit.freshLines() : []); // read-only: the helper's lines not said yet (the browser check)
   const errands = typeof makeErrands === 'function' ? makeErrands() : null; // farmers borrowed by animals (sdk/animals.js)
   const idleSince = new Map(); // farmer id → when it was first seen idle (frame time): play waits for 3 minutes
   let nextPlay = 45;
@@ -220,7 +392,11 @@ function makePixelView(th, prefs) {
     if (r.fx === 'sparkle') for (let k = 0; k < 16; k++) addPart({ x: x + rand(-8, 8), y: y - rand(1, 12), vx: rand(-12, 12), vy: rand(-26, -6), g: 18, life: 0.9, max: 0.9, size: 1, color: ['#ffffff', '#ffd43b', '#ff7eb6', '#5ab4ff', '#b388ff'][k % 5] });
     if (r.fx === 'dust') for (let k = 0; k < 8; k++) addPart({ x: x + rand(-4, 4), y: y - 1, vx: rand(-18, 18), vy: rand(-12, -4), g: 30, life: 0.5, max: 0.5, size: rand(1, 2), color: '#c9a46a', alpha: 0.7 });
   }
-  function onMenuKey(e) { if (e.key === 'Escape' && menuFor) closeMenu(); }
+  function onMenuKey(e) {
+    if (e.key !== 'Escape') return;
+    if (menuFor) closeMenu();
+    else if (hudMenu) { hudMenu = false; renderHud(); hudEl?.querySelector('[data-farm-menu]')?.focus?.(); } // the HUD's Menu: shut, back on its button
+  }
 
   function targets() {
     const out = new Map(), count = {}, used = new Map(), over = { desk: 0, turn: 0, storage: 0, charge: 0, meadow: 0 };
@@ -262,8 +438,16 @@ function makePixelView(th, prefs) {
     setTimeout(() => el.remove(), 1700);
   }
   function renderHud() {
-    if (hudEl) hudEl.innerHTML = th.hud({ still, zoom, saysOn, skyMode, follow, canFollow: Boolean(selectedId && bots.has(selectedId)), restingHidden: restingShown ? null : scene.farmers.filter(resting).length, bell: bellOn, nav: opts.navState?.() ?? {}, panelOpen, animals: kit ? animalsOn : null });
+    if (hudEl) hudEl.innerHTML = th.hud({ still, zoom, saysOn, skyMode, seasonMode, seasons: th.hasSeasons, follow, canFollow: Boolean(selectedId && bots.has(selectedId)), restingHidden: restingShown ? null : scene.farmers.filter(resting).length, bell: bellOn, nav: opts.navState?.() ?? {}, panelOpen, animals: kit ? animalsOn : null, menuOpen: hudMenu, seasonNames: th.seasonNames });
     placeMini();
+    // a panel that outgrew what was kept for it: the farm moves clear of it on the next frame, not in
+    // the middle of whatever drew the HUD (a farmer's move, say)
+    if (canvas && !refit && holdHud(hudKept, hudNow()) !== hudKept) refit = requestAnimationFrame(() => { refit = 0; resize(); });
+  }
+  /** The panel over the frame's top left (a world's .px-stats; 0 × 0 when there is none) and the switches' height, as they stand. */
+  function hudNow() {
+    const el = hudEl?.querySelector('.px-stats'), tools = hudEl?.querySelector('.px-tools'), w = el?.offsetWidth ?? 0;
+    return { w, h: w ? el.offsetHeight : 0, tools: tools?.offsetHeight ?? 0 };
   }
   /** The minimap sits just above the switches, which take more rows in a narrow frame (the sidebar open). */
   function placeMini() {
@@ -532,12 +716,17 @@ function makePixelView(th, prefs) {
       first = false;
     }
   }
-  /** Carrier pigeons: from the sender over an arc to the receiver in 2.4 s, then a ✉ pops there. */
+  /**
+   * Messages on their way, 2.4 s each, then a ✉ pops at the receiver: drawn the world's way (its flight hook:
+   * the sender's and the receiver's bodies, how far along, 0 to 1, and the clock), else as a carrier pigeon
+   * from the sender over an arc to the receiver.
+   */
   function drawFlights() {
     for (let i = flights.length - 1; i >= 0; i--) {
       const fl = flights[i], a = bots.get(fl.from), z = bots.get(fl.to), t = (T - fl.start) / 2.4;
       if (!a || !z) { flights.splice(i, 1); continue; }
       if (t >= 1) { pop(z.x, z.y - th.SH * SC - 16, '✉', 'good'); flights.splice(i, 1); continue; }
+      if (typeof th.flight === 'function') { th.flight(a, z, t, T); continue; }
       const ay = a.y - th.SH * SC, zy = z.y - th.SH * SC, e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
       const x = Math.round(a.x + (z.x - a.x) * e), y = Math.round(ay + (zy - ay) * e - Math.sin(Math.PI * t) * 34), m = z.x >= a.x ? 1 : -1, up = Math.floor(T * 12) % 2;
       px(x - 3, y, 6, 3, '#e6eef5'); px(x + (m > 0 ? 2 : -4), y - 2, 2, 2, '#e6eef5'); px(x + (m > 0 ? 4 : -5), y - 1, 1, 1, '#f08a24'); px(x + (m > 0 ? 3 : -4), y - 2, 1, 1, '#1b1420'); // body, head, beak, eye
@@ -595,7 +784,8 @@ function makePixelView(th, prefs) {
     PXG.T = T;
     PXG.k = backing;
     PXG.W = th.W;
-    if (th.season() !== bgSeason) bg = buildBg(); // the season turned: new grass and trees
+    PXG.season = seasonNow(); // the season to draw: held, or live
+    if (PXG.season !== bgSeason) bg = buildBg(); // the season turned (or was switched): new grass and trees
     PXG.ext = extOf();
     const sky = skyNow();
     PXG.lights = [...th.lights()];
@@ -682,13 +872,14 @@ function makePixelView(th, prefs) {
     const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
     last = now;
     T += dt;
+    PXG.season = seasonNow(); // before the ticks: what they emit (snow, petals) and the animals' winter go by the season shown
     for (const f of scene.farmers) { const b = bots.get(f.id); if (b) { step(dt, f, b); th.emit?.(f, b, dt, addPart); } }
     if (errands?.tick(T, id => bots.get(id) ?? null, id => scene.farmers.find(f => f.id === id)?.state)) sync(false);
     if (th.tick?.(dt, id => bots.get(id)) === true) { sync(false); layoutLabels(); } // what else moves, where the farmers are (the MCP carts); true: its agents' places changed, and what its labels say may have
     th.ambient?.(dt, addPart);
     if (animalsShown()) {
       for (const f of scene.farmers) if (f.state !== 'idle') idleSince.delete(f.id); else if (!idleSince.has(f.id)) idleSince.set(f.id, T);
-      kit.tick(dt, { night: skyNow().phase === 'night', still: false, winter: th.season() === 'winter', crew });
+      kit.tick(dt, { night: skyNow().phase === 'night', still: false, winter: PXG.season === 'winter', crew });
       if ((nextPlay -= dt) <= 0) { nextPlay = 45; kit.play(crew); } // a farmer idle three minutes plays with one
     }
     stepParticles(parts, dt);
@@ -699,13 +890,14 @@ function makePixelView(th, prefs) {
   function stopLoop() { if (raf) cancelAnimationFrame(raf); raf = 0; }
   function redrawStill() {
     sync(true);
+    PXG.season = seasonNow();
     for (const f of scene.farmers) { const b = bots.get(f.id); if (b) step(0, f, b); }
     th.tick?.(0, id => bots.get(id), true); // the MCP carts too: each where it is going
-    if (animalsShown()) { const now = Date.now(); kit.tick(stillAt ? (now - stillAt) / 1000 : 0, { night: false, still: true, winter: th.season() === 'winter' }); stillAt = now; } // the lines still go after their few seconds
+    if (animalsShown()) { const now = Date.now(); kit.tick(stillAt ? (now - stillAt) / 1000 : 0, { night: false, still: true, winter: PXG.season === 'winter' }); stillAt = now; } // the lines still go after their few seconds
     draw();
   }
   function layoutLabels() {
-    const key = JSON.stringify([th.layout().key, scene.fields, overflow, th.labelKey?.() ?? null]); // labelKey: what else a world's labels say (the farm: its henhouse's eggs)
+    const key = JSON.stringify([th.layout().key, scene.fields, overflow, scene.plan, scene.accounts, scene.codexPlan, th.labelKey?.() ?? null]); // the farm's silo tags read the plans and the accounts; labelKey: what else a world's labels say (the farm: its henhouse's eggs)
     if (key === labelKey) return;
     labelKey = key;
     ov.querySelectorAll('.px-lab').forEach(n => n.remove());
@@ -718,7 +910,7 @@ function makePixelView(th, prefs) {
     c.height = H + pad.t + pad.b;
     const g = c.getContext('2d');
     g.translate(pad.l, pad.t);
-    bgSeason = th.season();
+    bgSeason = PXG.season = seasonNow(); // the season shown: held, or live
     PXG.W = th.W;
     th.bg((x, y, w, h, col) => { g.fillStyle = ink(col); g.fillRect(x, y, w, h); }, bgSeason, extOf());
     return c;
@@ -729,17 +921,14 @@ function makePixelView(th, prefs) {
     // 100% fits the whole farm in the frame (its outer size, so scrollbars coming and going don't
     // change it); zoom scales the farm inside. The backing store is a whole multiple of the art,
     // at most ~24M pixels, and image-rendering: pixelated keeps the pixels square when scaled.
+    // The frame's spare room is more land, not empty frame: the forest round the farm. The panel lies
+    // over the frame's top left (its 10px margin and a 6px gap): the farm sits clear of it.
     const fw = viewEl?.offsetWidth || th.W, fh = viewEl?.offsetHeight || 0;
-    const fit = Math.max(0.5, Math.min(6, (fw - 2) / th.W, fh > 60 ? (fh - 2) / H : Infinity));
-    // The frame's spare room is more land, not empty frame: the forest round the farm.
-    const spareW = Math.max(0, (fw - 2) / fit - th.W), spareH = fh > 60 ? Math.floor(Math.max(0, (fh - 2) / fit - H)) : 0;
     const was = `${pad.l},${pad.r},${pad.t},${pad.b}`;
-    // The panel lies over the frame's left edge: with room to spare, the farm sits beside it rather
-    // than in the middle.
-    const edge = sel => { const el = hudEl?.querySelector(sel); return el ? (el.offsetWidth + 16) / fit : 0; };
-    const left = edge('.px-stats'), right = 0, room = spareW - left - right;
-    const padL = spareW <= 0 ? 0 : room >= 0 ? left + room / 2 : (spareW * left) / Math.max(1, left + right);
-    pad = { l: Math.floor(padL), r: Math.floor(spareW) - Math.floor(padL), t: Math.floor(spareH / 2), b: spareH - Math.floor(spareH / 2) };
+    hudKept = holdHud(hudKept, hudNow());
+    const { w: pw, h: ph, tools } = hudKept;
+    let fit;
+    ({ fit, pad } = fitClear(fw, fh, th.W, H, pw ? { w: pw + 16, h: ph + 16 } : null, tools ? tools + 12 : 0)); // the switches: 8px off the bottom, a 4px gap
     const EW = th.W + pad.l + pad.r, EH = H + pad.t + pad.b;
     cs = Math.max(0.25, Math.min(18, fit * zoom));
     const k = Math.max(1, Math.min(Math.ceil(cs * dpr), Math.floor(Math.sqrt(24e6 / (EW * EH)))));
@@ -750,6 +939,7 @@ function makePixelView(th, prefs) {
     canvas.style.height = `${EH * cs}px`;
     canvas.dataset.pad = `${pad.l},${pad.t}`; // where the farm sits in the canvas, and how wide the land drawn is (for tests)
     canvas.dataset.ew = String(EW);
+    canvas.dataset.foot = String(pad.b); // the land below the farm (for tests)
     ov.style.left = `${pad.l * cs}px`; // names and labels keep the farm's own coordinates
     ov.style.top = `${pad.t * cs}px`;
     if (was !== `${pad.l},${pad.r},${pad.t},${pad.b}`) bg = buildBg(); // the land grows with the frame
@@ -790,7 +980,7 @@ function makePixelView(th, prefs) {
     for (const ev of news) { // a harvest over its farmer, a sale at the stall
       const b = ev.id ? bots.get(ev.id) : null, at = ev.at ?? (b ? [b.x, b.y - th.SH * SC - 14] : null);
       if (at && ev.text) pop(at[0], at[1], ev.text, ev.cls);
-      if (ev.log) addLog(next.farmers.find(f => f.id === ev.id) ?? { name: ev.by ?? 'The market', state: 'turn' }, ev.log);
+      if (ev.log) addLog(next.farmers.find(f => f.id === ev.id) ?? { name: typeof ev.who === 'string' ? ev.who : 'The market', state: 'turn' }, ev.log); // news with no agent: its world names who tells it
     }
     for (const ev of news) if (ev.kind && animalsShown()) { const b = ev.id ? bots.get(ev.id) : null; kit.react(ev.kind, ev.at ?? (b ? [b.x, b.y] : null) ?? [th.W / 2, 100]); } // the animals' reactions: a failed deploy scatters them
     layoutLabels();
@@ -804,6 +994,18 @@ function makePixelView(th, prefs) {
     const whoBtn = e.target.closest?.('[data-animal-who]');
     if (whoBtn && menuFor) { e.stopPropagation(); menuFor.doer = whoBtn.dataset.animalWho; renderMenu(); return; }
     if (menuEl && !menuEl.contains(e.target)) closeMenu(); // a click anywhere else closes it (and does what it does)
+    // The HUD's Menu: its button opens and shuts it; a click anywhere else shuts it (and does what it does).
+    // In it, the switches and zoom leave it open, to change several; a button that takes you elsewhere or
+    // raises a dialog (List, a session, Help…) shuts it first. Theme stays, to go round its three.
+    if (e.target.closest?.('[data-farm-menu]')) {
+      e.stopPropagation();
+      hudMenu = !hudMenu;
+      renderHud();
+      if (hudMenu) hudEl?.querySelector('.px-menu button:not(:disabled)')?.focus?.();
+      return;
+    }
+    if (hudMenu && !e.target.closest?.('.px-menu')) { hudMenu = false; renderHud(); }
+    if (hudMenu && e.target.closest?.('[data-farm-help], [data-farm-nav]:not([data-farm-nav="theme"])')) hudMenu = false;
     const tag = e.target.closest?.('[data-farmer]');
     if (tag) { e.stopPropagation(); opts.onPickAgent?.(tag.dataset.farmer); return; }
     if (e.target.closest?.('[data-farm-more]')) { e.stopPropagation(); opts.onShowRepos?.(); return; }
@@ -824,7 +1026,7 @@ function makePixelView(th, prefs) {
     if (mem) { e.stopPropagation(); dlg?.close(); opts.onOpenDoc?.(mem.dataset.farmMem, mem.dataset.path); return; }
     if (e.target.closest?.('[data-farm-dlg-close]') || (dlg && e.target === dlg)) { e.stopPropagation(); dlg.close(); return; }
     if (dlg?.contains(e.target)) return;
-    if (e.target.closest?.('[data-farm-panel]')) { e.stopPropagation(); panelOpen = !panelOpen; prefs.set('panel', panelOpen ? 'open' : 'folded'); renderHud(); resize(); return; }
+    if (e.target.closest?.('[data-farm-panel]')) { e.stopPropagation(); panelOpen = !panelOpen; prefs.set('panel', panelOpen ? 'open' : 'folded'); renderHud(); hudKept = null; resize(); return; }
     const navBtn = e.target.closest?.('[data-farm-nav]');
     if (navBtn) { e.stopPropagation(); opts.onNav?.(navBtn.dataset.farmNav); renderHud(); return; } // the dashboard's own buttons
     const stateBtn = e.target.closest?.('[data-farm-state]');
@@ -857,6 +1059,15 @@ function makePixelView(th, prefs) {
       draw();
       return;
     }
+    if (e.target.closest?.('[data-farm-season]')) { // live, then each season held, then live again
+      e.stopPropagation();
+      seasonMode = SEASONS[(SEASONS.indexOf(seasonMode) + 1) % SEASONS.length];
+      prefs.set('season', seasonMode);
+      renderHud();
+      if (seasonNow() !== bgSeason) bg = buildBg(); // the ground in the season shown now
+      if (still) redrawStill(); else draw(); // still: the animals' winter (scarves, the pond's ice) is set as they tick
+      return;
+    }
     const zoomBtn = e.target.closest?.('[data-farm-zoom]');
     if (zoomBtn) { e.stopPropagation(); setZoom(Number(zoomBtn.dataset.farmZoom)); return; }
     if (e.target.closest?.('[data-farm-animals]')) {
@@ -865,6 +1076,7 @@ function makePixelView(th, prefs) {
       prefs.set('animals', animalsOn ? 'on' : 'off');
       closeMenu();
       if (!animalsOn) kit?.stopGags(crew); // hidden: the hats back, the farmers let go
+      if (kit) opts.onCast?.(animalsOn ? kit.cast() : []); // no lines are written for animals you can't see
       if (!animalsOn && errands) { errands.clear(); sync(false); } // hidden: no farmer walks to an animal you can't see
       renderHud();
       draw();
@@ -898,7 +1110,7 @@ function makePixelView(th, prefs) {
     const say = e.target.closest?.('[data-say]');
     if (say) { e.stopPropagation(); opts.onPickAgent?.(say.dataset.say, { from: 'say' }); return; }
     const help = host.querySelector('.px-help');
-    if (e.target.closest?.('[data-farm-help]')) { e.stopPropagation(); help.showModal(); return; }
+    if (e.target.closest?.('[data-farm-help]')) { e.stopPropagation(); renderHud(); help.showModal(); return; }
     if (e.target.closest?.('[data-farm-help-close]') || e.target === help) { e.stopPropagation(); help.close(); return; } // × or a click on the backdrop
     if (help?.contains(e.target)) return;
     if (e.target !== canvas) return;
@@ -924,9 +1136,9 @@ function makePixelView(th, prefs) {
     dlg.querySelector('.px-dlg-body').innerHTML = d.html;
     if (!dlg.open) dlg.showModal();
   }
-  /** The notice board: each project's CLAUDE.md and memory, read from one of its sessions. */
+  /** The notice board: each project's CLAUDE.md and memory, read from one of its sessions. Its title is the world's (boardTitle). */
   async function openBoard() {
-    dlg.querySelector('.px-dlg-title').textContent = 'The notice board: what your projects remember';
+    dlg.querySelector('.px-dlg-title').textContent = th.boardTitle;
     const body = dlg.querySelector('.px-dlg-body');
     body.innerHTML = '<div class="loading"><span class="spinner"></span>Reading…</div>';
     if (!dlg.open) dlg.showModal();
@@ -941,7 +1153,7 @@ function makePixelView(th, prefs) {
         return `<h4>${esc(f.cwd)}</h4><p class="muted">Could not read it.</p>`;
       }
     }));
-    body.innerHTML = parts.join('') || '<p class="muted">No sessions on the farm.</p>';
+    body.innerHTML = parts.join('') || '<p class="muted">No sessions here.</p>';
   }
   /** The minimap: the whole farm small in a corner while zoomed in, the view a box on it; click it to go there. */
   function drawMini() {
@@ -983,9 +1195,9 @@ function makePixelView(th, prefs) {
       opts = options ?? {};
       host = el;
       still = opts.still ?? false;
-      host.innerHTML = `<div class="px"><div class="px-host"><div class="px-view"><div class="px-stage"><canvas aria-label="Pixel farm: every farmer is an agent, every field a repo"></canvas><div class="px-ov"></div>${got ? '' : '<div class="px-loading"><span class="spinner"></span>Loading the farm…</div>'}</div></div><div class="px-hud"></div></div></div>
-        <dialog class="px-help" aria-label="How to read the farm"><header><b>How to read the farm</b><button type="button" class="x" data-farm-help-close aria-label="Close">×</button></header>${th.help()}</dialog>
-        <dialog class="px-help px-dlg" aria-label="The farm"><header><b class="px-dlg-title"></b><button type="button" class="x" data-farm-dlg-close aria-label="Close">×</button></header><div class="px-dlg-body"></div></dialog>`;
+      host.innerHTML = `<div class="px"><div class="px-host"><div class="px-view"><div class="px-stage"><canvas aria-label="${esc(`Pixel ${th.nouns.place}: every ${th.nouns.agent} is an agent, every ${th.nouns.repo} a repo`)}"></canvas><div class="px-ov"></div>${got ? '' : `<div class="px-loading"><span class="spinner"></span>Loading the ${esc(th.nouns.place)}…</div>`}</div></div><div class="px-hud"></div></div></div>
+        <dialog class="px-help" aria-label="How to read the ${esc(th.nouns.place)}"><header><b>How to read the ${esc(th.nouns.place)}</b><button type="button" class="x" data-farm-help-close aria-label="Close">×</button></header>${th.help()}</dialog>
+        <dialog class="px-help px-dlg" aria-label="The ${esc(th.nouns.place)}"><header><b class="px-dlg-title"></b><button type="button" class="x" data-farm-dlg-close aria-label="Close">×</button></header><div class="px-dlg-body"></div></dialog>`;
       canvas = host.querySelector('canvas');
       ctx = canvas.getContext('2d');
       viewEl = host.querySelector('.px-view');
@@ -995,7 +1207,7 @@ function makePixelView(th, prefs) {
       mini = document.createElement('canvas');
       mini.className = 'px-mini';
       mini.hidden = true;
-      mini.title = 'The whole farm: click to go there';
+      mini.title = `The whole ${th.nouns.place}: click to go there`;
       host.querySelector('.px-host').appendChild(mini);
       mini.addEventListener('click', onMiniClick);
       moverEls.clear();
@@ -1005,10 +1217,11 @@ function makePixelView(th, prefs) {
       settle(groundFor(scene.fields));
       renderHud(); // before the first fit: the panel's and switches' size place the farm
       bg = buildBg();
+      hudKept = null;
       resize();
       placed = false;
       if (got) restorePlace(); // else when the first scene has been applied and the canvas has its size
-      ro = new ResizeObserver(() => resize());
+      ro = new ResizeObserver(() => { hudKept = null; resize(); }); // a new frame size: the panel measured afresh
       ro.observe(host);
       host.addEventListener('click', onClick);
       viewEl.addEventListener('wheel', onWheel, { passive: false });
@@ -1028,8 +1241,10 @@ function makePixelView(th, prefs) {
       renderHud();
       timer = setInterval(() => { if (!document.hidden) { renderLog(); renderHud(); if (still && animalsShown() && kit.bubbles().length) redrawStill(); } }, 1000); // still: an animal's line goes after its few seconds
       startLoop();
+      if (kit) opts.onCast?.(animalsShown() ? kit.cast() : []); // the page learns which animals to ask the helper's lines for (none while hidden)
     },
     update(next) { apply(next); },
+    chatter(lines) { kit?.chatter(lines); },
     select(id) {
       selectedId = id;
       if (!id && follow) follow = false;
@@ -1065,6 +1280,7 @@ function makePixelView(th, prefs) {
     farmerColor: id => { const f = scene.farmers.find(x => x.id === id); return f ? f.shirt : '#9aa0a6'; },
     field: key => scene.fields.find(f => f.key === key),
     fieldNotes: key => String(th.fieldNotes?.(key) ?? ''), // what the world has to say of a field, in its close-up: HTML of the world's own making
+    nouns: th.nouns,
   };
 }
 
@@ -1077,10 +1293,11 @@ function makeField(view) {
   const FW = 360, ROW = 50, HEAD = 40, X1 = 104, STEP = 31, BASE = 34, PER_ROW = 8;
   let back = null, canvas = null, ctx = null, timer = 0, key = null, sel = null, T = 0, data = null, error = '', fetchedAt = 0, loading = false;
   let opts = {};
+  const repo = () => view.nouns?.repo ?? 'field'; // what the world calls a repo, in the close-up's header, label and messages (the farm's: field)
   const p = (a, b, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(a, b, w, h); };
   const writers = f => f.agents.filter(a => a.wrote).length;
   const kind = f => (f.doc ? 'doc' : f.wrote && writers(f) > 1 ? 'shared' : f.wrote ? 'write' : 'read');
-  const label = f => ({ write: 'written', read: 'read only', shared: 'written by two or more farmers', doc: 'document' })[kind(f)];
+  const label = f => ({ write: 'written', read: 'read only', shared: `written by two or more ${view.nouns.agents}`, doc: 'document' })[kind(f)];
   const GIT_WORD = { M: 'modified', U: 'new, not committed', A: 'added', D: 'deleted', R: 'renamed' };
   const dirOf = path => (path.includes('/') ? `${path.split('/')[0]}/` : './');
   function groups() {
@@ -1156,7 +1373,7 @@ function makeField(view) {
       shown.forEach((f, j) => ov.insertAdjacentHTML('beforeend', `<button type="button" class="fv-hit" data-fv-file="${esc(f.path)}" title="${esc(f.path)} · ${esc(label(f))} · ${ago(f.at)} ago" style="left:${(X1 + j * STEP - 15) * cs}px;top:${(y0 + 2) * cs}px;width:${30 * cs}px;height:${(ROW - 2) * cs}px"><span class="fv-pl" style="top:${(BASE + 7) * cs}px">${esc(nameIn(dir, f.path).split('/').pop())}</span></button>`));
       if (list.length > PER_ROW) ov.insertAdjacentHTML('beforeend', `<div class="fv-more" style="left:${(X1 + shown.length * STEP - 15) * cs}px;top:${(y0 + BASE - 22) * cs}px;width:${30 * cs}px">+${list.length - shown.length}</div>`);
     });
-    const empty = loading && !data ? 'Loading the field…' : error ? error : !g.length ? 'Fallow: no agent read or wrote files here in the last 24 hours' : '';
+    const empty = loading && !data ? `Loading the ${repo()}…` : error ? error : !g.length ? 'Fallow: no agent read or wrote files here in the last 24 hours' : '';
     if (empty) ov.insertAdjacentHTML('beforeend', `<div class="fv-dir fv-empty" style="left:${(X1 - 10) * cs}px;top:${(HEAD + 22) * cs}px">${esc(empty)}</div>`);
     draw();
   }
@@ -1180,9 +1397,9 @@ function makeField(view) {
     const names = f ? f.agents.map(a => esc(view.farmerName(a.id) ?? a.id)).join(' and ') : '';
     const detail = f ? `<div class="fv-detail"><b>${esc(f.path)}</b>
       <div class="muted">${esc(label(f))} · by ${names} · ${ago(f.at)} ago · git: ${f.git ? esc(GIT_WORD[f.git] ?? f.git) : 'committed'}</div>
-      ${f.doc ? '<div><button type="button" class="act" data-fv-read>Open in the reader</button></div>' : ''}${kind(f) === 'shared' ? '<div class="warnline">Two or more farmers wrote this file: this is where a collision would bite.</div>' : ''}</div>` : '';
+      ${f.doc ? '<div><button type="button" class="act" data-fv-read>Open in the reader</button></div>' : ''}${kind(f) === 'shared' ? `<div class="warnline">Two or more ${esc(view.nouns.agents)} wrote this file: this is where a collision would bite.</div>` : ''}</div>` : '';
     const status = loading && !data ? '<li class="muted">Loading…</li>' : error ? `<li class="muted">${esc(error)}</li>` : '<li class="muted">Nothing touched in the last 24 hours.</li>';
-    back.querySelector('.fv-tree').innerHTML = `<div class="piles">${piles}</div>${view.fieldNotes(key)}<ul class="fv-list">${rows || status}</ul>${detail}
+    back.querySelector('.fv-tree').innerHTML = `<div class="piles">${piles}</div>${view.fieldNotes?.(key) ?? ''}<ul class="fv-list">${rows || status}</ul>${detail}
       <p class="faint fv-note">Only files agents read or wrote in the last 24 h are shown, not the whole folder.${data?.truncated ? ' Showing the newest 300.' : ''}</p>`;
   }
   async function load() {
@@ -1193,9 +1410,9 @@ function makeField(view) {
     try {
       const r = await opts.request('repoTouched', { repo: asked });
       if (asked !== key) return;
-      if (r.ok) { data = r.data; error = ''; } else error = r.status === 0 ? `Could not load the field: ${r.error}` : r.error ?? `Could not load the field (HTTP ${r.status}).`;
+      if (r.ok) { data = r.data; error = ''; } else error = r.status === 0 ? `Could not load the ${repo()}: ${r.error}` : r.error ?? `Could not load the ${repo()} (HTTP ${r.status}).`;
     } catch (err) {
-      if (asked === key) error = `Could not load the field: ${err?.message ?? err}`;
+      if (asked === key) error = `Could not load the ${repo()}: ${err?.message ?? err}`;
     } finally {
       if (asked === key) loading = false;
     }
@@ -1225,9 +1442,9 @@ function makeField(view) {
       const field = view.field(k) ?? { name: k };
       back = document.createElement('div');
       back.className = 'fv-back';
-      back.innerHTML = `<div class="fv" role="dialog" aria-label="Field close-up"><header><b>${esc(field.name)} field</b><span class="muted">the files agents read or wrote here</span><span class="grow"></span><button type="button" class="x" data-fv-close aria-label="Close">×</button></header>
+      back.innerHTML = `<div class="fv" role="dialog" aria-label="${esc(`${repo().charAt(0).toUpperCase()}${repo().slice(1)}`)} close-up"><header><b>${esc(field.name)} ${esc(repo())}</b><span class="muted">the files agents read or wrote here</span><span class="grow"></span><button type="button" class="x" data-fv-close aria-label="Close">×</button></header>
         <div class="fv-body"><div class="fv-scene"><canvas></canvas><div class="fv-ov"></div></div><div class="fv-tree"></div></div>
-        <div class="fv-legend"><span><b class="k k-write"></b>watered = written (glows while recent)</span><span><b class="k k-read"></b>white flag = read only</span><span><b class="k k-shared"></b>trampled = written by two farmers</span><span><b class="k k-doc"></b>noticeboard = document (click to read)</span><span><b class="k k-hay"></b>hay = not committed</span><span>ribbons = which farmer</span></div></div>`;
+        <div class="fv-legend"><span><b class="k k-write"></b>watered = written (glows while recent)</span><span><b class="k k-read"></b>white flag = read only</span><span><b class="k k-shared"></b>trampled = written by two ${esc(view.nouns.agents)}</span><span><b class="k k-doc"></b>noticeboard = document (click to read)</span><span><b class="k k-hay"></b>hay = not committed</span><span>ribbons = which ${esc(view.nouns.agent)}</span></div></div>`;
       document.body.appendChild(back);
       canvas = back.querySelector('canvas');
       ctx = canvas.getContext('2d');

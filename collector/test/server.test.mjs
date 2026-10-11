@@ -28,13 +28,16 @@ async function start(opts = {}) {
   writeFileSync(join(builtinDir, 'sdk', 'bridge.js'), '// bridge');
   writeFileSync(join(builtinDir, 'farm', 'world.json'), JSON.stringify({ name: 'Farm', icon: '🌾', api: 1 }));
   writeFileSync(join(builtinDir, 'farm', 'world.js'), '// farm');
+  mkdirSync(join(builtinDir, 'test')); // the world test page: a page with a token's placeholder, which must never be filled in
+  writeFileSync(join(builtinDir, 'test', 'index.html'), '<title>World test page</title><!-- __TRACKER_TOKEN__ -->');
+  writeFileSync(join(builtinDir, 'test', 'tour.js'), 'window.AgentvilleTour = {};');
   const userDir = mkdtempSync(join(tmpdir(), 'my-worlds-'));
   mkdirSync(join(userDir, 'space'));
   writeFileSync(join(userDir, 'space', 'world.json'), JSON.stringify({ name: 'Space', api: 1 }));
   writeFileSync(join(userDir, 'space', 'world.js'), '// space');
   const srv = createTrackerServer({
     port: 0,
-    token: 'tok',
+    token: opts.token ?? 'tok',
     webFile,
     worlds: makeWorlds({ builtinDir, userDir, home: opts.home }),
     getSnapshot: () => ({ generatedAt: 1, agents: [], collisions: [] }),
@@ -59,6 +62,7 @@ async function start(opts = {}) {
       note: async body => { calls.push(['note', body]); return { ok: true, notes: [] }; },
       helper: async body => { calls.push(['helper', body]); return { ok: true, helper: { on: true } }; },
       name: async body => { calls.push(['name', body]); return { ok: true }; },
+      animals: async body => { calls.push(['animals', body]); return { ok: true }; },
       end: async body => { calls.push(['end', body]); return { ok: true }; },
       restart: async body => { calls.push(['restart', body]); return { ok: true }; },
       plugin: async body => { calls.push(['plugin', body]); return { ok: true }; },
@@ -106,6 +110,27 @@ test('the dashboard is served with the token filled in', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body, '<html>token=tok</html>');
   await srv.close();
+});
+
+test('the world test page: no token, never framed, its scripts by plain name only', async () => {
+  const { srv, port } = await start({ token: 'secret' });
+  try {
+    const get = path => request(port, { path });
+    const page = await get('/worlds/test');
+    assert.equal(page.status, 200);
+    assert.ok(!page.body.includes('secret'), 'no token in the page');
+    assert.ok(page.body.includes('__TRACKER_TOKEN__'), 'its placeholder is left as it is');
+    assert.match(page.headers['content-security-policy'], /frame-ancestors 'none'/);
+    assert.match(page.headers['content-security-policy'], /(^|; )connect-src 'none'(;|$)/, 'it fetches nothing, by policy: not even /api/state');
+    assert.equal(page.headers['x-frame-options'], 'DENY');
+    assert.equal((await get('/worlds/test/tour.js')).status, 200);
+    assert.equal((await get('/worlds/test/tour.js')).headers['content-type'], 'text/javascript; charset=utf-8');
+    assert.equal((await get('/worlds/test/..%2Fworlds.js')).status, 404);
+    assert.equal((await get('/worlds/test/Tour.js')).status, 404);
+    assert.equal((await get('/worlds/test/missing.js')).status, 404);
+  } finally {
+    await srv.close();
+  }
 });
 
 test('a request for another Host name is refused (DNS rebinding guard)', async () => {
@@ -619,14 +644,15 @@ test('the helper’s setting and a session’s name are changed only with the to
   try {
     const origin = `http://127.0.0.1:${port}`;
     const json = { 'content-type': 'application/json' };
-    for (const [path, body] of [['/api/actions/helper', '{"on":true,"uses":{"names":true}}'], ['/api/actions/name', '{"agentId":"s1","op":"rename","name":"x"}']]) {
+    for (const [path, body] of [['/api/actions/helper', '{"on":true,"uses":{"names":true}}'], ['/api/actions/name', '{"agentId":"s1","op":"rename","name":"x"}'], ['/api/actions/animals', '{"cast":[{"kind":"cow","name":"Cow"}]}']]) {
       assert.equal((await request(port, { method: 'POST', path, headers: { ...json, origin }, body })).status, 403);
       assert.equal((await request(port, { method: 'POST', path, headers: { ...json, 'x-tracker-token': 'tok', origin: 'https://evil.example' }, body })).status, 403);
     }
     assert.deepEqual(calls, []);
     await request(port, { method: 'POST', path: '/api/actions/helper', headers: { ...json, 'x-tracker-token': 'tok', origin }, body: '{"on":true,"uses":{"names":true}}' });
     await request(port, { method: 'POST', path: '/api/actions/name', headers: { ...json, 'x-tracker-token': 'tok', origin }, body: '{"agentId":"s1","op":"suggest"}' });
-    assert.deepEqual(calls, [['helper', { on: true, uses: { names: true } }], ['name', { agentId: 's1', op: 'suggest' }]]);
+    await request(port, { method: 'POST', path: '/api/actions/animals', headers: { ...json, 'x-tracker-token': 'tok', origin }, body: '{"cast":[{"kind":"cow","name":"Cow"}]}' });
+    assert.deepEqual(calls, [['helper', { on: true, uses: { names: true } }], ['name', { agentId: 's1', op: 'suggest' }], ['animals', { cast: [{ kind: 'cow', name: 'Cow' }] }]]);
   } finally {
     await srv.close();
   }
