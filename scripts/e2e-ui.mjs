@@ -45,6 +45,12 @@ if (!CHROME) {
   process.exit(1);
 }
 
+// A run that stalls ends with a message instead of holding a runner for hours (a normal run takes about 4 minutes).
+setTimeout(() => {
+  console.error(`\nTimed out after 12 minutes. Failed so far: ${failures.length ? failures.join('; ') : 'none'}`);
+  process.exit(1);
+}, 12 * 60_000).unref();
+
 /* ---------- fixture ---------- */
 
 const temp = mkdtempSync(join(tmpdir(), 'tracker-ui-'));
