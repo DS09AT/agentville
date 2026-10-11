@@ -39,13 +39,17 @@ function stubDom() {
   return { make, made, document, globals: { ResizeObserver: class { observe() {} disconnect() {} }, cancelAnimationFrame() {}, setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {}, Image: class {}, Path2D: class {} } };
 }
 /** The SDK in a context of its own, with a clock and frames a test moves by hand. */
-function load({ dom = true } = {}) {
+function load({ dom = true, noon = false } = {}) {
   const d = stubDom(), clock = { ms: 1000 };
+  // The world's sky and its animals' sleep follow the wall clock (they sleep from 20:00 to 05:00). With `noon` the clock the
+  // world sees runs on as usual but starts at noon, so a test of their daytime life does not depend on the hour it runs at.
+  const shift = noon ? new Date().setHours(12, 0, 0, 0) - Date.now() : 0;
+  const WorldDate = class extends Date { constructor(...a) { super(...(a.length ? a : [Date.now() + shift])); } static now() { return Date.now() + shift; } };
   let pending = null;
   const window = { Agentville: { raw() {} }, devicePixelRatio: 1 };
   const ctx = vm.createContext(dom
-    ? { window, document: d.document, console, Math, Date, JSON, Map, Set, Intl, performance: { now: () => clock.ms }, requestAnimationFrame: cb => { pending = cb; return 1; }, ...d.globals }
-    : { window, console, Math, Date, JSON, Map, Set, Intl }); // the collector's side: no document at all
+    ? { window, document: d.document, console, Math, Date: WorldDate, JSON, Map, Set, Intl, performance: { now: () => clock.ms }, requestAnimationFrame: cb => { pending = cb; return 1; }, ...d.globals }
+    : { window, console, Math, Date: WorldDate, JSON, Map, Set, Intl }); // the collector's side: no document at all
   vm.runInContext(`${code}\n;window.sdk = { withDefaults, engineScene, makePixelView, makeMirror, glide, PXG };`, ctx);
   /** Frames on, 50 ms apart. */
   const run = n => { for (let i = 0; i < n && pending; i++) { const cb = pending; pending = null; clock.ms += 50; cb(clock.ms); } };
@@ -148,7 +152,7 @@ test("a world's own things go out with its state (share), and a busy farmer is a
 /* ---------- a browser's side ---------- */
 
 function watcher(extra = {}, options = {}) {
-  const l = load(), drawn = [], acts = [], touches = [], diary = [];
+  const l = load({ noon: true }), drawn = [], acts = [], touches = [], diary = [];
   const world = hooks({ drawChar: (f, b) => drawn.push([f.id, Math.round(b.x * 100) / 100, b.y, b.walk, b.face, b.zone]), ...extra });
   const view = l.sdk.makePixelView(l.sdk.withDefaults(world), prefs);
   view.mount(l.d.make(), { still: false, remote: true, onAct: a => acts.push(plain(a)), onTouch: id => touches.push(id), onDiary: list => { diary.length = 0; diary.push(...list.map(e => `${e.who} ${e.text}`.trim())); }, ...options });
