@@ -83,6 +83,9 @@ const filesApp = () => ({ darwin: 'Finder', win32: 'Explorer' }[hostPlatform()] 
 // A path with your home folder as ~, wherever this system keeps homes (/Users/you, /home/you, C:\Users\you).
 const short = p => String(p ?? '').replace(/^(?:\/(?:Users|home)\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/, '~');
 const shellQuote = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// The line that resumes a session, in the host's own shell syntax.
+const psQuote = s => `'${String(s).replace(/['\u2018\u2019\u201a\u201b]/g, '$&$&')}'`;
+const resumeLine = a => (hostPlatform() === 'win32' ? `Set-Location -LiteralPath ${psQuote(a.cwd)}; claude --resume ${a.id}` : `cd ${shellQuote(a.cwd)} && claude --resume ${a.id}`);
 
 function elapsed(from) {
   const s = Math.max(0, Math.floor((Date.now() - from) / 1000));

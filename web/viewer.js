@@ -36,7 +36,13 @@ function readerHasText() {
 }
 const docEntry = (agentId, path) => snap?.agents.find(a => a.id === agentId)?.docs?.find(d => d.path === path);
 /** The path as the agent knows it: relative to its folder when inside it. */
-const docLabel = (agent, path) => (path === '@summary' ? 'your conversation summary' : agent?.cwd && path.startsWith(`${agent.cwd}/`) ? path.slice(agent.cwd.length + 1) : path);
+const docLabel = (agent, path) => {
+  if (path === '@summary') return 'your conversation summary';
+  const cwd = agent?.cwd, p = String(path);
+  if (!cwd || p.length <= cwd.length || !/[\\/]/.test(p[cwd.length])) return path;
+  const same = p.slice(0, cwd.length).replace(/\\/g, '/') === cwd.replace(/\\/g, '/'); // either slash (Windows)
+  return same ? p.slice(cwd.length + 1) : path;
+};
 /** When the agent last wrote or read a file: from its documents, or from the explorer listing. */
 function touchOf(agentId, path) {
   const doc = docEntry(agentId, path);
@@ -55,7 +61,7 @@ const docSub = (agent, path) => {
 function docsHtml(a) {
   if (!a.docs?.length) return '';
   return `<div class="sec">Documents</div><div class="docs">${a.docs.map(d => {
-    const dir = docLabel(a, d.path).split('/').slice(0, -1).join('/');
+    const dir = docLabel(a, d.path).split(/[\\/]/).slice(0, -1).join('/');
     return `<button class="doc" type="button" data-doc-agent="${esc(a.id)}" data-doc-path="${esc(d.path)}" data-tip="${esc(short(d.path))}"><span aria-hidden="true">${fileIcon(d.path)}</span><span class="doc-name">${esc(docName(d.path))}</span><span class="doc-dir faint">${esc(short(dir))}</span><span class="chip ${d.wrote ? 'c-warn' : 'c-plain'}">${d.wrote ? 'written' : 'read'}</span><span class="faint">${hhmm(d.at)}</span></button>`;
   }).join('')}</div>`;
 }

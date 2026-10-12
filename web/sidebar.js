@@ -264,7 +264,7 @@ function fsSessionHtml(a) {
       <label for="fs-mode">Permissions</label><select id="fs-mode" data-restart-mode data-agent="${id}"><option value="">${esc(a.mode ? modeName(a.mode) : 'Not known yet')} (now)</option>${modes}</select>
       <span class="fs-hint">Another mode${accountsOn() ? ' or account' : ''} restarts it there, in a new terminal window.</span>
     </div><div class="fs-sep"></div>` : '';
-  const resume = a.kind === 'codex' ? '' : `cd ${shellQuote(a.cwd)} && claude --resume ${a.id}`;
+  const resume = a.kind === 'codex' ? '' : resumeLine(a);
   const answers = a.kind === 'codex' ? '' : a.mod?.live
     ? '<div class="fs-mod msg-ok">📡 Dashboard answers on</div>'
     : `<div class="fs-mod faint" data-tip="${esc(modWhy(a))}">Dashboard answers off: send it anything in its terminal once</div>`;
