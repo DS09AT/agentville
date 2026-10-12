@@ -389,6 +389,18 @@ try {
   };
   /** Puts the keyboard in the page's field `id` and answers once it is there: a key sent before that goes nowhere. */
   const focusOn = id => until(`(f => Boolean(f) && (document.activeElement === f || (f.focus(), false)))(document.getElementById(${JSON.stringify(id)}))`, 4000);
+  /**
+   * Presses one of the page's own buttons (`press`, code that clicks it) until `done` is so. For a second after a
+   * world shows or changes the page holds its buttons back, and it takes one press of the top bar a quarter second
+   * (web/worlds.js, the click guard): a single press in that time is lost, so it is made again.
+   */
+  const pressUntil = async (press, done, ms = 20_000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(400)) {
+      if (await chrome.js(done, POLL_MS).catch(() => undefined)) return true;
+      await js(`if (!document.documentElement.dataset.guard) { ${press} }`);
+    }
+    return false;
+  };
   /** Where the world's frame sits in the page, for real mouse events (which take the page's coordinates). */
   const frameAt = async () => JSON.parse(await js("JSON.stringify((r => [r.left, r.top])(document.querySelector('#farm .world-frame').getBoundingClientRect()))"));
   await send('Page.enable');
@@ -1113,15 +1125,13 @@ try {
   linesOn = false;
   await funtil("document.querySelectorAll('.px-tag').length >= 2");
 
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('worlds-dlg').open");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('worlds-dlg').open");
   await js("document.querySelector('[data-world=\"u/throws\"]').click()");
   check(await until("/Throws didn.t start: (Uncaught Error: )?no barn here \\(world\\.js:1\\)/.test(document.querySelector('#farm .world-panel')?.textContent ?? '')", 9000), 'a world that throws as it loads is replaced by a panel saying what, and where');
   await js("document.querySelector('[data-world-back]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await funtil("document.querySelectorAll('.px-tag').length >= 2"), 'Back to the farm brings the farm back');
   check(await js("!document.querySelector('#farm .world-strip') && !document.querySelector('#farm .world-panel')"), 'with no strip or panel left over');
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('worlds-dlg').open");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('worlds-dlg').open");
   await js("document.querySelector('[data-world=\"u/leaves-slow\"]').click()");
   check(await until("/Leaves slow tried to leave the page and was stopped/.test(document.querySelector('#farm .world-panel')?.textContent ?? '')", 2500), "a world that sends its frame to a page that never answers is stopped as it leaves, before that page can speak");
   check(await js("!document.querySelector('#farm .world-frame') && !document.querySelector('[data-world-retry]')"), 'its frame is gone from the page');
@@ -1164,8 +1174,7 @@ try {
   await until("!document.getElementById('worlds-dlg').open");
   await js("document.getElementById('view-farm').click()"); // the list view's toggle: back to the world
   check(await until("document.getElementById('main').dataset.view === 'farm' && document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/probe/') && !!document.querySelector('#farm .world-corner')"), 'back in the world: the same frame, its corner still there');
-  await js("document.querySelector('#farm .world-corner [data-corner-worlds]').click()");
-  check(await until("document.getElementById('worlds-dlg').open"), 'its World ▾ opens the list of worlds');
+  check(await pressUntil("document.querySelector('#farm .world-corner [data-corner-worlds]').click()", "document.getElementById('worlds-dlg').open"), 'its World ▾ opens the list of worlds');
   await js("document.querySelector('[data-world=\"farm\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await funtil("document.querySelectorAll('.px-tag').length >= 2") && await js("!document.querySelector('#farm .world-corner')"), 'and the farm comes back, without the corner');
 
@@ -1273,10 +1282,8 @@ try {
   check(await until("document.body.dataset.shown === 'private'", 15_000) && await worldUntil('u/club', "(t => t.length === 7 && t.every(x => /^agent \\d+:/.test(x.title)))([...document.querySelectorAll('.wv-tag')])"), 'a world of api 2 of your own gets the private scene at the privacy stop');
   await send('Page.navigate', { url: addr('/') });
   await dashboardSettled();
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('main').dataset.view === 'farm' && !!document.querySelector('#farm .world-frame')");
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"tennis\"]')");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('main').dataset.view === 'farm' && !!document.querySelector('#farm .world-frame')");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"tennis\"]')"); // in the world's view, its button lists the worlds
   await shot('worlds-list-api2');
   await js("document.querySelector('[data-world=\"tennis\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/tennis/')"), 'the tennis club is in the list of worlds, and picking it shows it');
@@ -1292,12 +1299,11 @@ try {
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/club/') && !!document.querySelector('#farm .world-corner')"), 'a world of api 2 of your own shows, with the page’s corner over it');
   check(await worldUntil('u/club', "(t => t.length >= 2 && t.every(x => /^agent \\d+:/.test(x.title)))([...document.querySelectorAll('.wv-tag')])") && await until("window.TrackerLive.world() === 'u/club' && window.TrackerLive.watching()", 12_000), 'it sees numbers for names, and the collector moves it too, shut in');
   check(await worldUntil('u/club', "document.querySelector('.wv-panel').classList.contains('own')"), 'its panel sits below the corner');
-  await js("document.querySelector('#farm .world-corner [data-corner-worlds]').click()");
-  await until("document.getElementById('worlds-dlg').open");
+  await pressUntil("document.querySelector('#farm .world-corner [data-corner-worlds]').click()", "document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"farm\"]')");
   await js("document.querySelector('[data-world=\"farm\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await worldUntil('farm', "document.querySelectorAll('.px-tag').length >= 2", 20_000), 'and the farm comes back');
-  await js("document.getElementById('view-list').click()");
-  await until("document.getElementById('main').dataset.view === 'list' && !document.documentElement.dataset.guard"); // (the corner's World ▾ held the page's buttons for a second)
+  await pressUntil("document.getElementById('view-list').click()", "document.getElementById('main').dataset.view === 'list'");
+  await until("!document.documentElement.dataset.guard"); // (the world that came back held the page's buttons for a second)
 
   console.log('Claude Code setup');
   await js("document.getElementById('setup-open').click()");
