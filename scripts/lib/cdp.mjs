@@ -7,10 +7,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// Windows: Chrome in its installer locations, else Edge, which is Chromium and takes the same flags.
+const WINDOWS_BROWSERS = ['ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'].flatMap(v => (process.env[v] ? [join(process.env[v], 'Google', 'Chrome', 'Application', 'chrome.exe')] : []))
+  .concat(['ProgramFiles(x86)', 'ProgramFiles'].flatMap(v => (process.env[v] ? [join(process.env[v], 'Microsoft', 'Edge', 'Application', 'msedge.exe')] : [])));
 export const CHROME = process.env.CHROME ?? [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome',
   '/usr/bin/chromium',
+  ...(process.platform === 'win32' ? WINDOWS_BROWSERS : []),
 ].find(p => existsSync(p));
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 

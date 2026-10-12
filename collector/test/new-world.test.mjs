@@ -3,12 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { newWorld, nextSteps } from '../../scripts/lib/new-world.mjs';
 import { checkWorldJson, makeWorlds } from '../worlds.mjs';
+import { link } from './portable.mjs';
 
 const starterDir = fileURLToPath(new URL('../../web/worlds/starter', import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), 'agentville-new-world-'));
@@ -38,7 +39,7 @@ test('refuses a name that is taken (even by a broken link), and leaves it alone'
     writeFileSync(join(root, 'mine', 'note.txt'), 'keep me');
     assert.throws(() => newWorld({ name: 'mine', worldsDir: root, starterDir }), /already exists/);
     assert.equal(readFileSync(join(root, 'mine', 'note.txt'), 'utf8'), 'keep me');
-    symlinkSync(join(root, 'nowhere'), join(root, 'dangling'));
+    link(join(root, 'nowhere'), join(root, 'dangling'));
     assert.throws(() => newWorld({ name: 'dangling', worldsDir: root, starterDir }), /already exists/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -63,12 +64,18 @@ test("the next steps name the world as u/<name>, so a world called farm is yours
 });
 
 test('with --worlds, the next steps repeat it (quoted when it needs to be), and say the dashboard shows only your worlds folder', () => {
-  const steps = nextSteps({ dir: '/tmp/my worlds/my-bakery', name: 'my-bakery', title: 'My bakery', worlds: '/tmp/my worlds' });
+  const steps = nextSteps({ dir: '/tmp/my worlds/my-bakery', name: 'my-bakery', title: 'My bakery', worlds: '/tmp/my worlds', platform: 'linux' });
   assert.match(steps, /^ {2}3\. npm run check-world -- u\/my-bakery --worlds '\/tmp\/my worlds'$/m);
   assert.match(steps, /^ {2}4\. npm run world-shots -- u\/my-bakery --worlds '\/tmp\/my worlds'$/m);
   assert.match(steps, /show only your worlds folder/);
-  assert.match(nextSteps({ dir: '/w/x', name: 'x', title: 'X', worlds: "/it's" }), /--worlds '\/it'\\''s'$/m);
-  assert.match(nextSteps({ dir: '/w/x', name: 'x', title: 'X', worlds: '/w' }), /check-world -- u\/x --worlds \/w$/m);
+  assert.match(nextSteps({ dir: '/w/x', name: 'x', title: 'X', worlds: "/it's", platform: 'linux' }), /--worlds '\/it'\\''s'$/m);
+  assert.match(nextSteps({ dir: '/w/x', name: 'x', title: 'X', worlds: '/w', platform: 'linux' }), /check-world -- u\/x --worlds \/w$/m);
+});
+
+test('on Windows the folder is in double quotes when it needs any: cmd.exe does not read single ones', () => {
+  const steps = nextSteps({ dir: 'C:\\my worlds\\x', name: 'x', title: 'X', worlds: 'C:\\my worlds', platform: 'win32' });
+  assert.match(steps, /^ {2}3\. npm run check-world -- u\/x --worlds "C:\\my worlds"$/m);
+  assert.match(nextSteps({ dir: 'C:\\w\\x', name: 'x', title: 'X', worlds: 'C:\\w', platform: 'win32' }), /check-world -- u\/x --worlds C:\\w$/m);
 });
 
 test('the command, run with --worlds: it prints those steps, and the check-world it prints checks the new world', () => {
