@@ -2,8 +2,9 @@
 // copy in the data folder (~/.agentville/mod), beside state/: the mod finds the collector's state next to its
 // own folder, and the copy stays where it is when the code is updated or moved. Each account's settings.json
 // names that folder in CLAUDE_CODE_PLUGIN_DIRS (a list of folders Claude Code loads plugins from).
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { renameOver } from './lib/replace.mjs';
 
 const PARTS = ['.claude-plugin/plugin.json', 'hooks', 'types']; // what a session loads (never its tests, or the types Claude Code writes beside it)
 const MOD_NAME = 'agent-tracker';
@@ -61,7 +62,7 @@ export function linkMod({ settingsFile, modDir, on, platform = process.platform 
   const target = existsSync(settingsFile) ? realpathSync(settingsFile) : settingsFile;
   const temp = `${target}.${process.pid}.tmp`;
   writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`);
-  renameSync(temp, target);
+  renameOver(temp, target);
   return 'changed';
 }
 

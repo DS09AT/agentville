@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NAME_RE, cleanName, createHelper } from '../sources/helper.mjs';
+import { WINDOWS } from './portable.mjs';
 
 const at = s => new Date(s).getTime();
 function make(start = '2026-10-09T10:00:00') {
@@ -28,7 +29,7 @@ test('switching on records consent, needs a use ticked, and takes a limit of 1 t
   assert.deepEqual(r, { ok: true, helper: { on: true, uses: { names: true, lines: false }, dailyLimit: 50, today: 0 } });
   assert.equal(h.settings().consentedAt, at('2026-10-09T10:00:00'));
   assert.deepEqual(h.canCall('names'), { ok: true });
-  assert.equal(statSync(join(dir, 'helper.json')).mode & 0o777, 0o600);
+  if (!WINDOWS) assert.equal(statSync(join(dir, 'helper.json')).mode & 0o777, 0o600);
   assert.equal(h.update({ on: false }).helper.on, false);
   assert.match(h.canCall('names').error, /off/);
   assert.equal(h.settings().consentedAt, at('2026-10-09T10:00:00'), 'switching off keeps when you first agreed');
@@ -57,7 +58,7 @@ test('the last error is kept for the dialog; outcomes are kept per session', () 
   assert.equal(helper().outcome('s1'), 'dismissed');
   assert.equal(h.outcome('s2'), undefined);
   assert.equal(JSON.parse(readFileSync(join(dir, 'names.json'), 'utf8')).s1.outcome, 'dismissed');
-  assert.equal(statSync(join(dir, 'names.json')).mode & 0o777, 0o600);
+  if (!WINDOWS) assert.equal(statSync(join(dir, 'names.json')).mode & 0o777, 0o600);
 });
 
 test('what Haiku answers is cleaned into a short kebab name, or nothing', () => {

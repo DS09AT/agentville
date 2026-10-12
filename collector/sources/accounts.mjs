@@ -1,5 +1,6 @@
-import { readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
+import { renameOver } from '../lib/replace.mjs';
 
 // Your Claude accounts: one config folder each (CLAUDE_CONFIG_DIR). The collector's own folder
 // (~/.claude) is the first; its siblings ~/.claude-<name> with a login are the others, and
@@ -9,7 +10,8 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 const KEY = /[^a-z0-9_-]/g;
 const isDir = p => { try { return statSync(p).isDirectory(); } catch { return false; } };
 const realOrNull = p => { try { return realpathSync(p); } catch { return null; } };
-const trim = p => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+const TRAILING = process.platform === 'win32' ? /[\\/]+$/ : /\/+$/;
+const trim = p => { const t = p.replace(TRAILING, ''); return t && !/^[A-Za-z]:$/.test(t) ? t : p; };
 
 /** The login an account file records ({ email, org }), or null. */
 function loginOf(file) {
@@ -97,7 +99,7 @@ export function createSessionAccounts(file, { cap = 2000 } = {}) {
       while (map.size > cap) map.delete(map.keys().next().value);
       try {
         writeFileSync(`${file}.tmp`, JSON.stringify(Object.fromEntries(map)));
-        renameSync(`${file}.tmp`, file);
+        renameOver(`${file}.tmp`, file);
         dirty = false;
       } catch { /* tried again on the next change */ }
     },

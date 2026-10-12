@@ -44,7 +44,7 @@ export const WIN_PROCS_SCRIPT = `
 $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
 while ($null -ne [Console]::In.ReadLine()) {
   try {
-    $rows = @(Get-CimInstance Win32_Process | ForEach-Object {
+    $rows = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, KernelModeTime, UserModeTime, WorkingSetSize, CreationDate, CommandLine, Name | ForEach-Object {
       $started = 0
       if ($_.CreationDate) { $started = [long]($_.CreationDate.ToUniversalTime() - $epoch).TotalMilliseconds }
       $line = $_.CommandLine

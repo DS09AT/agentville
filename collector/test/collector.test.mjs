@@ -1,10 +1,12 @@
 import { test } from 'node:test';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, parse } from 'node:path';
 import { startCollector } from '../collector.mjs';
+import { shellQuote } from '../sources/sessions.mjs';
+import { FILE_LINKS, NOT_A_PROGRAM, WINDOWS, link, native, scriptCli, shellWord, sleeper } from './portable.mjs';
 import { parsePs } from '../sources/ps.mjs';
 
 test('collector serves a waiting agent from a fixture ~/.claude and survives a bad config edit', async () => {
@@ -235,7 +237,7 @@ test('a document can be read only if the agent opened it, and only if it is a ma
   mkdirSync(join(work, 'docs'));
   writeFileSync(join(work, 'docs', 'spec.md'), '# Spec\n\nHello.');
   writeFileSync(join(work, 'secret.txt'), 'not for the dashboard');
-  symlinkSync(join(work, 'secret.txt'), join(work, 'link.md'));
+  if (FILE_LINKS) link(join(work, 'secret.txt'), join(work, 'link.md'));
   writeFileSync(join(work, 'big.md'), 'x'.repeat(2 * 1024 * 1024 + 1));
   writeFileSync(join(work, 'gone.md'), 'soon deleted');
   const claudeDir = mkdtempSync(join(tmpdir(), 'tracker-claude-doc-'));
@@ -247,20 +249,20 @@ test('a document can be read only if the agent opened it, and only if it is a ma
   writeFileSync(join(claudeDir, 'projects', '-w', 'sess-doc.jsonl'), [
     JSON.stringify({ type: 'user', timestamp: new Date(now - 6000).toISOString(), cwd: work, message: { content: 'write the spec' } }),
     use(1, 'Write', join(work, 'docs', 'spec.md')),
-    use(2, 'Read', join(work, 'link.md')),
+    ...(FILE_LINKS ? [use(2, 'Read', join(work, 'link.md'))] : []),
     use(3, 'Read', join(work, 'big.md')),
     use(4, 'Read', join(work, 'gone.md')),
   ].join('\n') + '\n');
   const handle = await startCollector({ root, claudeDir, claudeBin: '/usr/bin/false', notify: () => {}, log: () => {} });
   try {
     const spec = join(work, 'docs', 'spec.md');
-    assert.deepEqual(handle.getSnapshot().agents.find(a => a.id === 'sess-doc').docs.map(d => d.path), [join(work, 'gone.md'), join(work, 'big.md'), join(work, 'link.md'), spec]);
+    assert.deepEqual(handle.getSnapshot().agents.find(a => a.id === 'sess-doc').docs.map(d => d.path), [join(work, 'gone.md'), join(work, 'big.md'), ...(FILE_LINKS ? [join(work, 'link.md')] : []), spec]);
     const ok = handle.readDoc('sess-doc', spec);
     assert.equal(ok.doc.text, '# Spec\n\nHello.');
     assert.equal(ok.doc.path, spec);
     assert.match(handle.readDoc('sess-doc', join(work, 'secret.txt')).error, /not one this agent has opened/);
     assert.match(handle.readDoc('nope', spec).error, /not one this agent has opened/);
-    assert.match(handle.readDoc('sess-doc', join(work, 'link.md')).error, /Only markdown/);
+    if (FILE_LINKS) assert.match(handle.readDoc('sess-doc', join(work, 'link.md')).error, /Only markdown/);
     assert.match(handle.readDoc('sess-doc', join(work, 'big.md')).error, /too large/);
     unlinkSync(join(work, 'gone.md'));
     assert.match(handle.readDoc('sess-doc', join(work, 'gone.md')).error, /no longer exists/);
@@ -611,16 +613,16 @@ test("a session's conversation is forked at one of its messages into a new sessi
     assert.equal((await handle.actions.note({ agentId: SID, op: 'add', text: 'ask about the changelog' })).ok, true);
     assert.deepEqual(await handle.actions.fork({ agentId: SID, at: 'r-1', mode: 'plan', model: 'sonnet' }), { ok: true, terminal: 'iTerm' });
     const command = launched[0].at(-1);
-    const copy = command.match(/--resume '([^']+)'/)[1];
+    const copy = shellWord(command.match(/--resume ((?:'[^']*'|\\.)+) /)[1]);
     const forkId = command.match(/--session-id ([0-9a-f-]{36}) /)?.[1];
-    assert.equal(command, `cd '${work}' && exec claude --resume '${copy}' --fork-session --session-id ${forkId} --name 'releaser (fork)' --permission-mode plan --model 'sonnet'`);
+    assert.equal(command, `cd ${shellQuote(work)} && exec claude --resume ${shellQuote(copy)} --fork-session --session-id ${forkId} --name 'releaser (fork)' --permission-mode plan --model 'sonnet'`);
     assert.notEqual(forkId, SID);
     assert.deepEqual(handle.getNotes(forkId).notes.map(n => n.text), ['ask about the changelog'], 'the fork has a copy of its notes');
     assert.ok(copy.startsWith(join(root, 'state', 'forks')), 'the copy is kept in the tracker\'s own state');
     assert.equal(readFileSync(copy, 'utf8'), `${lines.slice(0, 2).join('\n')}\n`, 'up to and including that reply');
     assert.equal(readFileSync(join(dir, `${SID}.jsonl`), 'utf8'), `${lines.join('\n')}\n`, 'the original is untouched');
     assert.deepEqual(await handle.actions.fork({ agentId: SID, at: 'p-2' }), { ok: true, terminal: 'iTerm' });
-    const prefill = launched[1].at(-1).match(/--prefill "\$\(cat '([^']+)'\)"$/)[1];
+    const prefill = shellWord(launched[1].at(-1).match(/--prefill "\$\(cat ((?:'[^']*'|\\.)+)\)"$/)[1]);
     assert.equal(readFileSync(prefill, 'utf8'), 'Ship it', 'forked from your message: it goes in the new prompt box');
     for (const body of [{ agentId: SID, at: 'nope' }, { agentId: SID, at: 'p-1' }, { agentId: SID }, { agentId: 'nobody', at: 'r-1' }, { agentId: SID, at: 'r-1', mode: 'yolo' }, { agentId: SID, at: 'r-1', model: 'gpt-5' }, null]) {
       assert.equal((await handle.actions.fork(body)).ok, false, JSON.stringify(body));
@@ -661,7 +663,7 @@ test("your notes on a session: added, edited, used, deleted; counted in its snap
     assert.equal(JSON.stringify(agent()).includes('and the tests'), false, 'the snapshot carries counts, never the text');
     assert.deepEqual(handle.getNotes(SID).notes.map(n => n.text), ['ask about the cache, again', 'and the tests']);
     assert.equal((await handle.pastSessions()).sessions.find(s => s.id === SID).notes, 1, 'the resume list counts the unused ones');
-    assert.equal(statSync(join(root, 'state', 'notes', `${SID}.json`)).mode & 0o777, 0o600);
+    if (!WINDOWS) assert.equal(statSync(join(root, 'state', 'notes', `${SID}.json`)).mode & 0o777, 0o600);
     assert.deepEqual((await handle.actions.note({ agentId: SID, op: 'clear-used' })).notes.map(n => n.text), ['and the tests']);
     assert.equal((await handle.actions.note({ agentId: SID, op: 'delete', id: handle.getNotes(SID).notes[0].id })).notes.length, 0);
     for (const body of [{ agentId: 'nobody', op: 'add', text: 'x' }, { agentId: SID, op: 'shout', text: 'x' }, { agentId: SID, op: 'add', text: '' }, { agentId: SID, op: 'add' }, null]) {
@@ -691,8 +693,14 @@ test('a session is restored to before one of your messages: ended, its files and
   writeFileSync(transcript, `${lines.join('\n')}\n`);
   writeFileSync(join(claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: SID, cwd: work, name: 'releaser', kind: 'interactive', status: 'idle' }));
   // A stand-in for claude --rewind-files: what it was asked goes to a log, how it ends to a file.
-  const bin = join(root, 'claude'), log = join(root, 'claude.log'), outcome = join(root, 'outcome');
-  writeFileSync(bin, `#!/bin/sh\ncase "$*" in *--rewind-files*) ;; *) echo '[]'; exit 0 ;; esac\necho "$CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING $*" >> '${log}'\nif [ -f '${outcome}' ]; then cat '${outcome}'; exit 1; fi\necho "Files rewound to state at message $4"\n`, { mode: 0o755 });
+  const log = join(root, 'claude.log'), outcome = join(root, 'outcome');
+  const bin = scriptCli(root, 'claude', `
+const fs = require('fs'), a = process.argv.slice(2);
+if (!a.includes('--rewind-files')) { console.log('[]'); process.exit(0); }
+fs.appendFileSync(${JSON.stringify(log)}, (process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING ?? '') + ' ' + a.join(' ') + '\\n');
+if (fs.existsSync(${JSON.stringify(outcome)})) { process.stdout.write(fs.readFileSync(${JSON.stringify(outcome)})); process.exit(1); }
+console.log('Files rewound to state at message ' + a[3]);
+`);
   const launched = [], signals = [];
   let alive = true;
   const procs = { commandOf: async () => 'claude', ttyOf: async () => 'ttys012', kill: (pid, sig) => { signals.push([pid, sig]); alive = false; }, alive: () => alive };
@@ -710,8 +718,8 @@ test('a session is restored to before one of your messages: ended, its files and
     assert.deepEqual(calls(), [`1 --resume ${SID} --rewind-files p-2`], 'its files put back from Claude Code\'s own snapshots');
     assert.equal(readFileSync(transcript, 'utf8'), `${lines.join('\n')}\n${marker}\n`, "the conversation: /rewind's row added, nothing removed");
     const command = launched.at(-1);
-    const prefill = command.match(/--prefill "\$\(cat '([^']+)'\)"$/)[1];
-    assert.equal(command, `cd '${work}' && exec claude --resume ${SID} --permission-mode plan --prefill "$(cat '${prefill}')"`, 'resumed as itself');
+    const prefill = shellWord(command.match(/--prefill "\$\(cat ((?:'[^']*'|\\.)+)\)"$/)[1]);
+    assert.equal(command, `cd ${shellQuote(work)} && exec claude --resume ${SID} --permission-mode plan --prefill "$(cat ${shellQuote(prefill)})"`, 'resumed as itself');
     assert.equal(readFileSync(prefill, 'utf8'), 'Ship it', 'with your message back in the prompt box');
     // Conversation only: no files touched. Code only: no row added, nothing in the prompt box.
     alive = true;
@@ -724,7 +732,7 @@ test('a session is restored to before one of your messages: ended, its files and
     assert.deepEqual(await handle.actions.restore({ agentId: SID, at: 'p-2', what: 'code' }), { ok: true, terminal: 'iTerm', files: true });
     assert.equal(calls().length, 2);
     assert.equal(readFileSync(transcript, 'utf8'), `${lines.join('\n')}\n`);
-    assert.equal(launched.at(-1), `cd '${work}' && exec claude --resume ${SID}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(work)} && exec claude --resume ${SID}`);
     // No snapshots for that message: with both, the conversation is still restored; code alone fails, and it is resumed as it was.
     writeFileSync(outcome, 'No file checkpoint found for this message.');
     alive = true;
@@ -735,7 +743,7 @@ test('a session is restored to before one of your messages: ended, its files and
     const failed = await handle.actions.restore({ agentId: SID, at: 'p-2', what: 'code' });
     assert.equal(failed.ok, false);
     assert.match(failed.error, /files could not be restored \(No file checkpoint found for this message\.\)\. It was resumed as it was/);
-    assert.equal(launched.at(-1), `cd '${work}' && exec claude --resume ${SID}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(work)} && exec claude --resume ${SID}`);
     // A session that won't end is left as it is.
     unlinkSync(outcome);
     alive = true;
@@ -781,12 +789,12 @@ test('a session starts or resumes in a terminal only in a listed folder, or from
     }
     assert.equal(launched.length, 0);
     assert.deepEqual(await handle.actions.start({ resume: PAST }), { ok: true, terminal: 'iTerm' });
-    assert.equal(launched[0].at(-1), `cd '${work}' && exec claude --resume ${PAST}`);
+    assert.equal(launched[0].at(-1), `cd ${shellQuote(work)} && exec claude --resume ${PAST}`);
     assert.deepEqual(await handle.actions.start({ cwd: work }), { ok: true, terminal: 'iTerm' });
-    assert.equal(launched[1].at(-1), `cd '${work}' && exec claude`);
+    assert.equal(launched[1].at(-1), `cd ${shellQuote(work)} && exec claude`);
     assert.match(launched[1].join('\n'), /tell application "iTerm"/);
     assert.deepEqual(await handle.actions.start({ cwd: work, model: 'opus[1m]', effort: 'high' }), { ok: true, terminal: 'iTerm' });
-    assert.equal(launched[2].at(-1), `cd '${work}' && exec claude --model 'opus[1m]' --effort high`, 'a model and effort for this session only, quoted for the shell');
+    assert.equal(launched[2].at(-1), `cd ${shellQuote(work)} && exec claude --model 'opus[1m]' --effort high`, 'a model and effort for this session only, quoted for the shell');
     for (const body of [{ cwd: work, model: 'gpt-5' }, { cwd: work, effort: 'turbo' }, { cwd: work, model: "sonnet'; rm -rf ~; '" }]) assert.equal((await handle.actions.start(body)).ok, false, JSON.stringify(body));
   } finally {
     await handle.stop();
@@ -837,7 +845,7 @@ test('a new session starts in any folder of yours, made first if it is new, and 
     assert.match((await handle.actions.start({ cwd: '~/code/new app' })).error, /doesn't exist/);
     assert.deepEqual(await handle.actions.mkdir({ path: '~/code/new app' }), { ok: true, path: join(home, 'code', 'new app') });
     assert.deepEqual(await handle.actions.start({ cwd: '~/code/new app', mode: 'plan', model: 'sonnet' }), { ok: true, terminal: 'Terminal' });
-    assert.equal(launched.at(-1), `cd '${join(home, 'code', 'new app')}' && exec claude --permission-mode plan --model 'sonnet'`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(join(home, 'code', 'new app'))} && exec claude --permission-mode plan --model 'sonnet'`);
     for (const body of [{ path: '/etc/x' }, { path: '~/../x' }, {}, null]) assert.equal((await handle.actions.mkdir(body)).ok, false, JSON.stringify(body));
     for (const cwd of ['/etc', '/', '~/..', 'code']) assert.equal((await handle.actions.start({ cwd })).ok, false, cwd);
     assert.equal(launched.length, 1);
@@ -876,7 +884,7 @@ test('a session is ended (SIGTERM, then its window closed by its tty) or restart
     assert.equal(launched[0].at(-1), '/dev/ttys012');
     alive = true;
     assert.deepEqual(await handle.actions.restart({ agentId: LIVE, mode: 'bypassPermissions' }), { ok: true, terminal: 'iTerm' });
-    assert.equal(launched.at(-1).at(-1), `cd '${work}' && exec claude --resume ${LIVE} --dangerously-skip-permissions`);
+    assert.equal(launched.at(-1).at(-1), `cd ${shellQuote(work)} && exec claude --resume ${LIVE} --dangerously-skip-permissions`);
     alive = true;
     procs.kill = (pid, sig) => signals.push([pid, sig]); // this one will not stop
     const before = launched.length;
@@ -1046,17 +1054,21 @@ test("a session's model and effort are switched by its mod (/model, /effort), an
 
 // A stand-in for the claude CLI: plugins, their details, MCP servers; what it was asked to change goes to a log.
 function fakeClaude(dir) {
-  const log = join(dir, 'claude.log'), bin = join(dir, 'claude');
-  writeFileSync(bin, `#!/bin/sh
-case "$1 $2" in
-  "agents --json") echo '[]' ;;
-  "plugin list") echo '[{"id":"alpha@market","version":"1.0.0","enabled":true,"scope":"user","lastUpdated":"2026-10-01T00:00:00Z"},{"id":"agent-tracker@inline","version":"0.6.1","enabled":true,"scope":"user"}]' ;;
-  "plugin details") printf 'alpha 1.0.0\\n  Description: Alpha things.\\n\\nComponent inventory\\n  Skills (2)  one, two\\n  Agents (0)\\n  Hooks (0)\\n  MCP servers (1)  mine\\n  LSP servers (0)\\n\\nProjected token cost\\n  Always-on:   ~1,200 tok   added to every session\\n' ;;
-  "plugin enable"|"plugin disable"|"plugin update"|"plugin uninstall") echo "$*" >> "${log}"; echo "Done: $2 $3" ;;
-  "mcp list") printf 'Checking MCP server health…\\n\\nmine: https://mine.example/mcp (HTTP) - ! Needs authentication\\nplugin:alpha:extra: https://extra.example/mcp (HTTP) - ✔ Connected\\n' ;;
-  "mcp remove") echo "$* in $(pwd -P)" >> "${log}" ;;
-esac
-`, { mode: 0o755 });
+  const log = join(dir, 'claude.log');
+  const answers = {
+    'agents --json': '[]',
+    'plugin list': '[{"id":"alpha@market","version":"1.0.0","enabled":true,"scope":"user","lastUpdated":"2026-10-01T00:00:00Z"},{"id":"agent-tracker@inline","version":"0.6.1","enabled":true,"scope":"user"}]',
+    'plugin details': 'alpha 1.0.0\n  Description: Alpha things.\n\nComponent inventory\n  Skills (2)  one, two\n  Agents (0)\n  Hooks (0)\n  MCP servers (1)  mine\n  LSP servers (0)\n\nProjected token cost\n  Always-on:   ~1,200 tok   added to every session\n',
+    'mcp list': 'Checking MCP server health…\n\nmine: https://mine.example/mcp (HTTP) - ! Needs authentication\nplugin:alpha:extra: https://extra.example/mcp (HTTP) - ✔ Connected\n',
+  };
+  const bin = scriptCli(dir, 'claude', `
+const fs = require('fs'), a = process.argv.slice(2), key = a.slice(0, 2).join(' ');
+const answers = ${JSON.stringify(answers)};
+const note = line => fs.appendFileSync(${JSON.stringify(log)}, line + '\\n');
+if (key in answers) process.stdout.write(answers[key].endsWith('\\n') ? answers[key] : answers[key] + '\\n');
+else if (['plugin enable', 'plugin disable', 'plugin update', 'plugin uninstall'].includes(key)) { note(a.join(' ')); console.log('Done: ' + a[1] + ' ' + a[2]); }
+else if (key === 'mcp remove') note(a.join(' ') + ' in ' + fs.realpathSync(process.cwd()));
+`);
   return { bin, log: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') };
 }
 
@@ -1095,7 +1107,7 @@ test("Claude Code's setup for the ⚙ dialog: plugins with their costs, MCP serv
     assert.equal(launched.at(-1), "cd ~ && exec claude mcp login 'mine'");
     assert.deepEqual(await handle.actions.mcp({ name: 'mine', op: 'remove' }), { ok: true });
     assert.deepEqual(await handle.actions.mcp({ name: 'local1', op: 'remove', project }), { ok: true });
-    assert.match(claude.log(), new RegExp(`^mcp remove mine -s user in .*\\n^mcp remove local1 -s local in ${project}$`, 'm'));
+    assert.match(claude.log(), new RegExp(`^mcp remove mine -s user in .*\\n^mcp remove local1 -s local in ${project.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}$`, 'm'));
 
     mkdirSync(join(project, '.claude'));
     writeFileSync(join(project, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { deny: ['Bash(rm:*)'] } }));
@@ -1210,7 +1222,7 @@ test('the helper: off by default; on, it asks a new default-named session’s mo
   ].join('\n') + '\n');
   // Two sessions with default names: one started long ago (before consent), one started after.
   const reg = (pid, id, startedAt, nameSource = 'derived', name = `w-${id}`) => writeFileSync(join(claudeDir, 'sessions', `${pid}.json`), JSON.stringify({ pid, sessionId: id, cwd: '/w', name, nameSource, status: 'idle', startedAt }));
-  const old = spawn('sleep', ['60']);
+  const old = sleeper(60);
   reg(old.pid, 'old-one', Date.now() - 3_600_000);
   transcript('old-one');
   mkdirSync(join(root, 'state', 'mods'), { recursive: true });
@@ -1247,7 +1259,7 @@ test('the helper: off by default; on, it asks a new default-named session’s mo
     await handle.reloadConfig();
     assert.deepEqual(taken, [], 'no burst: a session started before you switched on is not asked by itself');
     // A new session, started after: asked once, by itself.
-    fresh = spawn('sleep', ['60']);
+    fresh = sleeper(60);
     reg(fresh.pid, 'new-one', Date.now() + 1000);
     transcript('new-one');
     beacon('new-one');
@@ -1304,7 +1316,7 @@ test('the helper: off by default; on, it asks a new default-named session’s mo
     // started well after consent: switching off and on again counts as agreeing anew.)
     await handle.actions.helper({ dailyLimit: 50 });
     answer = { ok: true, text: 'third-name' };
-    third = spawn('sleep', ['60']);
+    third = sleeper(60);
     reg(third.pid, 'third-one', Date.now() + 60_000);
     transcript('third-one');
     beacon('third-one');
@@ -1426,7 +1438,7 @@ test('Animal lines: a live cast and a 0.9.0 session get a batch; the reply’s g
   const claudeDir = mkdtempSync(join(tmpdir(), 'tracker-claude-lines-'));
   mkdirSync(join(claudeDir, 'sessions'));
   mkdirSync(join(claudeDir, 'projects', '-w'), { recursive: true });
-  const proc = spawn('sleep', ['60']);
+  const proc = sleeper(60);
   writeFileSync(join(claudeDir, 'sessions', `${proc.pid}.json`), JSON.stringify({ pid: proc.pid, sessionId: 'helper-one', cwd: '/w', name: 'helper-one', nameSource: 'user', status: 'idle', startedAt: Date.now() }));
   writeFileSync(join(claudeDir, 'projects', '-w', 'helper-one.jsonl'), JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: 'hello' } }) + '\n');
   mkdirSync(join(root, 'state', 'mods'), { recursive: true });
@@ -1500,7 +1512,7 @@ test('Animal lines ticked again: a batch goes out at once, not after the 30-minu
   const claudeDir = mkdtempSync(join(tmpdir(), 'tracker-claude-relines-'));
   mkdirSync(join(claudeDir, 'sessions'));
   mkdirSync(join(claudeDir, 'projects', '-w'), { recursive: true });
-  const proc = spawn('sleep', ['60']);
+  const proc = sleeper(60);
   writeFileSync(join(claudeDir, 'sessions', `${proc.pid}.json`), JSON.stringify({ pid: proc.pid, sessionId: 'helper-two', cwd: '/w', name: 'helper-two', nameSource: 'user', status: 'idle', startedAt: Date.now() }));
   writeFileSync(join(claudeDir, 'projects', '-w', 'helper-two.jsonl'), JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: 'hello' } }) + '\n');
   mkdirSync(join(root, 'state', 'mods'), { recursive: true });
@@ -1532,6 +1544,29 @@ test('Animal lines ticked again: a batch goes out at once, not after the 30-minu
   } finally {
     clearInterval(fakeMod);
     proc.kill();
+    await handle.stop();
+  }
+});
+
+test('an agent working at the root of a disk has no folder to read files from', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'tracker-root-diskroot-'));
+  mkdirSync(join(root, 'web'));
+  writeFileSync(join(root, 'web', 'index.html'), '<html></html>');
+  writeFileSync(join(root, 'config.json'), JSON.stringify({ port: 0, deployRepos: {} }));
+  const somewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tracker-anywhere-')));
+  writeFileSync(join(somewhere, 'notes.md'), '# Notes');
+  const disk = parse(somewhere).root;
+  const claudeDir = mkdtempSync(join(tmpdir(), 'tracker-claude-diskroot-'));
+  mkdirSync(join(claudeDir, 'sessions'));
+  mkdirSync(join(claudeDir, 'projects', '-'), { recursive: true });
+  writeFileSync(join(claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-disk', cwd: disk, name: 'rooted', status: 'idle' }));
+  writeFileSync(join(claudeDir, 'projects', '-', 'sess-disk.jsonl'), `${JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), cwd: disk, message: { content: 'hi' } })}\n`);
+  const handle = await startCollector({ root, claudeDir, claudeBin: NOT_A_PROGRAM, notify: () => {}, log: () => {}, home: join(somewhere, 'no-home'), scratchBase: join(somewhere, 'no-scratch') });
+  try {
+    assert.match((await handle.listFiles('sess-disk')).folderError, /disk root/);
+    assert.match((await handle.readFile('sess-disk', join(somewhere, 'notes.md'))).error, /outside/);
+    assert.match((await handle.fileTicket('sess-disk', join(somewhere, 'notes.md'))).error, /outside/);
+  } finally {
     await handle.stop();
   }
 });

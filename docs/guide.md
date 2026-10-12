@@ -350,8 +350,9 @@ until you run `/reload-plugins` in it.
 - "Probably a permission prompt" is a guess and can be wrong.
 - Codex sessions are read-only and show no cost, CPU or memory.
 - claude.ai cloud sessions and Remote Control sessions on other machines aren't visible.
-- Windows has not been run on a real machine yet. There the collector is not restarted if it exits,
-  and a console window flashes at login.
+- Windows: the collector is not started again if it exits before your next login (a logon task needs
+  an administrator). Network access can make Windows Defender Firewall ask once. Where `claude` is
+  only a `claude.cmd`, the text for a fork's prompt box is left out when it holds `& | < > ^ % !` or a quote.
 - On Linux, ending a session does not close a tmux session that holds more than Claude.
 - ⑂ Fork and ↺ Restore rely on Claude Code options that a Claude Code update could change.
 - Worlds drawn in 3D (the tennis club, and worlds you make) need WebGL and have no animals.

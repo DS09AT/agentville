@@ -32,7 +32,9 @@ export function childrenIndex(procs) {
 }
 
 export function label(command) {
-  const [exe, ...rest] = command.split(' ');
+  // a Windows path with spaces is quoted or ends at its executable extension
+  const given = /^"([^"]*)"\s*(.*)$/.exec(command) ?? (/^[A-Za-z]:[\\/]/.test(command) ? /^(.*?\.(?:exe|cmd|bat|com))(?:\s+(.*))?$/i.exec(command) : null);
+  const [exe, ...rest] = given ? [given[1], ...String(given[2] ?? '').split(' ')] : command.split(' ');
   const base = exe.split(/[\\/]/).pop();
   const arg = rest.find(a => a && !a.startsWith('-'));
   return (arg ? `${base} ${arg.split(/[\\/]/).pop()}` : base).slice(0, 40);
@@ -68,8 +70,36 @@ const BASH_TOOL = /^(?:"[^"]*[\\/]|\S*[\\/])?(?:zsh|bash|sh)(?:\.exe)?"? (?:-[a-
 /** Whether a process is one of a session's shell commands: its Bash tool's, never its MCP servers or the session itself. */
 export const isShellCommand = (p, sessionPid) => Boolean(p) && p.ppid === sessionPid && p.pgid === p.pid && BASH_TOOL.test(p.command);
 
+// Splits a command line the way the Windows C runtime does.
+export function windowsArgv(line) {
+  const argv = [];
+  let word = null, quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '\\') {
+      let n = 0;
+      while (line[i] === '\\') { n++; i++; }
+      if (line[i] === '"') { word = (word ?? '') + '\\'.repeat(n >> 1); if (n & 1) word += '"'; else quoted = !quoted; } else { word = (word ?? '') + '\\'.repeat(n); i--; }
+    } else if (c === '"') {
+      word ??= '';
+      quoted = !quoted;
+    } else if (!quoted && /\s/.test(c)) {
+      if (word !== null) argv.push(word);
+      word = null;
+    } else {
+      word = (word ?? '') + c;
+    }
+  }
+  if (word !== null) argv.push(word);
+  return argv;
+}
+
 /** The command as typed, from its shell's line: the eval'd text, unquoted, with ps's escapes read back (a newline shows as \012). */
 export function typedCommand(line) {
+  if (/^"?[A-Za-z]:[\\/]/.test(line)) { // the -c word is quoted for the C runtime
+    const argv = windowsArgv(line), at = argv.indexOf('-c');
+    if (at > 0 && argv[at + 1] !== undefined) line = argv.slice(at + 1).join(' ');
+  }
   const text = line.replace(/\\([0-3][0-7]{2})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
   const m = /\beval '([\s\S]*)'(?: < \/dev\/null)? && pwd -P >\| \S+$/.exec(text); // stdin from /dev/null, unless the command reads it already
   return m ? m[1].replaceAll(`'"'"'`, "'").replaceAll(`'\\''`, "'") : text.replace(/^(?:"[^"]*"|\S+) (?:-[a-z]+ )*-c /, '');

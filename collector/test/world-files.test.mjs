@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { FILE_LINKS, NEEDS_FILE_LINKS, SYSTEM_FILE, link, native } from './portable.mjs';
 import { FRAME_CSP, checkWorldJson, makeWorlds, watchWorlds, worldsDirOf } from '../worlds.mjs';
 
 const plain = v => JSON.parse(JSON.stringify(v));
@@ -20,7 +21,7 @@ function builtins() {
   writeFileSync(join(dir, 'farm', 'art', 'barn.png'), 'png');
   writeFileSync(join(dir, 'farm', '.secret.js'), 'no');
   writeFileSync(join(dir, 'farm', 'run.sh'), 'no');
-  symlinkSync('/etc/hosts', join(dir, 'farm', 'leak.js'));
+  if (FILE_LINKS) link(SYSTEM_FILE, join(dir, 'farm', 'leak.js'));
   mkdirSync(join(dir, 'starter'));
   writeFileSync(join(dir, 'starter', 'world.json'), '{}');
   return dir;
@@ -44,12 +45,12 @@ test("a world's frame page: the SDK's template with its name (escaped) and its o
   assert.equal(w.frame('starter'), null);
 });
 
-test("a world.json that is a link to a file outside its folder is not read: no frame, no file", () => {
+test("a world.json that is a link to a file outside its folder is not read: no frame, no file", { skip: NEEDS_FILE_LINKS }, () => {
   const dir = builtins();
   const outside = join(mkdtempSync(join(tmpdir(), 'outside-')), 'x.json');
   writeFileSync(outside, JSON.stringify({ name: 'LEAKED-NAME' }));
   mkdirSync(join(dir, 'linky'));
-  symlinkSync(outside, join(dir, 'linky', 'world.json'));
+  link(outside, join(dir, 'linky', 'world.json'));
   const w = makeWorlds({ builtinDir: dir });
   assert.equal(w.frame('linky'), null);
   assert.equal(w.info('linky'), null);
@@ -86,14 +87,14 @@ function users() {
   world('nojs', { name: 'No script', api: 1 }, null);
   world('Bad_Name', { name: 'Bad', api: 1 });
   world('linked', { name: 'Linked', api: 1 }, null);
-  symlinkSync('/etc/hosts', join(dir, 'linked', 'world.js'));
+  if (FILE_LINKS) link(SYSTEM_FILE, join(dir, 'linked', 'world.js'));
   const outside = mkdtempSync(join(tmpdir(), 'outside-'));
   writeFileSync(join(outside, 'secret.png'), 'secret');
   world('escape', { name: 'Escape', api: 1 });
-  symlinkSync(outside, join(dir, 'escape', 'art'));
+  link(outside, join(dir, 'escape', 'art'));
   writeFileSync(join(outside, 'cfg.json'), JSON.stringify({ name: 'LEAKED', api: 1 }));
   world('linkjson', null);
-  symlinkSync(join(outside, 'cfg.json'), join(dir, 'linkjson', 'world.json'));
+  if (FILE_LINKS) link(join(outside, 'cfg.json'), join(dir, 'linkjson', 'world.json'));
   writeFileSync(join(dir, 'notes.txt'), 'not a world');
   return dir;
 }
@@ -128,9 +129,9 @@ test("your world's files come from inside its folder only: a link out of it is r
 
 test('a broken link in your folder is listed with its error and hides nothing', () => {
   const dir = users();
-  symlinkSync('/nowhere/at/all/gone', join(dir, 'old-dev-world'));
-  symlinkSync(join(dir, 'loop-b'), join(dir, 'loop-a'));
-  symlinkSync(join(dir, 'loop-a'), join(dir, 'loop-b'));
+  link('/nowhere/at/all/gone', join(dir, 'old-dev-world'));
+  link(join(dir, 'loop-b'), join(dir, 'loop-a'));
+  link(join(dir, 'loop-a'), join(dir, 'loop-b'));
   const w = makeWorlds({ builtinDir: builtins(), userDir: dir });
   const all = w.list(), by = Object.fromEntries(all.map(x => [x.key ?? x.name, x]));
   assert.match(by['old-dev-world'].error, /link to something that isn't there/);
@@ -146,10 +147,10 @@ test("a linked world folder is followed, unless it is the worlds folder, above i
   const elsewhere = mkdtempSync(join(tmpdir(), 'dev-world-'));
   writeFileSync(join(elsewhere, 'world.json'), JSON.stringify({ name: 'Dev', api: 1 }));
   writeFileSync(join(elsewhere, 'world.js'), 'x');
-  symlinkSync(elsewhere, join(dir, 'dev'));
-  symlinkSync('..', join(dir, 'up'));
-  symlinkSync(dir, join(dir, 'self'));
-  symlinkSync(home, join(dir, 'home'));
+  link(elsewhere, join(dir, 'dev'));
+  link('..', join(dir, 'up'));
+  link(dir, join(dir, 'self'));
+  link(home, join(dir, 'home'));
   writeFileSync(join(base, 'private.json'), '{}');
   const w = makeWorlds({ builtinDir: builtins(), userDir: dir, home });
   const by = Object.fromEntries(w.list().map(x => [x.key ?? x.name, x]));
@@ -170,7 +171,7 @@ test("a world folder linked to your home, the worlds folder or above them is ref
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'wt-'))), dir = join(base, 'worlds'), home = join(base, 'home');
   mkdirSync(dir); mkdirSync(home);
   const targets = [home, dir, base, '/', '/System/Volumes/Data', join(dir, '..'), ...spellings(home), ...spellings(dir), ...spellings(base)].filter(t => existsSync(t));
-  targets.forEach((t, i) => symlinkSync(t, join(dir, `l${i}`)));
+  targets.forEach((t, i) => link(t, join(dir, `l${i}`)));
   const w = makeWorlds({ builtinDir: builtins(), userDir: dir, home });
   const by = Object.fromEntries(w.list().map(x => [x.key, x]));
   targets.forEach((t, i) => {
@@ -217,12 +218,13 @@ test('a huge world.json is refused, only the known nouns are kept, and an empty 
 });
 
 test('worldsDir: default, ~, relative to home, absolute', () => {
-  const d = join('/h', '.agentville', 'worlds');
-  assert.equal(worldsDirOf({}, '/h'), d);
-  for (const bad of [null, '', '  ', 7, {}]) assert.equal(worldsDirOf({ worldsDir: bad }, '/h'), d);
-  assert.equal(worldsDirOf({ worldsDir: '~/x' }, '/h'), '/h/x');
-  assert.equal(worldsDirOf({ worldsDir: 'x' }, '/h'), '/h/x');
-  assert.equal(worldsDirOf({ worldsDir: '/x' }, '/h'), '/x');
+  const h = native('/h'); // a home folder that is not there, written as this system writes one
+  const d = join(h, '.agentville', 'worlds');
+  assert.equal(worldsDirOf({}, h), d);
+  for (const bad of [null, '', '  ', 7, {}]) assert.equal(worldsDirOf({ worldsDir: bad }, h), d);
+  assert.equal(worldsDirOf({ worldsDir: '~/x' }, h), join(h, 'x'));
+  assert.equal(worldsDirOf({ worldsDir: 'x' }, h), join(h, 'x'));
+  assert.equal(worldsDirOf({ worldsDir: '/x' }, h), '/x');
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'wt-'))), notes = [];
   mkdirSync(join(home, 'sub'));
   for (const bad of [home, '/', dirname(home), '../x', '~', ...spellings(home)]) {

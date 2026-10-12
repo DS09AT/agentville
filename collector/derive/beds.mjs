@@ -1,7 +1,8 @@
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { renameOver } from '../lib/replace.mjs';
 
 // The dashboard's own scene and grid, run here as the browser runs them: plain scripts with no DOM in them. So the
 // collector places each repo's field with the very code a world lays it out with, and every browser gets the same beds.
@@ -34,7 +35,7 @@ export function createBeds({ file, log = () => {} } = {}) {
         beds = JSON.parse(JSON.stringify(grid.layoutFor(fields, beds, now).beds)); // out of the other realm
         for (const r of snapshot.repos) r.bed = Number.isInteger(beds[r.path]?.i) ? beds[r.path].i : null;
         const text = JSON.stringify(beds);
-        if (file && text !== saved) { writeFileSync(`${file}.tmp`, text); renameSync(`${file}.tmp`, file); saved = text; }
+        if (file && text !== saved) { writeFileSync(`${file}.tmp`, text); renameOver(`${file}.tmp`, file); saved = text; }
       } catch (err) { log(`beds: ${err?.stack ?? err}`); }
       return snapshot;
     },

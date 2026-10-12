@@ -4,13 +4,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { RUNNER, plainLines, runContained, worldFiles } from '../../scripts/lib/contained.mjs';
 import { RULES, checkWorld, creatureProblems, guardedGagCheck } from '../../scripts/lib/world-vm.mjs';
+import { FILE_LINKS, NEEDS_FILE_LINKS, WINDOWS, link } from './portable.mjs';
 
 const fixture = n => fileURLToPath(new URL(`./fixtures/worlds/${n}`, import.meta.url));
 const builtIn = n => fileURLToPath(new URL(`../../web/worlds/${n}`, import.meta.url));
@@ -171,8 +172,8 @@ test("contained as the command runs a world: it reads the SDK and the world's tw
     writeFileSync(join(dir, 'world.js'), '// a world\n');
     writeFileSync(join(dir, 'world.json'), '{ "name": "w", "api": 1 }\n');
     writeFileSync(join(dir, 'notes.txt'), "the world's own, but not a file the check reads");
-    symlinkSync(outside, join(dir, 'peek')); // links in the world's folder, made here, never committed
-    symlinkSync(tmp, join(dir, 'up'));
+    if (FILE_LINKS) link(outside, join(dir, 'peek')); // links in the world's folder, made here, never committed
+    link(tmp, join(dir, 'up'));
     const world = worldFiles(dir);
     // Plain Node, with exactly the flags and the empty environment the command gives its contained check.
     const code = `const fs = require('node:fs'), cp = require('node:child_process');
@@ -182,24 +183,27 @@ test("contained as the command runs a world: it reads the SDK and the world's tw
         notes: read(${JSON.stringify(join(dir, 'notes.txt'))}), peek: read(${JSON.stringify(join(dir, 'peek'))}), up: read(${JSON.stringify(join(dir, 'up', 'outside.txt'))}),
         outside: read(${JSON.stringify(outside)}), write: t(() => fs.writeFileSync(${JSON.stringify(target)}, 'x')), program: t(() => cp.spawnSync('ls')),
         env: Object.keys(process.env) }));`;
+    process.env.AGENTVILLE_TEST_SENTINEL = 'yours';
     const r = runContained(world, ['-e', code], { stdio: 'pipe' });
+    delete process.env.AGENTVILLE_TEST_SENTINEL;
     assert.equal(r.status, 0, r.stderr);
     const got = JSON.parse(r.stdout);
     for (const k of ['sdk', 'js', 'json']) assert.equal(got[k], 'allowed', k);
-    for (const k of ['notes', 'peek', 'up', 'outside', 'write', 'program']) assert.equal(got[k], 'ERR_ACCESS_DENIED', k);
-    assert.ok(!got.env.includes('HOME') && !got.env.includes('PATH'), `no environment of yours: ${got.env}`);
+    for (const k of ['notes', 'up', 'outside', 'write', 'program', ...(FILE_LINKS ? ['peek'] : [])]) assert.equal(got[k], 'ERR_ACCESS_DENIED', k);
+    assert.ok(!got.env.includes('AGENTVILLE_TEST_SENTINEL'), `no environment of yours: ${got.env}`);
+    if (!WINDOWS) assert.ok(!got.env.includes('HOME') && !got.env.includes('PATH'), `an empty environment: ${got.env}`); // the OS adds its own defaults on Windows
     assert.equal(existsSync(target), false, 'nothing written');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test("the command refuses a world whose world.js leads out of its folder, before starting anything; one inside it is fine", () => {
+test("the command refuses a world whose world.js leads out of its folder, before starting anything; one inside it is fine", { skip: NEEDS_FILE_LINKS }, () => {
   const tmp = mkdtempSync(join(tmpdir(), 'check-world-')), worlds = join(tmp, 'worlds');
   try {
     const starter = readFileSync(join(builtIn('legacy-starter'), 'world.js'), 'utf8'), json = '{ "name": "w", "api": 1 }\n';
     writeFileSync(join(tmp, 'elsewhere.js'), starter);
     mkdirSync(join(worlds, 'linked'), { recursive: true });
     writeFileSync(join(worlds, 'linked', 'world.json'), json);
-    symlinkSync(join('..', '..', 'elsewhere.js'), join(worlds, 'linked', 'world.js')); // made here, never committed
+    link(join('..', '..', 'elsewhere.js'), join(worlds, 'linked', 'world.js')); // made here, never committed
     const out = run('linked', '--worlds', worlds);
     assert.equal(out.status, 1);
     assert.equal(out.stderr.trim(), "u/linked: world.js is a link to a file outside the world's folder: check-world won't run this world.");
@@ -208,7 +212,7 @@ test("the command refuses a world whose world.js leads out of its folder, before
     mkdirSync(join(worlds, 'inside', 'src'), { recursive: true });
     writeFileSync(join(worlds, 'inside', 'world.json'), json);
     writeFileSync(join(worlds, 'inside', 'src', 'main.js'), starter);
-    symlinkSync(join('src', 'main.js'), join(worlds, 'inside', 'world.js'));
+    link(join('src', 'main.js'), join(worlds, 'inside', 'world.js'));
     const ok = run('inside', '--worlds', worlds);
     assert.equal(ok.status, 0, ok.stdout + ok.stderr);
     assert.match(ok.stdout, /✓ 34 stops of the tour/);
@@ -223,13 +227,15 @@ test("worldFiles: each of the two files a regular file inside the folder's real 
     writeFileSync(join(dir, 'world.js'), '// a world\n');
     const real = realpathSync(dir);
     assert.deepEqual(worldFiles(dir), { dir: real, js: join(real, 'world.js'), json: join(real, 'world.json') }, 'no world.json: let through, for the check to report');
-    symlinkSync(join(tmp, 'gone.json'), join(dir, 'world.json'));
+    link(join(tmp, 'gone.json'), join(dir, 'world.json'));
     assert.throws(() => worldFiles(dir), { message: "world.json is a link to something that isn't there." });
     unlinkSync(join(dir, 'world.json'));
-    writeFileSync(join(tmp, 'outside.json'), '{}');
-    symlinkSync(join(tmp, 'outside.json'), join(dir, 'world.json'));
-    assert.throws(() => worldFiles(dir), { message: "world.json is a link to a file outside the world's folder: check-world won't run this world." });
-    unlinkSync(join(dir, 'world.json'));
+    if (FILE_LINKS) {
+      writeFileSync(join(tmp, 'outside.json'), '{}');
+      link(join(tmp, 'outside.json'), join(dir, 'world.json'));
+      assert.throws(() => worldFiles(dir), { message: "world.json is a link to a file outside the world's folder: check-world won't run this world." });
+      unlinkSync(join(dir, 'world.json'));
+    }
     mkdirSync(join(dir, 'world.json'));
     assert.throws(() => worldFiles(dir), { message: "world.json isn't a file." });
   } finally { rmSync(tmp, { recursive: true, force: true }); }

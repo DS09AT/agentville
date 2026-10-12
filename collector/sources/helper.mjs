@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { renameOver } from '../lib/replace.mjs';
 
 // The helper: small writing jobs for the dashboard with Haiku, called through the Agentville mod
 // inside an open Claude Code session (your sign-in, your plan; never an API key). Off until you
@@ -37,7 +38,7 @@ export function createHelper(dir, { now = () => Date.now() } = {}) {
   const write = (file, value) => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(`${file}.tmp`, JSON.stringify(value), { mode: 0o600 });
-    renameSync(`${file}.tmp`, file);
+    renameOver(`${file}.tmp`, file);
   };
   const stored = read(settingsFile);
   const okLimit = n => Number.isInteger(n) && n >= 1 && n <= 2000;

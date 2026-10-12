@@ -60,7 +60,7 @@ export function listCodexThreads(codexDir, since, metaCache = new Map()) {
   const names = readThreadNames(codexDir);
   const threads = [], subs = [], parentOf = new Map();
   for (const rel of files) {
-    if (!/(^|\/)rollout-[^/]*\.jsonl$/.test(rel)) continue;
+    if (!/(^|[\\/])rollout-[^\\/]*\.jsonl$/.test(rel)) continue;
     const path = join(root, rel);
     let mtimeMs;
     try { mtimeMs = statSync(path).mtimeMs; } catch { continue; }

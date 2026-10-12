@@ -1,16 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { sep } from 'node:path';
+import { native } from './portable.mjs';
 import { bashMode, bashTargets, collectTouches, touchesFromCall } from '../derive/touches.mjs';
 
 const HOME = '/h';
+const joined = path => path.split('/').join(sep); // what join() makes of a '/' path
+
 
 test('bash targets come from cd, git -C, absolute and ~ paths, else the entry cwd', () => {
-  assert.deepEqual(bashTargets('cd backend && git status', '/p', HOME), ['/p/backend']);
-  assert.ok(bashTargets('git -C /p/frontend log', '/p', HOME).includes('/p/frontend'));
-  assert.deepEqual(bashTargets('cat ~/notes.txt', '/p', HOME), ['/h/notes.txt']);
+  assert.deepEqual(bashTargets('cd backend && git status', '/p', HOME), [native('/p/backend')]);
+  assert.ok(bashTargets('git -C /proj/frontend log', '/p', HOME).includes('/proj/frontend'));
+  assert.deepEqual(bashTargets('cat ~/notes.txt', '/p', HOME), [joined('/h/notes.txt')]);
   assert.deepEqual(bashTargets('ls', '/p', HOME), ['/p']);
   assert.deepEqual(bashTargets('npm test', undefined, HOME), []);
   assert.ok(bashTargets('cd "/Users/a b/c" && ls', '/p', HOME).includes('/Users/a b/c'));
+});
+
+test('Git Bash writes a drive as /c/…: Windows reads it as C:\\…', { skip: process.platform !== 'win32' && 'a Windows path' }, () => {
+  assert.deepEqual(bashTargets('cd /c/Users/me/my-app && ls', 'C:\\x', 'C:\\Users\\me'), ['C:\\Users\\me\\my-app']);
+  assert.ok(bashTargets('git -C /d/work/api log', 'C:\\x', 'C:\\Users\\me').includes('D:\\work\\api'));
 });
 
 test('bash mode: mutating git commands, writes, and reads', () => {
@@ -28,9 +37,9 @@ test('bash mode: mutating git commands, writes, and reads', () => {
 
 test('file tools map to read/write touches', () => {
   assert.deepEqual(touchesFromCall({ name: 'Edit', input: { file_path: '/p/a.ts' } }, HOME), [{ path: '/p/a.ts', mode: 'write' }]);
-  assert.deepEqual(touchesFromCall({ name: 'Read', input: { file_path: '~/x' } }, HOME), [{ path: '/h/x', mode: 'read' }]);
+  assert.deepEqual(touchesFromCall({ name: 'Read', input: { file_path: '~/x' } }, HOME), [{ path: joined('/h/x'), mode: 'read' }]);
   assert.deepEqual(touchesFromCall({ name: 'Grep', input: { pattern: 'x' }, cwd: '/p' }, HOME), [{ path: '/p', mode: 'read' }]);
-  assert.deepEqual(touchesFromCall({ name: 'Bash', input: { command: 'cd backend && git commit -m x' }, cwd: '/p' }, HOME), [{ path: '/p/backend', mode: 'git' }]);
+  assert.deepEqual(touchesFromCall({ name: 'Bash', input: { command: 'cd backend && git commit -m x' }, cwd: '/p' }, HOME), [{ path: native('/p/backend'), mode: 'git' }]);
   assert.deepEqual(touchesFromCall({ name: 'WebSearch', input: { query: 'x' } }, HOME), []);
 });
 

@@ -194,15 +194,15 @@ export async function checkWorld({ dir, file = 'world.js', json = 'world.json', 
     if (Array.isArray(j?.taken)) taken = j.taken;
   } catch (err) { out.json = err.code === 'ENOENT' ? 'world.json is missing.' : `world.json can't be read: ${err.message}`; }
   const worldPath = join(dir, file);
-  const at = (path, line, col) => `${path === worldPath ? file : relative(WEB, path)}:${line}${col ? `:${col}` : ''}`;
+  const at = (path, line, col) => `${path === worldPath ? file : relative(WEB, path).split(sep).join('/')}:${line}${col ? `:${col}` : ''}`;
   // Where an exception came from: world.js's line if it is in the stack, else the SDK's (never this harness's own).
   const whereOf = err => {
     const stack = String(err?.stack ?? '');
     // Node puts the throw site first ("<file>:<line>\n<source>"): a world.js that doesn't parse, or a throw in
     // world.js itself. When the throw site is the SDK's, the world.js line that called it wins, from the stack.
-    const top = stack.match(/^(\/[^\n]*?):(\d+)\n/);
+    const top = stack.match(/^((?:\/|[A-Za-z]:[\\/])[^\n]*?):(\d+)\n/);
     if (top?.[1] === worldPath) return at(top[1], top[2]);
-    const found = [...stack.matchAll(/(?:\(|at )(\/[^()\n]*?):(\d+):(\d+)\)?$/gm)] // a path may hold spaces
+    const found = [...stack.matchAll(/(?:\(|at )((?:\/|[A-Za-z]:[\\/])[^()\n]*?):(\d+):(\d+)\)?$/gm)] // a path may hold spaces
       .filter(m => m[1] === worldPath || m[1].startsWith(WEB + sep));
     const f = found.find(m => m[1] === worldPath) ?? found[0];
     return f ? at(f[1], f[2], f[3]) : '';

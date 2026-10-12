@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { checkFolderFile, listFolder, readFolderFile } from '../sources/files.mjs';
+import { checkFolderFile, listFolder, readFolderFile, realOf } from '../sources/files.mjs';
+import { FILE_LINKS, SYSTEM_FILE, WINDOWS, link } from './portable.mjs';
 
 const write = (dir, rel, body) => {
   mkdirSync(dirname(join(dir, rel)), { recursive: true });
@@ -76,13 +77,13 @@ test('the home folder and the disk root are not listed', async () => {
 
 test('a file inside the folder is read; everything the explorer hides is refused', async () => {
   const dir = repo();
-  symlinkSync('/etc/hosts', join(dir, 'hosts.txt'));
+  if (FILE_LINKS) link(SYSTEM_FILE, join(dir, 'hosts.txt'));
   const ok = await readFolderFile(dir, join(dir, 'src/app.ts'));
   assert.equal(ok.doc.text, 'export const a = 2;\n');
   assert.equal(ok.doc.path, join(dir, 'src/app.ts'));
   const refused = async (cwd, path, re) => assert.match((await readFolderFile(cwd, path)).error, re, path);
   await refused(join(dir, 'src'), join(dir, 'README.md'), /outside/);
-  await refused(dir, join(dir, 'hosts.txt'), /outside/);
+  if (FILE_LINKS) await refused(dir, join(dir, 'hosts.txt'), /outside/);
   await refused(dir, 'src/app.ts', /outside/);
   await refused(dir, join(dir, 'debug.log'), /ignores/);
   await refused(dir, join(dir, 'node_modules/lib/index.js'), /ignores/);
@@ -96,7 +97,7 @@ test('a file inside the folder is read; everything the explorer hides is refused
 test("a picture, a PDF or any binary passes the same rules for its bytes: binary and large files too, the rest refused alike", async () => {
   const dir = repo();
   const ok = await checkFolderFile(dir, join(dir, 'bin.dat'));
-  assert.equal(ok.real, join(realpathSync(dir), 'bin.dat'));
+  assert.equal(ok.real, join(realOf(dir), 'bin.dat'));
   assert.ok(ok.size > 0);
   assert.ok((await checkFolderFile(dir, join(dir, 'big.txt'))).real, 'size is for the caller to judge');
   for (const [path, re] of [['debug.log', /ignores/], ['.env.local', /secrets/], ['.git/config', /Git's own/], ['gone.txt', /no longer exists/]]) assert.match((await checkFolderFile(dir, join(dir, path))).error, re, path);
@@ -133,4 +134,13 @@ test('a plain folder holding git repos lists each repo the way git sees it', asy
   });
   assert.equal((await readFolderFile(outer, join(outer, 'svc/src.ts'))).doc.text, 'two');
   assert.match((await readFolderFile(outer, join(outer, 'svc/dist/out.js'))).error, /ignores/);
+});
+
+test('Windows: a file is judged by its one true spelling, whatever case or stream it was asked by', { skip: !WINDOWS && 'Windows file names' }, async () => {
+  const dir = repo();
+  assert.match((await checkFolderFile(dir, join(dir, '.GIT', 'config'))).error, /Git's own/, 'another case of .git');
+  assert.match((await checkFolderFile(dir, join(dir, '.ENV'))).error, /secrets/, 'another case of .env');
+  assert.match((await checkFolderFile(dir, `${join(dir, '.env')}::$DATA`)).error, /outside/, 'a stream of a secret file');
+  assert.match((await checkFolderFile(dir, `${join(dir, 'README.md')}:hidden`)).error, /outside/, 'any stream');
+  assert.equal((await checkFolderFile(dir, join(dir, 'README.MD'))).real, join(realOf(dir), 'README.md'), 'the name as the disk has it');
 });

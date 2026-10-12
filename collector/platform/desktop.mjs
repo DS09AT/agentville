@@ -57,6 +57,9 @@ const LINUX_TERMINALS = [
 /** A word for fish: in its single quotes a backslash and a quote are escaped by a backslash, and nothing else is read. */
 export const fishQuote = s => `'${String(s).replace(/[\\']/g, '\\$&')}'`;
 
+// Windows Terminal keeps a window open after a non-zero exit, so the shell exits 0 unless claude failed right at the start.
+export const windowsLine = command => `$avStart = Get-Date; ${command}; $avCode = $LASTEXITCODE; if ($avCode -and ((Get-Date) - $avStart).TotalSeconds -lt 10) { Write-Host ('claude ended with code ' + $avCode); Read-Host 'Press Enter to close' | Out-Null }; exit 0`;
+
 /** Starts a program that stays (a terminal's window) and lets it go: { code: 0 } once it runs, { code: 1, stderr } when it could not start. */
 export function startDetached(cmd, args, { cwd, env } = {}) {
   return new Promise(resolve => {
@@ -120,7 +123,7 @@ export function makeDesktop({ platform = process.platform, env = process.env, ho
         // what it loads, in the folder it starts in, and a repo could hold a powershell.exe of its own. The line goes there itself.
         const exe = find('powershell'), wt = app === 'Windows Terminal' ? find('wt') : null;
         if (!exe || (app === 'Windows Terminal' && !wt)) return { ok: false, error: `${wt === null && exe ? 'Windows Terminal' : 'PowerShell'} was not found.` };
-        const ps = ['-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')];
+        const ps = ['-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(windowsLine(command), 'utf16le').toString('base64')];
         const res = wt ? await launch(['-w', 'new', exe, ...ps], { cmd: wt, detached: true, cwd: home }) : await launch(ps, { cmd: exe, detached: true, cwd: home });
         return res.code === 0 ? { ok: true, terminal: app } : { ok: false, error: res.stderr.trim().slice(0, 200) || 'The terminal did not open.' };
       }
@@ -173,13 +176,16 @@ export function makeDesktop({ platform = process.platform, env = process.env, ho
     /** Shows a file in the file manager (only shows it: never opens or runs it). Linux has no one way to select a file: its folder is shown. */
     revealFile(real) {
       if (mac) return runner('open', ['-R', real], { timeoutMs: 10_000 });
-      if (win) return runner('explorer.exe', [`/select,${real}`], { timeoutMs: 10_000 }).then(() => ({ code: 0, stdout: '', stderr: '' })); // Explorer's exit code says nothing
+      if (win && /["\0\r\n]/.test(real)) return Promise.resolve({ code: 1, stdout: '', stderr: 'not a path' }); // none of these is in a Windows file name
+      // Explorer parses its own command line, so a comma in the name needs the quotes.
+      if (win) return runner('explorer.exe', [`/select,"${real}"`], { timeoutMs: 10_000, verbatim: true }).then(() => ({ code: 0, stdout: '', stderr: '' })); // Explorer's exit code says nothing
       return has('xdg-open') ? starter('xdg-open', [real.replace(/\/[^/]*$/, '') || '/']) : Promise.resolve({ code: 1, stdout: '', stderr: 'no file manager' });
     },
     /** A folder in the file manager, by the file manager's own name: a folder that names an app is shown, never launched. */
     openFolder(dir) {
+      if (win && /["\0\r\n]/.test(dir)) return Promise.resolve({ code: 1, stdout: '', stderr: 'not a path' });
       if (mac) return runner('open', ['-a', 'Finder', dir], { timeoutMs: 10_000 });
-      if (win) return runner('explorer.exe', [dir], { timeoutMs: 10_000 }).then(() => ({ code: 0, stdout: '', stderr: '' }));
+      if (win) return runner('explorer.exe', [`"${dir}"`], { timeoutMs: 10_000, verbatim: true }).then(() => ({ code: 0, stdout: '', stderr: '' }));
       return has('xdg-open') ? starter('xdg-open', [dir]) : Promise.resolve({ code: 1, stdout: '', stderr: 'no file manager' });
     },
     /** A page in your browser. */

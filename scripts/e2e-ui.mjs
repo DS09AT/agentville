@@ -376,12 +376,29 @@ try {
     await sleep(400);
     writeFileSync(join(process.env.SHOTS, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
   };
+  // Waiting asks over and over. A question the browser never answers (its frame was on its way out) is given up
+  // after POLL_MS and asked again: left to the driver's own 15 s, one lost question used up the whole wait.
+  const POLL_MS = 3000;
   const until = async (expr, ms = 8000) => {
-    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await js(expr)) return true;
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await chrome.js(expr, POLL_MS).catch(() => undefined)) return true;
     return false;
   };
   const funtil = async (expr, ms = 8000) => {
-    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await fjs(expr)) return true;
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await chrome.inFrame('/world/', expr, POLL_MS).catch(() => undefined)) return true;
+    return false;
+  };
+  /** Puts the keyboard in the page's field `id` and answers once it is there: a key sent before that goes nowhere. */
+  const focusOn = id => until(`(f => Boolean(f) && (document.activeElement === f || (f.focus(), false)))(document.getElementById(${JSON.stringify(id)}))`, 4000);
+  /**
+   * Presses one of the page's own buttons (`press`, code that clicks it) until `done` is so. For a second after a
+   * world shows or changes the page holds its buttons back, and it takes one press of the top bar a quarter second
+   * (web/worlds.js, the click guard): a single press in that time is lost, so it is made again.
+   */
+  const pressUntil = async (press, done, ms = 20_000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(400)) {
+      if (await chrome.js(done, POLL_MS).catch(() => undefined)) return true;
+      await js(`if (!document.documentElement.dataset.guard) { ${press} }`);
+    }
     return false;
   };
   /** Where the world's frame sits in the page, for real mouse events (which take the page's coordinates). */
@@ -456,7 +473,7 @@ try {
   await js("document.getElementById('convo').close()");
   check(await until("!document.getElementById('convo').open && !CSS.highlights.has('convo-hit')"), 'closing it clears the highlights');
   const key = (type, mods = 0) => send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: mods, ...(type === 'keyDown' ? { text: '\r' } : {}) }); // a real key press carries its text
-  await js("document.getElementById('msg-text').focus()");
+  await focusOn('msg-text');
   await send('Input.insertText', { text: 'First line' });
   await key('keyDown', 8); await key('keyUp', 8); // Shift+Enter
   await send('Input.insertText', { text: 'second line' });
@@ -470,24 +487,28 @@ try {
   check(received[0] === 'First line\nsecond line', `⚡ Send now sends it (got ${JSON.stringify(received)})`);
   check(await until("document.getElementById('msg-text')?.value === ''"), 'the message box clears once it is sent');
   const arrow = async (name, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code }); };
-  await js("document.getElementById('msg-text').focus()"); // sending leaves the box (so the page can update): back in it
+  await focusOn('msg-text'); // sending leaves the box (so the page can update): back in it
   await arrow('ArrowUp', 38);
   check(await until("document.getElementById('msg-text')?.value === 'Plan the next crop'"), `↑ in the message box brings back what you said to the session (got ${JSON.stringify(await js("document.getElementById('msg-text')?.value"))})`);
   await arrow('ArrowDown', 40);
   check(await until("document.getElementById('msg-text')?.value === ''"), '↓ goes back to what you were typing');
+  // The page is written anew every few seconds and whenever something finishes: the keyboard stays where it was.
+  check(await js("(() => { const box = document.getElementById('note-text'); box.focus(); box.value = 'abc'; box.dispatchEvent(new Event('input', { bubbles: true })); box.setSelectionRange(1, 2); render(); const now = document.getElementById('note-text'), kept = now !== box && document.activeElement === now && now.selectionStart === 1 && now.selectionEnd === 2; now.value = ''; now.dispatchEvent(new Event('input', { bubbles: true })); return kept; })()"), 'the page drawn anew, the box you were typing in still has the keyboard, and your place in it');
+  check(await js("(() => { const b = document.querySelector('button[data-group]'); b.focus(); render(); const now = document.activeElement; return now !== b && now?.dataset.group === b.dataset.group; })()"), 'and so does a button with no name of its own, found again by what it is for');
+  check(await js("(() => { document.getElementById('note-text').focus(); document.activeElement.blur(); render(); return document.activeElement === document.body; })()"), 'a box left on purpose is not gone back to');
   // Notes: written for later, used into the message box, sent from there; Send now; a fork gets a copy
-  await js("document.getElementById('note-text').focus()");
+  await focusOn('note-text');
   await send('Input.insertText', { text: 'Ask about the frost' });
   await key('keyDown'); await key('keyUp');
   check(await until("[...document.querySelectorAll('#center-body .note-text')].some(b => b.textContent === 'Ask about the frost') && document.getElementById('note-text')?.value === ''"), 'a note is added with Enter, and its box empties for the next');
   await js("document.querySelector('#center-body [data-note-use]').click()");
   check(await until("document.getElementById('msg-text')?.value === 'Ask about the frost'"), '↳ Use puts the note in the message box');
-  await js("document.getElementById('msg-text').focus()");
+  await focusOn('msg-text');
   await key('keyDown'); await key('keyUp');
   await sendHeldNow();
   for (let i = 0; i < 40 && received.at(-1) !== 'Ask about the frost'; i++) await sleep(150);
   check(received.at(-1) === 'Ask about the frost' && await until("!!document.querySelector('#center-body .note.used')"), `sent from the message box, the note is crossed out as used (got ${JSON.stringify(received.at(-1))})`);
-  await js("document.getElementById('note-text').focus()");
+  await focusOn('note-text');
   await send('Input.insertText', { text: 'Water the beans' });
   await key('keyDown'); await key('keyUp');
   await until("!!document.querySelector('#center-body .note:not(.used) [data-note-send]')");
@@ -524,7 +545,7 @@ try {
   check(await until("!document.getElementById('restore-dlg').open"), 'Cancel leaves it as it is');
   await js("document.querySelector('#center-body [data-convo=\"ui-asker\"]').click()");
   await until("!!document.getElementById('convo-msg-text')");
-  await js("document.getElementById('convo-msg-text').focus()"); // before the conversation has loaded
+  await focusOn('convo-msg-text'); // before the conversation has loaded
   await until("/messages since/.test(document.getElementById('convo-sub').textContent)");
   check(await js("document.activeElement?.id === 'convo-msg-text'"), 'the reply box keeps the focus once the conversation has loaded');
   await send('Input.insertText', { text: 'Sent from the conversation dialog' });
@@ -845,6 +866,8 @@ try {
   check(await until("localStorage.getItem('tracker-awake') === 'off'") && await funtil("/Screen: may sleep/.test(document.querySelector('[data-farm-awake]').textContent)"), 'and lets it sleep again');
   await fjs("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   check(await funtil("document.querySelector('.px-menu').hidden && document.activeElement?.hasAttribute('data-farm-menu')"), 'Esc shuts it, back on its button');
+  await fjs("document.querySelector('[data-farm-menu]').drawnBefore = true");
+  check(await funtil("(b => !b.drawnBefore && document.activeElement === b)(document.querySelector('[data-farm-menu]'))", 15_000), "and stays there when the farm's HUD is drawn anew, as it is every few seconds");
   await sleep(300); // the page takes one press of the top bar's buttons a quarter second
   await fjs("document.querySelector('[data-farm-menu]').click()");
   await fjs("document.querySelector('[data-farm-nav=\"broadcast\"]').click()");
@@ -1024,6 +1047,7 @@ try {
   check(await js("(p => { const r = p.getBoundingClientRect(), s = document.getElementById('farm-sidebar').getBoundingClientRect(); return r.left >= s.left - 1 && r.right <= s.right + 1 && r.bottom <= s.bottom + 1; })(document.querySelector('#fs-pop .fs-pop'))"), 'the picker fits inside the sidebar');
   await js("document.getElementById('fs-find').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   check(await until("!document.querySelector('#fs-pop .fs-pop') && document.activeElement?.id === 'fs-switch'"), 'Esc closes it, back on the name');
+  check(await js("(() => { const b = document.getElementById('fs-switch'); b.focus(); render(); const now = document.getElementById('fs-switch'); return now !== b && document.activeElement === now; })()"), 'and stays there when the sidebar is drawn anew');
   await js("document.getElementById('fs-session').click()");
   check(await until("!!document.querySelector('#fs-pop [data-end-session], #fs-pop #fs-list')"), 'Session opens its menu');
   await js("document.getElementById('tab-activity').click()");
@@ -1101,15 +1125,13 @@ try {
   linesOn = false;
   await funtil("document.querySelectorAll('.px-tag').length >= 2");
 
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('worlds-dlg').open");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('worlds-dlg').open");
   await js("document.querySelector('[data-world=\"u/throws\"]').click()");
   check(await until("/Throws didn.t start: (Uncaught Error: )?no barn here \\(world\\.js:1\\)/.test(document.querySelector('#farm .world-panel')?.textContent ?? '')", 9000), 'a world that throws as it loads is replaced by a panel saying what, and where');
   await js("document.querySelector('[data-world-back]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await funtil("document.querySelectorAll('.px-tag').length >= 2"), 'Back to the farm brings the farm back');
   check(await js("!document.querySelector('#farm .world-strip') && !document.querySelector('#farm .world-panel')"), 'with no strip or panel left over');
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('worlds-dlg').open");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('worlds-dlg').open");
   await js("document.querySelector('[data-world=\"u/leaves-slow\"]').click()");
   check(await until("/Leaves slow tried to leave the page and was stopped/.test(document.querySelector('#farm .world-panel')?.textContent ?? '')", 2500), "a world that sends its frame to a page that never answers is stopped as it leaves, before that page can speak");
   check(await js("!document.querySelector('#farm .world-frame') && !document.querySelector('[data-world-retry]')"), 'its frame is gone from the page');
@@ -1152,8 +1174,7 @@ try {
   await until("!document.getElementById('worlds-dlg').open");
   await js("document.getElementById('view-farm').click()"); // the list view's toggle: back to the world
   check(await until("document.getElementById('main').dataset.view === 'farm' && document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/probe/') && !!document.querySelector('#farm .world-corner')"), 'back in the world: the same frame, its corner still there');
-  await js("document.querySelector('#farm .world-corner [data-corner-worlds]').click()");
-  check(await until("document.getElementById('worlds-dlg').open"), 'its World ▾ opens the list of worlds');
+  check(await pressUntil("document.querySelector('#farm .world-corner [data-corner-worlds]').click()", "document.getElementById('worlds-dlg').open"), 'its World ▾ opens the list of worlds');
   await js("document.querySelector('[data-world=\"farm\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await funtil("document.querySelectorAll('.px-tag').length >= 2") && await js("!document.querySelector('#farm .world-corner')"), 'and the farm comes back, without the corner');
 
@@ -1225,7 +1246,7 @@ try {
 
   console.log('A world of api 2, drawn with three.js');
   const inWorld = (key, expr) => chrome.inFrame(`/world/${key}/`, expr).catch(() => undefined);
-  const worldUntil = async (key, expr, ms = 10_000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await inWorld(key, expr)) return true; return false; };
+  const worldUntil = async (key, expr, ms = 10_000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await chrome.inFrame(`/world/${key}/`, expr, POLL_MS).catch(() => undefined)) return true; return false; };
   const askedOf = () => js("JSON.stringify([...document.querySelectorAll('#asked li')].map(l => l.textContent))");
   await send('Page.navigate', { url: addr('/worlds/test?world=starter&stop=everyone') });
   check(await until("document.body.dataset.shown === 'everyone'", 15_000), 'the starter shows a stop of the tour');
@@ -1261,10 +1282,8 @@ try {
   check(await until("document.body.dataset.shown === 'private'", 15_000) && await worldUntil('u/club', "(t => t.length === 7 && t.every(x => /^agent \\d+:/.test(x.title)))([...document.querySelectorAll('.wv-tag')])"), 'a world of api 2 of your own gets the private scene at the privacy stop');
   await send('Page.navigate', { url: addr('/') });
   await dashboardSettled();
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('main').dataset.view === 'farm' && !!document.querySelector('#farm .world-frame')");
-  await js("document.getElementById('view-farm').click()");
-  await until("document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"tennis\"]')");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('main').dataset.view === 'farm' && !!document.querySelector('#farm .world-frame')");
+  await pressUntil("document.getElementById('view-farm').click()", "document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"tennis\"]')"); // in the world's view, its button lists the worlds
   await shot('worlds-list-api2');
   await js("document.querySelector('[data-world=\"tennis\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/tennis/')"), 'the tennis club is in the list of worlds, and picking it shows it');
@@ -1280,12 +1299,11 @@ try {
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/club/') && !!document.querySelector('#farm .world-corner')"), 'a world of api 2 of your own shows, with the page’s corner over it');
   check(await worldUntil('u/club', "(t => t.length >= 2 && t.every(x => /^agent \\d+:/.test(x.title)))([...document.querySelectorAll('.wv-tag')])") && await until("window.TrackerLive.world() === 'u/club' && window.TrackerLive.watching()", 12_000), 'it sees numbers for names, and the collector moves it too, shut in');
   check(await worldUntil('u/club', "document.querySelector('.wv-panel').classList.contains('own')"), 'its panel sits below the corner');
-  await js("document.querySelector('#farm .world-corner [data-corner-worlds]').click()");
-  await until("document.getElementById('worlds-dlg').open");
+  await pressUntil("document.querySelector('#farm .world-corner [data-corner-worlds]').click()", "document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"farm\"]')");
   await js("document.querySelector('[data-world=\"farm\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await worldUntil('farm', "document.querySelectorAll('.px-tag').length >= 2", 20_000), 'and the farm comes back');
-  await js("document.getElementById('view-list').click()");
-  await until("document.getElementById('main').dataset.view === 'list' && !document.documentElement.dataset.guard"); // (the corner's World ▾ held the page's buttons for a second)
+  await pressUntil("document.getElementById('view-list').click()", "document.getElementById('main').dataset.view === 'list'");
+  await until("!document.documentElement.dataset.guard"); // (the world that came back held the page's buttons for a second)
 
   console.log('Claude Code setup');
   await js("document.getElementById('setup-open').click()");
@@ -1318,6 +1336,18 @@ try {
   check(await savedNotifications(true) && await until("document.getElementById('st-notifications')?.checked === true && document.getElementById('st-notify-waiting')?.disabled === false && document.getElementById('st-notify-waiting')?.checked === true"), 'and on again straight after, with each kind as it was');
   await js("document.querySelector('[data-settings-close]').click()");
   check(await until("!document.getElementById('settings').open"), 'its × closes it');
+  // Closed while a save is still on its way: the answer to the save does not open it again.
+  const settingsReady = () => until("document.getElementById('settings').open && !!document.getElementById('st-notifications') && document.getElementById('settings-save').disabled === false");
+  await js("document.getElementById('settings-open').click()");
+  await settingsReady();
+  await js("document.getElementById('st-notifications').click(); document.getElementById('settings-save').click(); document.querySelector('[data-settings-close]').click()");
+  check(await savedNotifications(false) && !(await until("document.getElementById('settings').open", 1500)), 'closed while a save is on its way, it stays closed, and the save is kept');
+  await js("document.getElementById('settings-open').click()");
+  await settingsReady();
+  await js("document.getElementById('st-notifications').click(); document.getElementById('settings-save').click()");
+  check(await savedNotifications(true) && await until("document.getElementById('settings-note').textContent === 'Saved.' && document.getElementById('settings-save').disabled === false"), 'opened again, it saves as before');
+  await js("document.querySelector('[data-settings-close]').click()");
+  await until("!document.getElementById('settings').open");
   console.log('Sessions');
   await js("document.getElementById('sessions-open').click()");
   check(await until("document.getElementById('sessions').open && [...document.querySelectorAll('#sessions [data-sess-resume]')].some(b => b.closest('.sess-row').textContent.includes('Harvest planning'))"), 'the sessions dialog offers to resume a past session by its title');

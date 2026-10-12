@@ -9,3 +9,4 @@ mod/.claude-plugin/types/
 *.mp4
 CLAUDE.md
 AGENTS.md
+.docs/

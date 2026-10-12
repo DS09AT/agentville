@@ -65,8 +65,10 @@
   const words = s => esc(noBidi(s));
   const prefKey = (world, name) => `tracker-world:${world}:${name}`;
   const short = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+  // Normalizes slashes and the drive letter so Windows and git spellings compare equal.
+  const slashed = p => String(p).replace(/\\/g, '/').replace(/^[a-z]:/, d => d.toUpperCase());
   /** Inside a folder (or the folder itself), with no `..` on the way. */
-  const inside = (path, dir) => short(dir, PATH_MAX) && !path.split('/').includes('..') && (path === dir || path.startsWith(dir.endsWith('/') ? dir : `${dir}/`));
+  const inside = (path, dir) => short(dir, PATH_MAX) && !slashed(path).split('/').includes('..') && (slashed(path) === slashed(dir) || slashed(path).startsWith(slashed(dir).endsWith('/') ? slashed(dir) : `${slashed(dir)}/`));
 
   /** A world's saved settings, { name: value }. The farm's first time: its old keys, copied once. */
   function loadPrefs(world, store = browserStore) {

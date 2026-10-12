@@ -31,12 +31,13 @@ Details: [docs/guide.md](docs/guide.md).
 
 ## Requirements
 
-- macOS, Linux or Windows. Windows has not been tested on a real machine yet.
+- macOS, Linux or Windows (11, checked with Windows PowerShell 5.1, Windows Terminal and Git for Windows).
 - Node.js 22 or newer.
 - Claude Code with plugin mods (tested on 2.1.293).
 - Optional: the GitHub CLI (`gh`), signed in, for deploys and pull requests.
 - Optional on Linux: a terminal emulator or `tmux` to start sessions, `notify-send`, `zenity` or
   `kdialog`. LibreOffice (Linux, Windows) previews Word files and slides.
+- On Windows, sessions open in Windows Terminal when it is installed, else in a PowerShell window.
 
 `agentville doctor` lists what it found.
 
@@ -81,7 +82,7 @@ The service belongs to your user and starts at login:
 |---|---|---|
 | macOS | launchd agent, restarted if it exits | no |
 | Linux | systemd user service, restarted if it exits | yes, with `sudo loginctl enable-linger $USER` |
-| Windows | `Run` registry key | no |
+| Windows | `Run` registry key, no administrator and no window at login; not started again if it exits | no |
 
 ### Update and uninstall
 
@@ -215,7 +216,12 @@ More: [docs/guide.md](docs/guide.md#troubleshooting).
 - Only Claude Code and Codex are supported. Other agents don't appear.
 - Only sessions that load the mod can be answered, messaged or switched from the dashboard.
 - Codex sessions are read-only.
-- Windows has not been run on a real machine yet.
+- Windows: nothing starts the collector again if it exits before your next login (a logon task needs
+  an administrator). Allowing network access can make Windows Defender Firewall ask once; allowing it
+  takes an administrator. `npm run test:ui` and the demo scripts are for macOS and Linux.
+- Windows: where `claude` is only a `claude.cmd` (no `claude.ps1` or `claude.exe` beside it), the text
+  for the prompt box of a ⑂ Fork from your message is left out, with a warning, when it holds
+  `& | < > ^ % !` or a quote: `cmd.exe` would read them as its own.
 - claude.ai cloud sessions and Remote Control sessions on other machines aren't visible.
 
 More: [docs/guide.md](docs/guide.md#known-limits).

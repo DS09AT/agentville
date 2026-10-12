@@ -25,7 +25,8 @@ export function spawnSpec(cmd, args, { platform = process.platform, env = proces
 }
 
 /** Runs a command without a shell. Never rejects: failures resolve with a non-zero code. */
-export function run(cmd, args, { timeoutMs = 15000, cwd, env } = {}) {
+// With verbatim, Windows gets the arguments exactly as given, for programs that parse their own command line.
+export function run(cmd, args, { timeoutMs = 15000, cwd, env, verbatim = false } = {}) {
   return new Promise(resolve => {
     const given = env ? { ...process.env, ...env } : process.env;
     const spec = spawnSpec(cmd, args, { env: given });
@@ -33,7 +34,7 @@ export function run(cmd, args, { timeoutMs = 15000, cwd, env } = {}) {
     execFile(
       spec.file,
       spec.args,
-      { timeout: timeoutMs, cwd, env: spec.env ? { ...given, ...spec.env } : given, maxBuffer: 32 * 1024 * 1024, ...spec.options },
+      { timeout: timeoutMs, cwd, env: spec.env ? { ...given, ...spec.env } : given, maxBuffer: 32 * 1024 * 1024, ...spec.options, ...(verbatim ? { windowsVerbatimArguments: true } : {}) },
       (err, stdout, stderr) => {
         if (err) {
           resolve({ code: typeof err.code === 'number' ? err.code : 1, stdout: String(stdout ?? ''), stderr: String(stderr || err.message) });

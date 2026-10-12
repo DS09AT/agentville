@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findCodexRoots, findPidByArg, label, parsePs, shellsOf, treeStats } from '../sources/ps.mjs';
+import { findCodexRoots, findPidByArg, isShellCommand, label, parsePs, shellsOf, treeStats, typedCommand, windowsArgv } from '../sources/ps.mjs';
 
 const PS = [
   '  100     1   1.5  20480 /usr/bin/claude --dangerously-skip-permissions',
@@ -69,4 +69,27 @@ test("the shell commands a session runs now: its Bash tool's, each in its own pr
   ], "not its MCP servers, the mod's own wait, or another session's commands");
   assert.deepEqual(shellsOf(procs, 999_999, 1), []);
   assert.equal(parsePs('  1 0 1 1-02:03:04 0.0 1 launchd').get(1).ageSec, 93_784, 'days too');
+});
+
+// Command lines of a Bash tool call as captured on Windows with Git for Windows.
+const WIN_SNAPSHOT = String.raw`"C:\Program Files\Git\bin\bash.exe" -c "source /c/Users/me/.claude/shell-snapshots/snapshot-bash-1700000000000-abc123.sh 2>/dev/null || true && export TEMP='C:\Users\me\AppData\Local\Temp' TMP='C:\Users\me\AppData\Local\Temp' && shopt -u extglob 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval `;
+const winLine = quoted => `${WIN_SNAPSHOT}${quoted} < /dev/null && pwd -P >| /c/Users/me/AppData/Local/Temp/claude-0a1b-cwd"`;
+
+test('Windows: a shell command is found by its quoted program, and shows as typed, however many quotes it holds', () => {
+  const sleep = winLine("'sleep 150'");
+  assert.equal(isShellCommand({ pid: 110, ppid: 100, pgid: 110, command: sleep }, 100), true);
+  assert.equal(typedCommand(sleep), 'sleep 150');
+  const quoted = winLine(String.raw`'echo \"hi there \\\"inner\\\" '\"'\"'single'\"'\"'\"; sleep 90'`);
+  assert.equal(typedCommand(quoted), `echo "hi there \\"inner\\" 'single'"; sleep 90`);
+  assert.equal(isShellCommand({ pid: 120, ppid: 100, pgid: 120, command: quoted }, 100), true);
+  // the inner shell's parent is the outer shell, not the session
+  assert.equal(isShellCommand({ pid: 111, ppid: 110, pgid: 111, command: sleep.replace('"C:\\Program Files\\Git\\bin\\bash.exe"', '"C:\\Program Files\\Git\\bin\\..\\usr\\bin\\bash.exe"') }, 100), false);
+});
+
+test('Windows: a process is named by its program, whatever its path holds', () => {
+  assert.equal(label('"C:\\Program Files\\Git\\bin\\bash.exe" -c "source x"'), 'bash.exe "source');
+  assert.equal(label('"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -File run.ps1'), 'pwsh.exe run.ps1');
+  assert.equal(label('C:\\Program Files\\nodejs\\node.exe server.js'), 'node.exe server.js');
+  assert.equal(label('C:\\Windows\\system32\\conhost.exe 0x4'), 'conhost.exe 0x4');
+  assert.deepEqual(windowsArgv('"C:\\a b\\x.exe" -c "say \\"hi\\" \\\\\\"x\\\\\\"" last'), ['C:\\a b\\x.exe', '-c', 'say "hi" \\"x\\"', 'last']);
 });

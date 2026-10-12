@@ -1,4 +1,5 @@
 import { lastDeployOf } from './deploys.mjs';
+import { samePath } from '../lib/within.mjs';
 
 /**
  * The repos the dashboard lists (the repo rail and the farm's fields), busiest first. A repo is
@@ -19,7 +20,7 @@ export function reposFor(agents, { deployRepos = {}, repoInfo = new Map(), deplo
   for (const a of agents) {
     if (a.state === 'stale') continue;
     for (const t of a.touching ?? []) if (t.repo) addAgent(t.repo, a.id);
-    const own = a.cwd && a.cwd !== home && a.cwd !== '/' ? lookup(a.cwd) : null;
+    const own = a.cwd && !samePath(a.cwd, home) && a.cwd !== '/' ? lookup(a.cwd) : null;
     if (own) addAgent(own, a.id);
   }
   // A repo watched for deploys with nobody in it shows only while its deploy runs (a windmill).

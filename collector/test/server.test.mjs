@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrackerServer } from '../server.mjs';
 import { renderTranscriptPage } from '../transcript-page.mjs';
 import { makeWorlds } from '../worlds.mjs';
+import { link } from './portable.mjs';
 
 const RAW_DIR = mkdtempSync(join(tmpdir(), 'tracker-raw-'));
 writeFileSync(join(RAW_DIR, 'clip.mp4'), '0123456789');
@@ -439,7 +440,7 @@ test("a world folder linked to your home or above is never served, however the l
   try {
     const spell = p => [p, p.toUpperCase(), join('/System/Volumes/Data', p)].filter(s => existsSync(s));
     const targets = [...spell(home), ...spell(join(userDir, '..')), '/System/Volumes/Data', '/'].filter(t => existsSync(t));
-    targets.forEach((t, i) => symlinkSync(t, join(userDir, `l${i}`)));
+    targets.forEach((t, i) => link(t, join(userDir, `l${i}`)));
     for (const i of targets.keys()) {
       for (const f of ['world.js', 'world.json']) assert.equal((await request(port, { path: `/world/u/l${i}/${f}` })).status, 404, `${targets[i]} ${f}`);
       assert.equal((await request(port, { path: `/world/u/l${i}/` })).status, 404, targets[i]);

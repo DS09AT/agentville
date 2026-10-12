@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { run } from '../lib/exec.mjs';
 import { GIT_ENV, nativePath } from './git.mjs';
+import { samePath } from '../lib/within.mjs';
 
 // The dashboard's file explorer: an agent's working folder, read-only. In a git folder it lists
 // what git tracks plus new files git doesn't ignore; elsewhere it walks the folder, skipping
@@ -12,6 +13,12 @@ const MAX_BYTES = 2 * 1024 * 1024;
 const WALK_DEPTH = 8;
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 export const SECRET_FILE = /(^|\/)(\.env(\.(?!example$|sample$|template$)[^/]*)?|[^/]*\.(pem|key|p12|pfx|keystore|jks)|id_(rsa|dsa|ecdsa|ed25519)|\.npmrc|\.pypirc|\.netrc)$/i;
+
+// Windows spells one file many ways (a short 8.3 name, another case): the native call gives the one the rules below are written for.
+export const realOf = process.platform === 'win32' ? realpathSync.native : realpathSync;
+// SECURITY: a colon after the drive names an alternate data stream, which would slip a secret file past its name.
+const namesStream = path => process.platform === 'win32' && path.replace(/^[A-Za-z]:/, '').includes(':');
+const isGitFolder = name => (process.platform === 'win32' ? name.toLowerCase() : name) === '.git';
 
 const STATUS_CODE = xy => (xy === '??' ? 'U' : xy.includes('D') ? 'D' : xy.includes('A') ? 'A' : xy.includes('R') ? 'R' : 'M');
 
@@ -91,7 +98,7 @@ async function walk(cwd, max, runner) {
 
 /** The files under `cwd`, relative to it, with git status where there is one. */
 export async function listFolder(cwd, { home = homedir(), runner = run, max = MAX_FILES } = {}) {
-  if (!cwd || dirname(cwd) === cwd || cwd === home) {
+  if (!cwd || dirname(cwd) === cwd || samePath(cwd, home)) {
     return { error: 'This agent works in your home folder (or the disk root), so the explorer stays off here.' };
   }
   const repo = await listRepo(cwd, runner);
@@ -110,14 +117,14 @@ export async function listFolder(cwd, { home = homedir(), runner = run, max = MA
  */
 export async function checkFolderFile(cwd, path, { runner = run } = {}) {
   const outside = { status: 403, error: "That file is outside the agent's folder." };
-  if (typeof path !== 'string' || !isAbsolute(path)) return outside;
+  if (typeof path !== 'string' || !isAbsolute(path) || namesStream(path)) return outside;
   try {
-    const root = realpathSync(cwd);
-    const real = realpathSync(path);
+    const root = realOf(cwd);
+    const real = realOf(path);
     const rel = relative(root, real);
     if (!rel || rel.startsWith('..') || isAbsolute(rel)) return outside;
     const parts = rel.split(sep);
-    if (parts.includes('.git')) return { status: 403, error: "Git's own files aren't shown here." };
+    if (parts.some(isGitFolder)) return { status: 403, error: "Git's own files aren't shown here." };
     if (SECRET_FILE.test(parts.join('/'))) return { status: 403, error: "Files that may hold secrets (.env, keys) aren't shown here." };
     // Ask git from the file's own folder, so a repo nested inside a plain folder applies its own ignores.
     const here = dirname(real);

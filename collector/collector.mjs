@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { cpus, homedir, hostname, networkInterfaces, totalmem } from 'node:os';
 import { createServer as createNetServer } from 'node:net';
@@ -9,6 +9,7 @@ import { syncMod } from './mod-link.mjs';
 import { checkPassword, makeAdmits, makePasses } from './access.mjs';
 import { ownCertificate } from './tls.mjs';
 import { run } from './lib/exec.mjs';
+import { samePath, within } from './lib/within.mjs';
 import { TailReader } from './lib/tail-reader.mjs';
 import { SessionModel } from './transcript/session-model.mjs';
 import { Conversation } from './transcript/conversation.mjs';
@@ -21,7 +22,7 @@ import { childrenIndex, findCodexRoots, findPidByArg, isShellCommand, shellsOf, 
 import { GIT_ENV, RepoResolver, githubSlug, repoStatus } from './sources/git.mjs';
 import { deployStatus, pullRequests } from './sources/gh.mjs';
 import { confirmDelivery, modAtLeast, readBeacons, readPending, readReplies, validateAnswers, writeAnswerFile, writeMessageFile, writeRequestFile } from './sources/pending.mjs';
-import { checkFolderFile, listFolder, parsePorcelain, readFolderFile } from './sources/files.mjs';
+import { checkFolderFile, listFolder, parsePorcelain, readFolderFile, realOf } from './sources/files.mjs';
 import { listDirs, makeDir, startPlace } from './sources/folders.mjs';
 import { contentTypeOf, parseCsv, readXlsx, viewOf } from './sources/previews.mjs';
 import { repoFiles } from './derive/repo-files.mjs';
@@ -47,6 +48,7 @@ import { createTrackerServer } from './server.mjs';
 import { makeWorlds, watchWorlds, worldsDirOf } from './worlds.mjs';
 import { renderTranscriptPage } from './transcript-page.mjs';
 import { checkCast, chooseSession, createLinesWatch, dueLines, factsOf, lineWorld, namesOf, parseLines } from './sources/lines.mjs';
+import { renameOver } from './lib/replace.mjs';
 
 const DOC_FILE = /\.(md|markdown|mdx)$/i;
 
@@ -61,7 +63,7 @@ export function makeLogger(dir) {
   const file = join(dir, 'collector.log');
   return message => {
     try {
-      if (existsSync(file) && statSync(file).size > 5 * 1024 * 1024) renameSync(file, `${file}.1`);
+      if (existsSync(file) && statSync(file).size > 5 * 1024 * 1024) renameOver(file, `${file}.1`);
       appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
     } catch {
       // logging must never take the collector down
@@ -320,7 +322,7 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
     };
   }
 
-  const ownFolder = a => Boolean(a.cwd) && a.cwd !== home && a.cwd !== '/';
+  const ownFolder = a => Boolean(a.cwd) && !samePath(a.cwd, home) && dirname(a.cwd) !== a.cwd;
 
   function queueResolve(agents) {
     if (isResolving) return;
@@ -345,7 +347,7 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
     const file = join(stateDir, 'state.json');
     try {
       writeFileSync(`${file}.tmp`, JSON.stringify(snap));
-      renameSync(`${file}.tmp`, file);
+      renameOver(`${file}.tmp`, file);
     } catch (err) {
       markFail('state', err);
     }
@@ -688,15 +690,15 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
 
   // The explorer: the agent's working folder, with the files the agent itself touched marked.
   const listings = new Map(); // agent id → { at, value }, so several open pages share one git call
-  const browsable = agent => Boolean(agent?.cwd) && agent.kind !== 'codex' && agent.cwd !== home && agent.cwd !== '/';
+  const browsable = agent => Boolean(agent?.cwd) && agent.kind !== 'codex' && !samePath(agent.cwd, home) && dirname(agent.cwd) !== agent.cwd;
 
   function touchedIn(agentId, cwd) {
     const rec = sessions.get(agentId);
     const out = {};
     for (const m of rec ? [rec.model, ...rec.childModels.values()] : []) {
       for (const f of m?.touchedFiles() ?? []) {
-        if (!f.path.startsWith(`${cwd}/`)) continue;
-        const rel = f.path.slice(cwd.length + 1);
+        const rel = within(cwd, f.path);
+        if (!rel) continue;
         const prev = out[rel];
         out[rel] = prev ? { wrote: prev.wrote || f.wrote, at: Math.max(prev.at, f.at) } : { wrote: f.wrote, at: f.at };
       }
@@ -735,8 +737,8 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
     if (!agent || typeof path !== 'string') return null;
     if (agent.kind !== 'codex' && memoryOf(agent).some(m => m.path === path)) return dirname(path);
     const scratchRoot = agent.kind === 'codex' ? null : scratchpadOf(agentId, scratchBase, agent.cwd);
-    if (scratchRoot && path.startsWith(`${scratchRoot}/`)) return scratchRoot;
-    if (browsable(agent) && path.startsWith(`${agent.cwd}/`)) return agent.cwd;
+    if (scratchRoot && within(scratchRoot, path)) return scratchRoot;
+    if (browsable(agent) && within(agent.cwd, path)) return agent.cwd;
     return null;
   }
   const OUTSIDE = { status: 403, error: "That file is outside the agent's folder." };
@@ -757,7 +759,7 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
     for (const [k, t] of tickets) if (t.until < now) tickets.delete(k);
     const id = randomBytes(16).toString('hex');
     tickets.set(id, { root, file: folder ? null : ok.real, until: now + ticketMs });
-    const rel = folder ? relative(realpathSync(root), ok.real) : basename(ok.real);
+    const rel = folder ? relative(realOf(root), ok.real) : basename(ok.real);
     return { url: `/raw/${id}/${rel.split(sep).map(encodeURIComponent).join('/')}`, type: contentTypeOf(ok.real), size: ok.size };
   }
   /** What a link opens: { real, type, size } of the file, or { status, error }. `rel` is the path after the link's id, decoded. */
@@ -966,7 +968,7 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
     const files = [{ path: join(claudeDir, 'settings.json'), label: 'You, everywhere' }, { path: join(claudeDir, 'settings.local.json'), label: 'Your home folder, just you' }];
     const folders = new Set([...(snapshot?.repos ?? []).map(r => r.path), ...(snapshot?.agents ?? []).map(a => resolver.lookup(a.cwd)?.path ?? a.cwd)].filter(Boolean));
     for (const dir of [...folders].sort()) {
-      if (dir === home) continue;
+      if (samePath(dir, home)) continue;
       const name = basename(dir);
       files.push({ path: join(dir, '.claude', 'settings.json'), label: `${name}, shared` }, { path: join(dir, '.claude', 'settings.local.json'), label: `${name}, just you` });
     }
