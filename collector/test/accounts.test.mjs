@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { accountEnv, createSessionAccounts, findAccounts, keyOfDir } from '../sources/accounts.mjs';
 import { mergeConfig } from '../config.mjs';
+import { link } from './portable.mjs';
 
 const login = (file, email) => writeFileSync(file, JSON.stringify({ oauthAccount: { emailAddress: email, organizationName: `${email}'s Organization` } }));
 function home() {
@@ -56,7 +57,7 @@ test('a shared projects folder: both accounts have the same real path', () => {
   const { h, main } = home();
   mkdirSync(join(h, '.claude-zeta'));
   login(join(h, '.claude-zeta', '.claude.json'), 'z@x');
-  symlinkSync(join(main, 'projects'), join(h, '.claude-zeta', 'projects'));
+  link(join(main, 'projects'), join(h, '.claude-zeta', 'projects'));
   const [a, b] = findAccounts({ claudeDir: main, home: h });
   assert.ok(a.projectsReal);
   assert.equal(a.projectsReal, b.projectsReal);

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SessionModel } from '../transcript/session-model.mjs';
 import { at, modelOf, prompt, reply, title, toolResult, toolUse, turnEnd } from './fixtures.mjs';
+import { native } from './portable.mjs';
 
 test('a finished tool call is marked ok with its duration and is no longer pending', () => {
   const m = modelOf(prompt(0, 'go'), toolUse(1, 't1', 'Bash', { command: 'ls' }), toolResult(3, 't1'));
@@ -89,7 +90,7 @@ test('markdown files written, edited or read are remembered as documents, newest
     toolUse(5, 'e', 'Edit', { file_path: 'notes/plan.markdown' }, '/w'),
   );
   assert.deepEqual(m.documents(), [
-    { path: '/w/notes/plan.markdown', wrote: true, at: at(5) },
+    { path: native('/w/notes/plan.markdown'), wrote: true, at: at(5) },
     { path: '/w/docs/spec.md', wrote: true, at: at(4) },
     { path: '/w/README.md', wrote: false, at: at(1) },
   ]);
@@ -152,7 +153,7 @@ test('files found earlier in the transcript are merged in as older, never overri
   assert.deepEqual(m.touchedFiles(), [
     { path: '/w/b.ts', wrote: true, at: at(12) },
     { path: '/w/spec.md', wrote: true, at: at(11) },
-    { path: '/w/rel.ts', wrote: true, at: at(3) },
+    { path: native('/w/rel.ts'), wrote: true, at: at(3) },
     { path: '/w/old.md', wrote: false, at: at(2) },
   ]);
   assert.deepEqual(m.documents().map(d => d.path), ['/w/spec.md', '/w/old.md']);

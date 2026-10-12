@@ -99,7 +99,7 @@ export function worldsDirOf(cfg, home, note = () => {}) {
   const t = w.trim();
   let dir;
   if (t === '~') dir = home;
-  else if (t.startsWith('~/')) dir = join(home, t.slice(2));
+  else if (/^~[\\/]/.test(t)) dir = join(home, t.slice(2));
   else if (isAbsolute(t)) dir = t;
   else {
     dir = join(home, t);

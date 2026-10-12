@@ -1,12 +1,15 @@
 // The collector with two Claude accounts: a config folder each, the second's history shared or not.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startCollector } from '../collector.mjs';
+import { shellQuote } from '../sources/sessions.mjs';
+import { link, scriptCli } from './portable.mjs';
 
 const ID = { nco: '11111111-1111-4111-8111-111111111111', zeta: '22222222-2222-4222-8222-222222222222', old: '33333333-3333-4333-8333-333333333333', bg: '44444444-4444-4444-8444-444444444444' };
+const escapeRe = s => s.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 const iso = ms => new Date(ms).toISOString();
 const say = (cwd, text, ms, extra = {}) => JSON.stringify({ type: 'user', timestamp: iso(ms), cwd, message: { role: 'user', content: text }, ...extra });
 const answer = (cwd, text, ms, extra = {}) => JSON.stringify({ type: 'assistant', timestamp: iso(ms), cwd, message: { model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'text', text }] }, ...extra });
@@ -24,7 +27,7 @@ function twoAccounts({ shared = true } = {}) {
   writeFileSync(join(root, 'config.json'), JSON.stringify({ port: 0, pollMs: 200, accounts: { [claudeDir]: 'nco' } }));
   writeFileSync(`${claudeDir}.json`, JSON.stringify({ oauthAccount: { emailAddress: 'me@nco.example' } }));
   writeFileSync(join(zeta, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'me@zeta.example' } }));
-  if (shared) symlinkSync(join(claudeDir, 'projects'), join(zeta, 'projects'));
+  if (shared) link(join(claudeDir, 'projects'), join(zeta, 'projects'));
   else mkdirSync(join(zeta, 'projects', '-work'), { recursive: true });
   const now = Date.now();
   writeFileSync(join(claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: ID.nco, cwd: work, name: 'on nco', kind: 'interactive', status: 'idle' }));
@@ -42,19 +45,21 @@ function twoAccounts({ shared = true } = {}) {
  * A stand-in claude that logs `<CLAUDE_CONFIG_DIR or none>|<args>` for every call: zeta's
  * `agents --json` lists a background session two days old (stale); `auth status` says signed in.
  */
-function fakeClaude(f) {
-  const bin = join(f.top, 'claude-cli'), log = join(f.top, 'claude-cli.log');
-  const bg = JSON.stringify([{ id: 'bg1', sessionId: ID.bg, cwd: f.work, kind: 'background', startedAt: 1, state: 'blocked' }]);
+function fakeClaude(f, { everyAccountLists = false } = {}) {
+  const log = join(f.top, 'claude-cli.log');
+  const bg = [{ id: 'bg1', sessionId: ID.bg, cwd: f.work, kind: 'background', startedAt: 1, state: 'blocked' }];
   // A file named cli-fails makes `agents --json` fail; zeta-out makes zeta's `auth status` say signed out.
-  writeFileSync(bin, `#!/bin/sh
-echo "\${CLAUDE_CONFIG_DIR:-none}|$*" >> '${log}'
-case "$1 $2" in
-  "agents --json") if [ -e '${f.top}/cli-fails' ]; then exit 1; fi; if [ "$CLAUDE_CONFIG_DIR" = '${f.zeta}' ]; then echo '${bg}'; else echo '[]'; fi ;;
-  "auth status") if [ -e '${f.top}/zeta-out' ] && [ "$CLAUDE_CONFIG_DIR" = '${f.zeta}' ]; then echo '{"loggedIn":false}'; else echo '{"loggedIn":true}'; fi ;;
-esac
-exit 0
+  const bin = scriptCli(f.top, 'claude-cli', `
+const fs = require('fs'), a = process.argv.slice(2), dir = process.env.CLAUDE_CONFIG_DIR;
+fs.appendFileSync(${JSON.stringify(log)}, (dir || 'none') + '|' + a.join(' ') + '\\n');
+const zeta = dir === ${JSON.stringify(f.zeta)};
+if (a[0] === 'agents' && a[1] === '--json') {
+  if (fs.existsSync(${JSON.stringify(join(f.top, 'cli-fails'))})) process.exit(1);
+  console.log(JSON.stringify(zeta || ${everyAccountLists} ? ${JSON.stringify(bg)} : []));
+} else if (a[0] === 'auth' && a[1] === 'status') {
+  console.log(JSON.stringify({ loggedIn: !(fs.existsSync(${JSON.stringify(join(f.top, 'zeta-out'))}) && zeta) }));
+}
 `);
-  chmodSync(bin, 0o755);
   writeFileSync(join(f.claudeDir, 'projects', '-work', `${ID.bg}.jsonl`), `${say(f.work, 'background work', Date.now() - 2 * 86_400_000)}\n`);
   return { bin, calls: () => { try { return readFileSync(log, 'utf8').trim().split('\n'); } catch { return []; } } };
 }
@@ -160,11 +165,11 @@ test('start: a new session on zeta, a resume on its own account by default, an u
   const { handle, launched } = await start(f);
   try {
     assert.equal((await handle.actions.start({ cwd: f.work, account: 'zeta' })).ok, true);
-    assert.equal(launched.at(-1), `cd '${f.work}' && exec env CLAUDE_CONFIG_DIR='${f.zeta}' claude`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(f.work)} && exec env CLAUDE_CONFIG_DIR=${shellQuote(f.zeta)} claude`);
     assert.equal((await handle.actions.start({ resume: ID.old })).ok, true);
-    assert.equal(launched.at(-1), `cd '${f.work}' && exec env -u CLAUDE_CONFIG_DIR claude --resume ${ID.old}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(f.work)} && exec env -u CLAUDE_CONFIG_DIR claude --resume ${ID.old}`);
     assert.equal((await handle.actions.start({ resume: ID.old, account: 'zeta' })).ok, true, 'shared history: it moves');
-    assert.equal(launched.at(-1), `cd '${f.work}' && exec env CLAUDE_CONFIG_DIR='${f.zeta}' claude --resume ${ID.old}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(f.work)} && exec env CLAUDE_CONFIG_DIR=${shellQuote(f.zeta)} claude --resume ${ID.old}`);
     assert.deepEqual(await handle.actions.start({ cwd: f.work, account: 'nope' }), { ok: false, error: 'No account "nope".' });
     assert.equal(launched.length, 3);
     assert.equal((await handle.pastSessions()).sessions.find(s => s.id === ID.old).account, 'zeta', 'remembered as launched');
@@ -199,7 +204,7 @@ test('fork: on the account picked, else the original\'s; an unknown account refu
   try {
     assert.deepEqual(await handle.actions.fork({ agentId: ID.nco, at: 'r1', account: 'nope' }), { ok: false, error: 'No account "nope".' });
     assert.equal((await handle.actions.fork({ agentId: ID.nco, at: 'r1', account: 'zeta' })).ok, true);
-    assert.match(launched.at(-1), new RegExp(`^cd '${f.work}' && exec env CLAUDE_CONFIG_DIR='${f.zeta}' claude --resume '[^']+' --fork-session --session-id `));
+    assert.match(launched.at(-1), new RegExp(`^${escapeRe(`cd ${shellQuote(f.work)} && exec env CLAUDE_CONFIG_DIR=${shellQuote(f.zeta)} claude --resume `)}(?:'[^']*'|\\\\.)+ --fork-session --session-id `));
     assert.equal((await handle.actions.fork({ agentId: ID.nco, at: 'r1' })).ok, true);
     assert.match(launched.at(-1), /exec env -u CLAUDE_CONFIG_DIR claude --resume/);
   } finally { await handle.stop(); }
@@ -215,7 +220,7 @@ test('restart with another account ends the session and resumes it there, same i
     assert.equal(alive, true, 'refused before ending it');
     const r = await handle.actions.restart({ agentId: ID.nco, mode: 'default', account: 'zeta' });
     assert.equal(r.ok, true, r.error);
-    assert.equal(launched.at(-1), `cd '${f.work}' && exec env CLAUDE_CONFIG_DIR='${f.zeta}' claude --resume ${ID.nco}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(f.work)} && exec env CLAUDE_CONFIG_DIR=${shellQuote(f.zeta)} claude --resume ${ID.nco}`);
   } finally { await handle.stop(); }
 });
 
@@ -248,13 +253,13 @@ test("restore, remove and attach run on the session's account; the collector's o
     assert.equal(bg?.account, 'zeta');
     assert.equal(bg.state, 'stale');
     assert.equal((await handle.actions.open('bg1')).ok, true);
-    assert.equal(launched.at(-1), `env CLAUDE_CONFIG_DIR='${f.zeta}' claude attach bg1`);
+    assert.equal(launched.at(-1), `env CLAUDE_CONFIG_DIR=${shellQuote(f.zeta)} claude attach bg1`);
     assert.equal((await handle.actions.rm([ID.bg])).results[0].ok, true);
     assert.ok(claude.calls().includes(`${f.zeta}|rm bg1`));
     const r = await handle.actions.restore({ agentId: ID.nco, at: 'u2', what: 'code' });
     assert.equal(r.ok, true, r.error);
     assert.ok(claude.calls().includes(`none|--resume ${ID.nco} --rewind-files u2`), claude.calls().join('\n'));
-    assert.equal(launched.at(-1), `cd '${f.work}' && exec env -u CLAUDE_CONFIG_DIR claude --resume ${ID.nco}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(f.work)} && exec env -u CLAUDE_CONFIG_DIR claude --resume ${ID.nco}`);
     assert.ok(!claude.calls().some(c => c.startsWith('/elsewhere|')));
   } finally {
     if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was;
@@ -283,10 +288,9 @@ test('an account that leaves the list (its folder removed) never stops the colle
 test('`claude agents --json` failing keeps the sessions it listed last time (one account too)', async () => {
   const f = twoAccounts();
   rmSync(f.zeta, { recursive: true, force: true });
-  const claude = fakeClaude(f);
-  writeFileSync(join(f.top, 'cli-bg-on-main'), '');
   // with one account, main lists the background session
-  writeFileSync(claude.bin, readFileSync(claude.bin, 'utf8').replace(`if [ "$CLAUDE_CONFIG_DIR" = '${f.zeta}' ]`, 'if true'));
+  const claude = fakeClaude(f, { everyAccountLists: true });
+  writeFileSync(join(f.top, 'cli-bg-on-main'), '');
   writeFileSync(join(f.root, 'config.json'), JSON.stringify({ port: 0, pollMs: 200, agentsCliPollMs: 300 }));
   const { handle, snap } = await start(f, { claudeBin: claude.bin });
   try {
@@ -308,7 +312,7 @@ test("an unshared account's past session that was never seen running is that acc
     assert.equal(s.account, 'zeta');
     assert.deepEqual(s.canRunOn, ['zeta']);
     assert.equal((await handle.actions.start({ resume: only })).ok, true);
-    assert.equal(launched.at(-1), `cd '${f.work}' && exec env CLAUDE_CONFIG_DIR='${f.zeta}' claude --resume ${only}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(f.work)} && exec env CLAUDE_CONFIG_DIR=${shellQuote(f.zeta)} claude --resume ${only}`);
   } finally { await handle.stop(); }
 });
 
@@ -331,7 +335,7 @@ test('with one account, nothing is remembered about accounts', async () => {
   const { handle, launched } = await start(f);
   try {
     assert.equal((await handle.actions.start({ resume: ID.old })).ok, true);
-    assert.equal(launched.at(-1), `cd '${f.work}' && exec claude --resume ${ID.old}`);
+    assert.equal(launched.at(-1), `cd ${shellQuote(f.work)} && exec claude --resume ${ID.old}`);
     await settle(400);
     assert.equal(existsSync(join(f.root, 'state', 'session-accounts.json')), false);
   } finally { await handle.stop(); }

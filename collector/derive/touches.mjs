@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, join, normalize, resolve } from 'node:path';
 import { mayLookAt } from '../platform/tools.mjs';
 
 const GIT_MUTATING = /\bgit\b(?:\s+-C\s+\S+|\s+-c\s+\S+)*\s+(commit|checkout|switch|stash|reset|rebase|merge|push|pull)\b/;
@@ -7,7 +7,8 @@ const WRITE_CMD = /(^|[\s;&|(])(tee|rm|mv|cp|mkdir|touch)\s|\bsed\s+-i\b/;
 
 export function expandHome(path, home = homedir()) {
   if (path === '~') return home;
-  return /^~[\\/]/.test(path) ? home + path.slice(1) : path;
+  if (!/^~[\\/]/.test(path)) return path;
+  return process.platform === 'win32' ? join(home, path.slice(2)) : home + path.slice(1); // one kind of slash on Windows, so what follows can be compared
 }
 
 /** Folders/files a shell command works on, as absolute paths. */
@@ -17,7 +18,7 @@ export function bashTargets(command, cwd, home = homedir()) {
     const clean = raw.replace(/^['"]|['"]$/g, '');
     if (!clean) return;
     let expanded = expandHome(clean, home);
-    if (process.platform === 'win32') expanded = expanded.replace(/^\/([a-zA-Z])\//, (_, drive) => `${drive.toUpperCase()}:\\`); // Git Bash's /c/Users/… is C:\Users\…
+    if (process.platform === 'win32' && /^\/[a-zA-Z]\//.test(expanded)) expanded = normalize(expanded.replace(/^\/([a-zA-Z])\//, (_, drive) => `${drive.toUpperCase()}:\\`)); // Git Bash's /c/Users/… is C:\Users\…
     const path = isAbsolute(expanded) ? expanded : cwd ? resolve(cwd, expanded) : null;
     if (path && mayLookAt(path, cwd)) found.add(path); // never another machine's (Windows): the collector looks at each of these
   };
