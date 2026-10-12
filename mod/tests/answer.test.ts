@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { NAME_SYSTEM, answerAsides, answerFromDashboard, chooseAlways, deliverMessages, endStoppedCommand, linesPrompt, linesSystem, namePrompt, noteSpinner, offerContext, permitFromDashboard, runHelper, runSettings, startTurn, turnEnded, turnForBeacon, turnStarted, usageNow } from '../hooks/register'
+import { NAME_SYSTEM, answerAsides, answerFromDashboard, chooseAlways, deliverMessages, endStoppedCommand, linesPrompt, linesSystem, namePrompt, noteSpinner, offerContext, onWindows, openDashboard, permitFromDashboard, runHelper, runSettings, startTurn, turnEnded, turnForBeacon, turnStarted, usageNow } from '../hooks/register'
 
 // The hook bodies only call $.fs.write and $.process.run, so a small stand-in records them.
 type Run = { exitCode: number; stdout: string; stderr: string }
@@ -558,4 +558,67 @@ test('lines unticked, or no animals to write for: Haiku is not called', async ()
 
 test('the lines prompt keeps the model to short rows about the animals, from the names given', () => {
   for (const world of ['farm', 'factory', undefined]) for (const s of ['kind|when|text', '40 characters', 'idle, deployFailed, deployOk, harvest, merged, arrive', 'never invent names', 'files, code or secrets']) expect(linesSystem(world)).toContain(s)
+})
+
+// On Windows the same jobs run in PowerShell, started by its full path, with paths passed through the environment.
+function windows$(initial: Record<string, string>, onRun: (argv: string[], init: any) => Run | Promise<Run>) {
+  const calls: { argv: string[]; init: any }[] = []
+  const $ = {
+    plugin: { root: 'C:\\Users\\me\\.agentville\\mod' },
+    env: { get: async (name: string) => (name === 'SystemRoot' ? 'D:\\Win' : undefined) },
+    fs: { list: async () => Object.keys(initial).map(name => ({ name, kind: 'file' })), write: async () => {} },
+    prompt: { submit: async () => ({}) },
+    process: { run: async (argv: string[], init: any) => { calls.push({ argv, init }); return onRun(argv, init) } },
+  }
+  return { $, calls }
+}
+const STATE_W = 'C:\\Users\\me\\.agentville/state'
+const POWERSHELL_W = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+
+test('a path that starts with a drive or two backslashes is a Windows mod; any other is not', () => {
+  for (const root of ['C:\\Users\\me\\mod', 'c:/Users/me/mod', '\\\\server\\share\\mod']) expect(onWindows({ plugin: { root } })).toBe(true)
+  for (const root of ['/Users/me/mod', '/home/me/.agentville/mod', '']) expect(onWindows({ plugin: { root } })).toBe(false)
+  expect(onWindows({})).toBe(false)
+})
+
+test('on Windows the dashboard messages are claimed by PowerShell, which prints their texts', async () => {
+  const f = windows$({ '1000-a.json': '', '2000-b.json': '' }, () => ok(JSON.stringify(['{"text":"first"}', '{"text":"second"}', 'not json'])))
+  const submitted: string[] = []
+  ;(f.$ as any).prompt.submit = async (input: { text: string }) => { submitted.push(input.text) }
+  await deliverMessages(f.$, STATE_W, 's1')
+  expect(submitted).toEqual(['first', 'second'])
+  expect(f.calls.length).toBe(1)
+  const { argv, init } = f.calls[0]
+  expect(argv[0]).toBe(POWERSHELL_W)
+  expect(argv).toContain('-NoProfile')
+  expect(init.env).toEqual({ AGENTVILLE_INBOX: `${STATE_W}/messages/s1` })
+  expect(argv.join(' ')).not.toContain('.agentville')
+})
+
+test('on Windows an inbox with nothing in it starts no process', async () => {
+  const f = windows$({ '3000-c.json.tmp': '' }, () => ok('[]'))
+  await deliverMessages(f.$, STATE_W, 's1')
+  expect(f.calls).toEqual([])
+})
+
+test('on Windows a dashboard answer is waited for by PowerShell, and the files are removed by it', async () => {
+  const f = windows$({}, () => ok(JSON.stringify({ answers: { 'Pick a colour?': 'Blue' } })))
+  const out: any = await answerFromDashboard(f.$, ask('toolu_W1'), never, { ...OFFER, stateDir: STATE_W })
+  expect(out.result).toBeTruthy()
+  const wait = f.calls[0]
+  expect(wait.argv[0]).toBe(POWERSHELL_W)
+  expect(wait.init.env).toMatchObject({ AGENTVILLE_ANSWER: `${STATE_W}/answers/toolu_W1.json`, AGENTVILLE_PENDING: `${STATE_W}/pending/toolu_W1.json` })
+  expect(Number(wait.init.env.AGENTVILLE_TICKS)).toBeGreaterThan(0)
+  const gone = f.calls.at(-1)!
+  expect(gone.argv[0]).toBe(POWERSHELL_W)
+  expect(gone.init.env.AGENTVILLE_PATHS).toContain('toolu_W1.json')
+})
+
+test('the dashboard is opened by a program named by its full path on Windows, by open elsewhere', async () => {
+  const win = windows$({}, () => ok())
+  await openDashboard(win.$)
+  expect(win.calls[0].argv).toEqual(['D:\\Win\\System32\\rundll32.exe', 'url.dll,FileProtocolHandler', 'http://localhost:7777'])
+  const calls: string[][] = []
+  await openDashboard({ plugin: { root: '/repo/mod' }, process: { run: async (argv: string[]) => { calls.push(argv); return ok() } } })
+  expect(calls).toEqual([['open', 'http://localhost:7777']])
 })

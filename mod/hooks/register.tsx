@@ -23,10 +23,59 @@ const PERSON_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
 const WAIT_SH = 'n=0; while [ "$n" -lt "$3" ]; do if [ -f "$1" ]; then cat "$1"; exit 0; fi; if [ ! -f "$2" ]; then exit 2; fi; if [ $((n % 4)) -eq 0 ]; then touch "$2"; fi; sleep 0.25; n=$((n+1)); done; exit 1'
 const DASHBOARD_REASON = 'Answered from the Agentville dashboard'
 
+// Windows has no mv, rm or /bin/sh, so these jobs run in PowerShell with their paths passed through the environment.
+// The mod has no platform API: a plugin root starting with a drive letter or two backslashes means Windows.
+export const onWindows = ($: any): boolean => {
+  try {
+    return /^(?:[A-Za-z]:[\\/]|\\\\)/.test(String($.plugin.root))
+  } catch {
+    return false
+  }
+}
+// Claims each *.json in the folder, oldest first, by renaming it, then prints their texts as a JSON array.
+const CLAIM_PS = "$o = @(); Get-ChildItem -LiteralPath $env:AGENTVILLE_INBOX -File -ErrorAction SilentlyContinue | Where-Object { $_.Name.EndsWith('.json') } | Sort-Object Name | ForEach-Object { $c = $_.FullName + '.claimed'; try { Move-Item -LiteralPath $_.FullName -Destination $c -ErrorAction Stop } catch { return }; try { $o += [IO.File]::ReadAllText($c) } catch { }; Remove-Item -LiteralPath $c -Force -ErrorAction SilentlyContinue }; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; ConvertTo-Json -Compress -InputObject @($o)"
+// Mirrors WAIT_SH: exits 2 when the offer is withdrawn, 1 on timeout, and touches the offer as a heartbeat.
+const WAIT_PS = "$n = 0; $max = [int]$env:AGENTVILLE_TICKS; while ($n -lt $max) { if (Test-Path -LiteralPath $env:AGENTVILLE_ANSWER) { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; [Console]::Out.Write([IO.File]::ReadAllText($env:AGENTVILLE_ANSWER)); exit 0 }; if (-not (Test-Path -LiteralPath $env:AGENTVILLE_PENDING)) { exit 2 }; if ($n % 4 -eq 0) { try { (Get-Item -LiteralPath $env:AGENTVILLE_PENDING).LastWriteTime = Get-Date } catch { } }; Start-Sleep -Milliseconds 250; $n++ }; exit 1"
+const REMOVE_PS = "Remove-Item -LiteralPath ($env:AGENTVILLE_PATHS -split [char]10) -Force -ErrorAction SilentlyContinue"
+
+// SECURITY: Windows programs are started by their full path; a bare name is looked for in the session's folder first.
+async function system32($: any): Promise<string> {
+  return `${(await $.env.get('SystemRoot')) || 'C:\\Windows'}\\System32`
+}
+
+async function powershell($: any, script: string, env: Record<string, string>, timeoutMs: number) {
+  return $.process.run([`${await system32($)}\\WindowsPowerShell\\v1.0\\powershell.exe`, '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { env, timeoutMs })
+}
+
+export async function openDashboard($: any) {
+  if (!onWindows($)) return $.process.run(['open', DASHBOARD_URL])
+  return $.process.run([`${await system32($)}\\rundll32.exe`, 'url.dll,FileProtocolHandler', DASHBOARD_URL])
+}
+
+async function claimOnWindows($: any, inbox: string): Promise<any[]> {
+  const r = await powershell($, CLAIM_PS, { AGENTVILLE_INBOX: inbox }, 20_000)
+  if (r.exitCode !== 0) return []
+  let texts: unknown
+  try {
+    texts = JSON.parse(r.stdout)
+  } catch {
+    return []
+  }
+  const out: any[] = []
+  for (const text of Array.isArray(texts) ? texts : []) {
+    try {
+      out.push(JSON.parse(String(text)))
+    } catch {
+      // unreadable: dropped
+    }
+  }
+  return out
+}
+
 type Offer = { stateDir: string; sessionId: string; isLive: boolean; windowSec: number; now: number }
 type Waited = { kind: 'answer'; text: string } | { kind: 'withdrawn' } | { kind: 'timeout' }
 
-const MOD_VERSION = '0.9.2'
+const MOD_VERSION = '0.9.3'
 
 let latest: TrackerView = EMPTY
 // The terminal's working line (Slithering… while thinking), for the dashboard: when the turn began,
@@ -87,6 +136,7 @@ export async function claimRequests($: any, inbox: string): Promise<any[]> {
   } catch {
     return []
   }
+  if (onWindows($)) return entries.some(e => e.name.endsWith('.json')) ? claimOnWindows($, inbox) : []
   const out: any[] = []
   for (const name of entries.map(e => e.name).filter(n => n.endsWith('.json')).sort()) {
     const claimed = `${inbox}/${name}.claimed`
@@ -367,14 +417,18 @@ async function ensurePolling($: any) {
 }
 
 async function waitForAnswer($: any, answerPath: string, pendingPath: string, seconds: number): Promise<Waited> {
-  const r = await $.process.run(['/bin/sh', '-c', WAIT_SH, 'sh', answerPath, pendingPath, String(Math.max(1, Math.round(seconds * 4)))], { timeoutMs: (seconds + 10) * 1000 })
+  const ticks = String(Math.max(1, Math.round(seconds * 4)))
+  const r = onWindows($)
+    ? await powershell($, WAIT_PS, { AGENTVILLE_ANSWER: answerPath, AGENTVILLE_PENDING: pendingPath, AGENTVILLE_TICKS: ticks }, (seconds + 10) * 1000)
+    : await $.process.run(['/bin/sh', '-c', WAIT_SH, 'sh', answerPath, pendingPath, ticks], { timeoutMs: (seconds + 10) * 1000 })
   if (r.exitCode === 0) return { kind: 'answer', text: r.stdout }
   return r.exitCode === 2 ? { kind: 'withdrawn' } : { kind: 'timeout' }
 }
 
 async function removeFiles($: any, paths: string[]) {
   try {
-    await $.process.run(['rm', '-f', ...paths])
+    if (onWindows($)) await powershell($, REMOVE_PS, { AGENTVILLE_PATHS: paths.join('\n') }, 15_000)
+    else await $.process.run(['rm', '-f', ...paths])
   } catch (err) {
     logFailure($, `could not withdraw the dashboard offer: ${String(err)}`)
   }
@@ -604,7 +658,7 @@ export const register: Register = on => {
           </Box>
         ))}
         {snapshot.counts.stale > 0 ? <Text dimColor>{snapshot.counts.stale} stale (see the dashboard)</Text> : null}
-        <Button key="open-browser" label="Open in browser" onPress={() => void $.process.run(['open', DASHBOARD_URL])} />
+        <Button key="open-browser" label="Open in browser" onPress={() => void openDashboard($)} />
       </Box>
     )
   })
