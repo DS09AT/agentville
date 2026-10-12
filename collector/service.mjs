@@ -6,7 +6,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { run } from './lib/exec.mjs';
 
 export const LABEL = 'local.agentville', UNIT = 'agentville.service', RUN_VALUE = 'Agentville';
@@ -61,13 +61,13 @@ WantedBy=default.target
  * `dataDir` is where its log and its pid file are; `env`: what it must be started with (AGENTVILLE_HOME, when the
  * data folder is not the usual one). Every call resolves to a line or two to print, or throws with one.
  */
-export async function serviceFor({ platform = process.platform, home = homedir(), node = process.execPath, script, dataDir, env = {}, runner = run } = {}) {
+export async function serviceFor({ platform = process.platform, home = homedir(), node = process.execPath, script, dataDir, env = {}, runner = run, conhost } = {}) {
   const logFile = join(dataDir, 'logs', 'service.log'), pidFile = join(dataDir, 'collector.pid');
   const made = { node, script, logFile, env };
   const ensureLogs = () => mkdirSync(join(dataDir, 'logs'), { recursive: true });
 
   if (platform === 'darwin') {
-    const domain = `gui/${process.getuid()}`, plist = join(home, 'Library', 'LaunchAgents', `${LABEL}.plist`);
+    const domain = `gui/${process.getuid?.() ?? 0}`, plist = join(home, 'Library', 'LaunchAgents', `${LABEL}.plist`);
     const loaded = async () => (await runner('launchctl', ['print', `${domain}/${LABEL}`], { timeoutMs: 10_000 }));
     const legacy = async () => { // the agent-tracker service, and its command's link when that leads nowhere now
       const old = join(home, 'Library', 'LaunchAgents', `${LEGACY_LABEL}.plist`);
@@ -111,7 +111,7 @@ export async function serviceFor({ platform = process.platform, home = homedir()
 
   // systemd's user manager is reached through the user's runtime folder. A shell that was not started by a login
   // (su, a container's exec) has no XDG_RUNTIME_DIR, though the manager runs: the folder is named for it then.
-  const runtime = platform === 'linux' && !process.env.XDG_RUNTIME_DIR && existsSync(`/run/user/${process.getuid()}/systemd`) ? { XDG_RUNTIME_DIR: `/run/user/${process.getuid()}` } : undefined;
+  const runtime = platform === 'linux' && !process.env.XDG_RUNTIME_DIR && existsSync(`/run/user/${process.getuid?.() ?? 0}/systemd`) ? { XDG_RUNTIME_DIR: `/run/user/${process.getuid?.() ?? 0}` } : undefined;
   const ctl = (...args) => runner('systemctl', ['--user', ...args], { timeoutMs: 30_000, ...(runtime ? { env: runtime } : {}) });
   const systemd = platform === 'linux' && (await ctl('show-environment')).code === 0;
   if (systemd) {
@@ -146,9 +146,12 @@ export async function serviceFor({ platform = process.platform, home = homedir()
   // A process of its own in the background. The collector writes its pid file itself (index.mjs), so it is found however it was started.
   const win = platform === 'win32';
   const pidNow = () => { try { const pid = Number(readFileSync(pidFile, 'utf8').trim()); return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : null; } catch { return null; } };
-  const startLine = `"${node}" "${script}" start`;
+  // A console program started at login would open a window, so conhost runs it headless where it exists.
+  const host = win ? (conhost !== undefined ? conhost : (() => { const p = win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'conhost.exe'); return existsSync(p) ? p : null; })()) : null;
+  const startLine = `${host ? `"${host}" --headless ` : ''}"${node}" "${script}" start`;
   const background = {
     kind: win ? 'background process, started at login' : 'background process', startsAtLogin: win,
+    loginLine: win ? startLine : null,
     installed: async () => (win ? (await runner('reg.exe', ['query', RUN_KEY, '/v', RUN_VALUE], { timeoutMs: 15_000 })).code === 0 : Boolean(pidNow())),
     async install() {
       if (win) {

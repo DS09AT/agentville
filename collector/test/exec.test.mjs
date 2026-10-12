@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { run } from '../lib/exec.mjs';
+import { WINDOWS, native } from './portable.mjs';
 
 test('returns stdout and code 0 on success', async () => {
   const r = await run(process.execPath, ['-e', 'process.stdout.write("hi")']);
@@ -14,9 +15,9 @@ test('returns the exit code on failure without throwing', async () => {
 });
 
 test('a missing binary resolves with a non-zero code', async () => {
-  const r = await run('/nonexistent/binary-xyz', []);
+  const r = await run(native('/nonexistent/binary-xyz'), []);
   assert.notEqual(r.code, 0);
-  assert.match(r.stderr, /ENOENT/);
+  assert.match(r.stderr, WINDOWS ? /was not found/ : /ENOENT/);
 });
 
 test('env is merged over process.env', async () => {
@@ -27,7 +28,7 @@ test('env is merged over process.env', async () => {
 test('an undefined variable is left out of the child environment', async () => {
   process.env.AGENTVILLE_TEST_UNSET = 'set';
   try {
-    const r = await run('/usr/bin/env', [], { env: { AGENTVILLE_TEST_UNSET: undefined } });
+    const r = await run(process.execPath, ['-e', 'for (const [k, v] of Object.entries(process.env)) console.log(k + "=" + v)'], { env: { AGENTVILLE_TEST_UNSET: undefined } });
     assert.equal(r.code, 0);
     assert.doesNotMatch(r.stdout, /AGENTVILLE_TEST_UNSET/);
   } finally {

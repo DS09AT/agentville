@@ -110,30 +110,35 @@ test('each system’s way to keep it running: launchd, systemd (with lingering a
   assert.equal(await win.installed(), false);
   await win.uninstall();
   assert.deepEqual(reg.at(-1), ['reg.exe', 'delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'Agentville', '/f']);
+  // The login entry runs headless through conhost where it exists.
+  const entry = async conhost => (await serviceFor({ platform: 'win32', home, node: 'C:\\Program Files\\nodejs\\node.exe', script: 'C:\\s\\agentville.mjs', dataDir, conhost, runner: async () => ok() })).loginLine;
+  assert.equal(await entry('C:\\Windows\\System32\\conhost.exe'), '"C:\\Windows\\System32\\conhost.exe" --headless "C:\\Program Files\\nodejs\\node.exe" "C:\\s\\agentville.mjs" start');
+  assert.equal(await entry(null), '"C:\\Program Files\\nodejs\\node.exe" "C:\\s\\agentville.mjs" start');
 });
 
 test('the mod: copied beside the state it reads, and named in settings.json without touching anything else there', () => {
   const dir = temp(), from = join(ROOT, 'mod'), modDir = join(dir, 'data', 'mod'), settingsFile = join(dir, 'claude', 'settings.json');
+  const LIST = process.platform === 'win32' ? ';' : ':'; // what separates the folders on this system
   const written = installMod({ from, to: modDir });
   assert.ok(written.includes('.claude-plugin/plugin.json') && written.includes('hooks/register.tsx') && written.includes('hooks/hooks.json'));
   assert.ok(!written.some(f => f.startsWith('tests/') || f.includes('.claude-plugin/types')), 'only what a session loads');
   assert.deepEqual(installMod({ from, to: modDir }), [], 'again: nothing differs, nothing is written');
   assert.equal(linkMod({ settingsFile, modDir, on: false }), 'same', 'off, and no settings file: none is made');
   assert.equal(existsSync(settingsFile), false);
-  assert.equal(linkMod({ settingsFile, modDir, on: true, platform: 'linux' }), 'changed');
+  assert.equal(linkMod({ settingsFile, modDir, on: true }), 'changed');
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, 'utf8')), { env: { CLAUDE_CODE_PLUGIN_DIRS: modDir } });
   // an earlier copy in a clone is replaced (a session must not load two), other plugin folders and settings stay
   const clone = join(dir, 'clone', 'mod');
   installMod({ from, to: clone });
-  writeFileSync(settingsFile, JSON.stringify({ model: 'opus', env: { OTHER: '1', CLAUDE_CODE_PLUGIN_DIRS: `/plugins/mine:${clone}` } }));
-  assert.equal(linkMod({ settingsFile, modDir, on: true, platform: 'linux' }), 'changed');
-  assert.deepEqual(JSON.parse(readFileSync(settingsFile, 'utf8')), { model: 'opus', env: { OTHER: '1', CLAUDE_CODE_PLUGIN_DIRS: `/plugins/mine:${modDir}` } });
-  assert.equal(linkMod({ settingsFile, modDir, on: true, platform: 'linux' }), 'same');
-  assert.equal(linkMod({ settingsFile, modDir, on: false, platform: 'linux' }), 'changed');
+  writeFileSync(settingsFile, JSON.stringify({ model: 'opus', env: { OTHER: '1', CLAUDE_CODE_PLUGIN_DIRS: `/plugins/mine${LIST}${clone}` } }));
+  assert.equal(linkMod({ settingsFile, modDir, on: true }), 'changed');
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, 'utf8')), { model: 'opus', env: { OTHER: '1', CLAUDE_CODE_PLUGIN_DIRS: `/plugins/mine${LIST}${modDir}` } });
+  assert.equal(linkMod({ settingsFile, modDir, on: true }), 'same');
+  assert.equal(linkMod({ settingsFile, modDir, on: false }), 'changed');
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, 'utf8')), { model: 'opus', env: { OTHER: '1', CLAUDE_CODE_PLUGIN_DIRS: '/plugins/mine' } });
   // switched off, another copy is not this one's to take out (a second collector beside the first)
   writeFileSync(settingsFile, JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: clone } }));
-  assert.equal(linkMod({ settingsFile, modDir, on: false, platform: 'linux' }), 'same');
+  assert.equal(linkMod({ settingsFile, modDir, on: false }), 'same');
   // Windows separates the folders with ;
   writeFileSync(settingsFile, JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: 'C:\\plugins\\mine' } }));
   linkMod({ settingsFile, modDir, on: true, platform: 'win32' });

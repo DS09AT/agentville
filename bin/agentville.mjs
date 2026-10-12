@@ -46,7 +46,7 @@ const commands = {
     const svc = await service();
     const note = await svc.install();
     if (!(await waitFor(true))) return notAnswering(svc);
-    say(`Agentville ${version} installed as a ${svc.kind}.${svc.startsAtLogin ? ' It starts at login.' : ''}`);
+    say(`Agentville ${version} installed as a ${svc.kind}.${svc.startsAtLogin && !/login/.test(svc.kind) ? ' It starts at login.' : ''}`);
     if (note) say(note);
     whereItIs();
     say(`Settings: ⚙ in the dashboard. Data: ${dataDir}`);

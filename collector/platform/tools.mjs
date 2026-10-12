@@ -1,12 +1,20 @@
 // Finding the programs the collector runs (claude, gh, git, a terminal), on any system, with nothing set up
 // beforehand: a service is started with a bare PATH (launchd, systemd), so the collector asks your login shell
 // for the PATH your terminal has, and adds the folders these tools are usually installed in.
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, statSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { dirname, posix, win32 } from 'node:path';
 import { run } from '../lib/exec.mjs';
 
-const isFile = p => { try { return statSync(p).isFile(); } catch { return false; } };
+const isFile = p => {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    if (process.platform !== 'win32') return false;
+    // App execution aliases such as wt.exe are reparse points that stat cannot open.
+    try { const s = lstatSync(p); return s.isFile() || s.isSymbolicLink(); } catch { return false; }
+  }
+};
 
 /** On Windows, a path on another machine (\\host\share\…, //host/share/…) or a device (\\?\, \\.\): to look at it, Windows signs in there as you. */
 export const isNetworkPath = (path, platform = process.platform) => platform === 'win32' && /^[\\/]{2}/.test(String(path ?? ''));

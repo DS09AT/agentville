@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { spawnSpec } from '../lib/exec.mjs';
-import { fishQuote, makeDesktop } from '../platform/desktop.mjs';
+import { fishQuote, makeDesktop, windowsLine } from '../platform/desktop.mjs';
 import { isClaudeCommand, makeProcReader, makeSessionProcs, makeWinReader, makeWinRows } from '../platform/procs.mjs';
 import { fullPath, isNetworkPath, mayLookAt, shellPath, usualDirs, which } from '../platform/tools.mjs';
 import { isShellCommand, typedCommand } from '../sources/ps.mjs';
@@ -294,7 +294,9 @@ test('Windows: PowerShell in a console of its own (or Windows Terminal), its lin
   assert.equal(plain.launched[0].cmd, POWERSHELL, 'by its full path: a bare name would be looked for in the folder first');
   assert.equal(plain.launched[0].cwd, 'C:\\Users\\me', "and from your home, not the session's folder (the line goes there itself)");
   assert.equal(plain.launched[0].detached, true);
-  assert.equal(Buffer.from(plain.launched[0].args.at(-1), 'base64').toString('utf16le'), line, 'the line needs no quoting on its way');
+  const sent = Buffer.from(plain.launched[0].args.at(-1), 'base64').toString('utf16le');
+  assert.equal(sent, windowsLine(line), 'the line needs no quoting on its way');
+  assert.ok(sent.includes(`${line}; $avCode = $LASTEXITCODE;`) && sent.endsWith('; exit 0'), "the shell ends with 0, so a window that Claude's end leaves behind closes by itself");
   assert.deepEqual(plain.launched[0].args.slice(0, 3), ['-NoLogo', '-ExecutionPolicy', 'Bypass']);
   const wt = desktop('win32', { has: ['wt'] });
   assert.deepEqual(wt.d.terminals(), ['Windows Terminal', 'PowerShell']);
@@ -310,7 +312,12 @@ test('Windows: PowerShell in a console of its own (or Windows Terminal), its lin
   assert.deepEqual(plain.d.folderRoots(), ['C:\\Users\\me', 'D:\\'], 'your home, and the other drives');
   assert.equal(plain.d.scratchBase(), 'C:\\Users\\me\\AppData\\Local\\Temp\\claude');
   await plain.d.revealFile('C:\\w\\a b.txt');
-  assert.deepEqual([plain.ran.at(-1).cmd, plain.ran.at(-1).args], ['explorer.exe', ['/select,C:\\w\\a b.txt']]);
+  assert.deepEqual([plain.ran.at(-1).cmd, plain.ran.at(-1).args, plain.ran.at(-1).opts.verbatim], ['explorer.exe', ['/select,"C:\\w\\a b.txt"'], true], 'in quotes, given as they are: Explorer reads its own line, and a comma in a name ends the path otherwise');
+  await plain.d.revealFile('C:\\w\\a,b.txt');
+  assert.deepEqual(plain.ran.at(-1).args, ['/select,"C:\\w\\a,b.txt"']);
+  assert.equal((await plain.d.revealFile('C:\\w\\x"y')).code, 1, 'a quote is in no file name: refused, never put into the line');
+  await plain.d.openFolder('C:\\w\\a,b');
+  assert.deepEqual([plain.ran.at(-1).cmd, plain.ran.at(-1).args], ['explorer.exe', ['"C:\\w\\a,b"']]);
 });
 
 test('a Word document or a slide deck: macOS reads it itself, elsewhere LibreOffice does, and without it the reader says so', async () => {

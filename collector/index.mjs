@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeLogger, startCollector } from './collector.mjs';
 import { CODE_ROOT, adoptLegacyData, dataDirOf } from './paths.mjs';
+import { dropSessionEnv } from './lib/session-env.mjs';
 import { fullPath, pathKey } from './platform/tools.mjs';
 
 /** Starts the collector and keeps it: { stop, port() }. A setting that needs it started again (the port, sharing on the network) does that in this process. */
@@ -18,6 +19,8 @@ export async function runCollector({ codeRoot = CODE_ROOT, dataDir = dataDirOf()
   // (a second copy beside the first, with a data folder of its own, starts empty)
   try { if (!process.env.AGENTVILLE_HOME) adoptLegacyData({ codeRoot, dataDir, log }); } catch (err) { log(`an earlier install's data could not be brought over: ${err?.message ?? err}`); }
   process.env[pathKey()] = await fullPath();
+  const inherited = dropSessionEnv(); // a collector started inside a session must not pass its markers on
+  if (inherited.length) log(`started from inside a Claude Code session: ${inherited.join(', ')} left out of what it starts`);
   const pidFile = join(dataDir, 'collector.pid');
   let handle = null, turn = Promise.resolve();
   const start = async () => {
