@@ -73,8 +73,8 @@ test('your own skills: name, what they do, and roughly what one costs when used'
   skill('loose', 'No front matter at all');
   mkdirSync(join(home, '.claude', 'skills', 'empty-folder'));
   assert.deepEqual(readOwnSkills(home).map(s => ({ ...s, path: s.path.replace(home, '~') })), [
-    { name: 'loose', description: '', path: '~/.claude/skills/loose/SKILL.md', tokens: 6 },
-    { name: 'report-writing', description: 'Write a report: findings first', path: '~/.claude/skills/report-writing/SKILL.md', tokens: Math.round(long.length / 4) }, // about 4 characters a token
+    { name: 'loose', description: '', path: join('~', '.claude', 'skills', 'loose', 'SKILL.md'), tokens: 6 },
+    { name: 'report-writing', description: 'Write a report: findings first', path: join('~', '.claude', 'skills', 'report-writing', 'SKILL.md'), tokens: Math.round(long.length / 4) }, // about 4 characters a token
   ]);
   assert.deepEqual(readOwnSkills('/nonexistent'), []);
 });

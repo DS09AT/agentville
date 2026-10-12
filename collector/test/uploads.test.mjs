@@ -39,7 +39,7 @@ test('files are saved whole under the session, and the message tells the agent w
   const dir = mkdtempSync(join(tmpdir(), 'tracker-uploads-'));
   const paths = saveFiles(dir, 'sess-1', checkFiles([{ name: 'shot.png', data: b64(PNG) }, { name: 'notes.md', data: b64(Buffer.from('# Notes')) }]).files);
   assert.equal(paths.length, 2);
-  assert.match(paths[0], /\/sess-1\/[\w-]+-1-shot\.png$/);
+  assert.match(paths[0], /[\\/]sess-1[\\/][\w-]+-1-shot\.png$/);
   assert.match(paths[1], /-2-notes\.md$/);
   assert.ok(readFileSync(paths[0]).equals(PNG));
   assert.throws(() => saveFiles(dir, '../evil', []), /session id/);

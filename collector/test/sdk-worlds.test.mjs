@@ -5,12 +5,14 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { FILE_LINKS, SYSTEM_FILE, link } from './portable.mjs';
 import { createTrackerServer } from '../server.mjs';
 import { API_VERSION, FRAME_CSP, checkWorldJson, frameCsp, makeWorlds } from '../worlds.mjs';
 import { readManifest } from '../../web/worlds/sdk/core/manifest.js';
@@ -67,16 +69,16 @@ test('a world of api 2 is listed with its api; it needs no code of its own, but 
     'no-tree': { 'world.json': { ...TINY, figure: { model: 'assets/person.glb' } } },
     typo: { 'world.json': { ...TINY, camera: { view: 'fisheye' } } },
   });
-  symlinkSync('/etc/hosts', join(dir, 'no-tree', 'assets-link.glb'));
+  if (FILE_LINKS) link(SYSTEM_FILE, join(dir, 'no-tree', 'assets-link.glb'));
   const w = makeWorlds({ builtinDir, userDir: dir }), by = Object.fromEntries(w.list().map(x => [x.key, x]));
   assert.deepEqual([by['u/plain'].api, by['u/plain'].error, by['u/full'].error, by['u/full'].nouns], [2, null, null, { place: 'club' }]);
   assert.equal(by['u/no-tree'].error, 'assets/person.glb is missing (or is a link out of the folder).');
   assert.equal(by['u/typo'].error, 'world.json: "camera.view" is one of iso, tilt, top, orbit.');
   assert.deepEqual([by.farm.api, by.factory.api, by.tennis.api], [1, 1, 2]);
   assert.deepEqual(w.source('u/plain'), { api: 2, json: join(dir, 'plain', 'world.json').replace(/^\/var\//, '/private/var/'), sim: null });
-  assert.ok(w.source('u/full').sim.endsWith('/full/sim.js'));
+  assert.ok(w.source('u/full').sim.endsWith(join('full', 'sim.js')));
   assert.equal(w.source('u/typo'), null, 'a world that can not run has nothing to be moved with');
-  assert.ok(w.source('farm').world.endsWith('/farm/world.js'), 'LEGACY: a world of the pixel engine is moved with its world.js');
+  assert.ok(w.source('farm').world.endsWith(join('farm', 'world.js')), 'LEGACY: a world of the pixel engine is moved with its world.js');
   assert.deepEqual([w.file('u/full', 'assets/tree.glb').type, w.file('u/full', 'assets/tree.glb').size], ['model/gltf-binary', 3]);
 });
 
@@ -101,7 +103,7 @@ test("the frame's page: the SDK by addresses relative to its own, the world's co
   assert.ok(marks.includes('<title>__WORLD__ __SIM__ __WORLDS__</title>'));
   assert.equal(JSON.parse(/<script type="application\/json" id="world">([\s\S]*?)<\/script>/.exec(marks)[1]).manifest.description, '__VIEW__ __ROOT__');
   assert.equal(marks.replace(/<title>.*<\/title>/, '').replace(/id="world">[\s\S]*?<\/script>/, '').match(/__[A-Z]+__/), null, 'and every mark of the template itself is filled in');
-  assert.ok(marks.includes('<script src="view.js" crossorigin="anonymous"></script>\n'));
+  assert.match(marks, /<script src="view\.js" crossorigin="anonymous"><\/script>\r?\n/);
 });
 
 test("a frame's policy: the one every world has, and for a frame with an import map that one block by its hash", () => {
@@ -119,7 +121,7 @@ test('three.js is served from the installed package by name: the files the SDK l
   const w = makeWorlds({ builtinDir });
   for (const f of ['three/three.module.js', 'three/three.core.js', 'three/addons/loaders/GLTFLoader.js', 'three/addons/utils/BufferGeometryUtils.js', 'three/addons/utils/SkeletonUtils.js']) {
     const got = w.file('sdk', f);
-    assert.ok(got.real?.includes('/node_modules/three/') && got.size > 1000 && got.type === 'text/javascript; charset=utf-8', f);
+    assert.ok(got.real?.includes(`${sep}node_modules${sep}three${sep}`) && got.size > 1000 && got.type === 'text/javascript; charset=utf-8', f);
   }
   for (const f of ['three/package.json', 'three/three.webgpu.js', 'three/addons/loaders/DRACOLoader.js', 'three/../../../package.json', 'three/addons/../three.cjs', 'three/src/Three.js']) assert.equal(w.file('sdk', f).status, 404, f);
   assert.equal(w.file('tennis', 'three/three.module.js').status, 404, "only under the SDK's name");
@@ -127,7 +129,7 @@ test('three.js is served from the installed package by name: the files the SDK l
   const served = new Set(['three/three.module.js', 'three/three.core.js', 'three/addons/loaders/GLTFLoader.js', 'three/addons/utils/BufferGeometryUtils.js', 'three/addons/utils/SkeletonUtils.js']);
   const imports = f => [...readFileSync(w.file('sdk', f).real, 'utf8').matchAll(/^\s*(?:import|export)\b[^'"]*?from\s+['"]([^'"]+)['"]/gm)].map(m => m[1]);
   for (const f of served) for (const spec of imports(f)) {
-    const to = spec === 'three' ? 'three/three.module.js' : join(f, '..', spec);
+    const to = spec === 'three' ? 'three/three.module.js' : posix.join(f, '..', spec);
     assert.ok(served.has(to), `${f} imports ${spec}`);
   }
 });
@@ -220,7 +222,7 @@ test('check-world: what is wrong with world.json, a file it names that is not th
 test('check-world, the command: a world of api 2 is checked contained, its own code where it can reach nothing; exit 1 with a ✗ line for a problem', () => {
   const dir = folder({ club: { starter: true }, bad: { 'world.json': TINY, 'sim.js': "Agentville.sim({ scene() { throw new Error('\\x1b[31mred'); } });" }, out: { 'world.json': TINY } });
   writeFileSync(join(dir, 'secret.txt'), 'the neighbour');
-  symlinkSync(join(dir, 'secret.txt'), join(dir, 'out', 'sim.js'));
+  if (FILE_LINKS) link(join(dir, 'secret.txt'), join(dir, 'out', 'sim.js'));
   const run = name => spawnSync(process.execPath, [join(ROOT, 'scripts', 'check-world.mjs'), `u/${name}`, '--worlds', dir], { encoding: 'utf8', timeout: 60_000 });
   const ok = run('club');
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
@@ -231,15 +233,17 @@ test('check-world, the command: a world of api 2 is checked contained, its own c
   assert.equal(bad.status, 1, bad.stdout + bad.stderr);
   assert.match(bad.stdout, /✗ 0 stops of the tour: 34 problems\n {2}✗ everyone \(and 33 more stops\): red \(sim\.js:1\)\n/, 'with its stop and line, said once for all the stops it happens at');
   assert.ok(!bad.stdout.includes('\x1b'), "no control sequence of the world's reaches your terminal");
-  const out = run('out');
-  assert.equal(out.status, 1, out.stdout + out.stderr);
-  assert.match(out.stdout, /✗ \(loading\): sim\.js is a link out of the world's folder, or not a file\./);
-  assert.ok(!out.stdout.includes('neighbour'));
+  if (FILE_LINKS) {
+    const out = run('out');
+    assert.equal(out.status, 1, out.stdout + out.stderr);
+    assert.match(out.stdout, /✗ \(loading\): sim\.js is a link out of the world's folder, or not a file\./);
+    assert.ok(!out.stdout.includes('neighbour'));
+  }
 });
 
 /* ---------- the guide (docs/worlds.md) says what the code does ---------- */
 
-const guide = readFileSync(join(ROOT, 'docs', 'worlds.md'), 'utf8');
+const guide = readFileSync(join(ROOT, 'docs', 'worlds.md'), 'utf8').replace(/\r\n/g, '\n'); // normalize Windows line ends
 const blocks = lang => [...guide.matchAll(new RegExp('```' + lang + '\\n([\\s\\S]*?)```', 'g'))].map(m => m[1]);
 
 test("the guide's world.json examples read as written: the whole world, and each piece put into one", () => {

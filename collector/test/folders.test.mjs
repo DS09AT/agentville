@@ -1,17 +1,18 @@
 // Folders a new session may start in: suggested as you type, checked, and made when missing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listDirs, makeDir, startPlace } from '../sources/folders.mjs';
+import { SYSTEM_DIR, link } from './portable.mjs';
 
 function fixture() {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'tracker-home-')));
   for (const d of ['code/app', 'code/api', 'Docs', '.hidden', 'Volumes-like']) mkdirSync(join(home, d), { recursive: true });
   writeFileSync(join(home, 'notes.txt'), 'x');
-  symlinkSync('/etc', join(home, 'out')); // a link to a folder outside
-  symlinkSync(join(home, 'code'), join(home, 'work')); // a link to one inside
+  link(SYSTEM_DIR, join(home, 'out')); // a link to a folder outside
+  link(join(home, 'code'), join(home, 'work')); // a link to one inside
   return { home, roots: [home] };
 }
 

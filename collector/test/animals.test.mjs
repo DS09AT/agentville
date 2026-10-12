@@ -520,7 +520,7 @@ test('a gag whose creature can’t get to its farmer (in a field) ends: no hat t
 
 test('the guide’s cat with a gag runs as written (docs/worlds-legacy.md, "Gags and play")', () => {
   const k = load();
-  const guide = readFileSync(fileURLToPath(new URL('../../docs/worlds-legacy.md', import.meta.url)), 'utf8');
+  const guide = readFileSync(fileURLToPath(new URL('../../docs/worlds-legacy.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n'); // normalize Windows line ends
   const block = guide.split('The same cat with habits')[1].match(/```js\n([\s\S]*?)```/)[1];
   const hooks = vm.runInNewContext(`({ ${block} })`, {});
   const warns = [];
