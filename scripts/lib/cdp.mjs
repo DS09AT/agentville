@@ -35,13 +35,16 @@ export async function openChrome({ prepare = async () => {} } = {}) {
   const pending = new Map(), errors = [];
   const frames = new Map(); // sessionId → { targetId, url }: frames in a process of their own
   const contexts = new Map(); // frameId → its main world's context id, for frames in the page's process
-  // A call to a frame that is detached or navigating is never answered: it settles as an error after CALL_MS so a
-  // wait loop keeps checking its own deadline instead of hanging the whole run.
+  // A call to a frame that is detached or navigating is never answered: it settles as an error after `ms` (CALL_MS
+  // unless the caller gives less) so a wait loop keeps checking its own deadline instead of hanging the whole run.
+  // A caller that asks over and over gives a short `ms`: one lost call then costs it a moment, not its whole wait.
   const CALL_MS = 15_000;
-  const raw = (method, params = {}, sessionId) => new Promise(r => {
+  const raw = (method, params = {}, sessionId, ms = CALL_MS) => new Promise(r => {
     const n = ++id;
-    const timer = setTimeout(() => { pending.delete(n); r({ error: { message: `${method}: no answer in ${CALL_MS} ms` } }); }, CALL_MS);
-    pending.set(n, m => { clearTimeout(timer); r(m); });
+    const timer = setTimeout(() => { pending.delete(n); r({ error: { message: `${method}: no answer in ${ms} ms` } }); }, ms);
+    const done = m => { clearTimeout(timer); r(m); };
+    done.sessionId = sessionId;
+    pending.set(n, done);
     ws.send(JSON.stringify({ id: n, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
   const send = (method, params = {}, sessionId = page) => raw(method, params, sessionId);
@@ -63,7 +66,10 @@ export async function openChrome({ prepare = async () => {} } = {}) {
       void adopt(p.sessionId);
     }
     if (m.method === 'Target.targetInfoChanged') for (const f of frames.values()) if (f.targetId === p.targetInfo?.targetId) f.url = p.targetInfo.url;
-    if (m.method === 'Target.detachedFromTarget') frames.delete(p.sessionId);
+    if (m.method === 'Target.detachedFromTarget') {
+      frames.delete(p.sessionId);
+      for (const [n, done] of pending) if (done.sessionId === p.sessionId) { pending.delete(n); done({ error: { message: 'its frame is gone' } }); } // what was asked of it gets no answer now
+    }
   });
   const targets = (await raw('Target.getTargets')).result.targetInfos;
   page = (await raw('Target.attachToTarget', { targetId: targets.find(t => t.type === 'page').targetId, flatten: true })).result.sessionId;
@@ -72,23 +78,25 @@ export async function openChrome({ prepare = async () => {} } = {}) {
   // it), and a key sent to a page without it can be lost, the more often the slower the machine. With this the
   // page counts as the focused one throughout, as a page someone looks at does.
   await raw('Emulation.setFocusEmulationEnabled', { enabled: true }, page);
-  async function evaluate(expression, sessionId, contextId) {
-    const r = await raw('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, ...(contextId ? { contextId } : {}) }, sessionId);
+  async function evaluate(expression, sessionId, contextId, ms) {
+    const r = await raw('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, ...(contextId ? { contextId } : {}) }, sessionId, ms);
     if (r.error) throw new Error(r.error.message);
     if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? r.result.exceptionDetails.text);
     return r.result?.result?.value;
   }
-  /** Runs `expression` in the first frame whose address contains `part`; undefined while there is none. */
-  async function inFrame(part, expression) {
-    for (const [s, f] of frames) if (f.url.includes(part)) return evaluate(expression, s);
+  /** Runs `expression` in the first frame whose address contains `part`; undefined while there is none. `ms`: how long to wait for the answer (CALL_MS). */
+  async function inFrame(part, expression, ms) {
+    for (const [s, f] of frames) if (f.url.includes(part)) return evaluate(expression, s, undefined, ms);
     const all = [], walk = t => { all.push(t.frame); (t.childFrames ?? []).forEach(walk); };
-    walk((await send('Page.getFrameTree')).result.frameTree);
+    const tree = await raw('Page.getFrameTree', {}, page, ms);
+    if (tree.error) throw new Error(tree.error.message);
+    walk(tree.result.frameTree);
     const frame = all.find(f => f.url.includes(part)), contextId = frame && contexts.get(frame.id);
-    return contextId ? evaluate(expression, page, contextId) : undefined;
+    return contextId ? evaluate(expression, page, contextId, ms) : undefined;
   }
   return {
     send, errors, inFrame,
-    js: expression => evaluate(expression, page),
+    js: (expression, ms) => evaluate(expression, page, undefined, ms),
     /** Whether the frame whose address contains `part` runs in a process of its own. */
     ownProcess: part => [...frames.values()].some(f => f.url.includes(part)),
     close: async () => {

@@ -376,12 +376,15 @@ try {
     await sleep(400);
     writeFileSync(join(process.env.SHOTS, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
   };
+  // Waiting asks over and over. A question the browser never answers (its frame was on its way out) is given up
+  // after POLL_MS and asked again: left to the driver's own 15 s, one lost question used up the whole wait.
+  const POLL_MS = 3000;
   const until = async (expr, ms = 8000) => {
-    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await js(expr)) return true;
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await chrome.js(expr, POLL_MS).catch(() => undefined)) return true;
     return false;
   };
   const funtil = async (expr, ms = 8000) => {
-    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await fjs(expr)) return true;
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await chrome.inFrame('/world/', expr, POLL_MS).catch(() => undefined)) return true;
     return false;
   };
   /** Puts the keyboard in the page's field `id` and answers once it is there: a key sent before that goes nowhere. */
@@ -1234,7 +1237,7 @@ try {
 
   console.log('A world of api 2, drawn with three.js');
   const inWorld = (key, expr) => chrome.inFrame(`/world/${key}/`, expr).catch(() => undefined);
-  const worldUntil = async (key, expr, ms = 10_000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await inWorld(key, expr)) return true; return false; };
+  const worldUntil = async (key, expr, ms = 10_000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (await chrome.inFrame(`/world/${key}/`, expr, POLL_MS).catch(() => undefined)) return true; return false; };
   const askedOf = () => js("JSON.stringify([...document.querySelectorAll('#asked li')].map(l => l.textContent))");
   await send('Page.navigate', { url: addr('/worlds/test?world=starter&stop=everyone') });
   check(await until("document.body.dataset.shown === 'everyone'", 15_000), 'the starter shows a stop of the tour');
