@@ -1,9 +1,10 @@
 // The settings, as the dashboard's Settings window shows and saves them: one list says what each is, what it may
 // be and what the page calls it, so config.json never has to be edited by hand. What the page sends is checked
 // against the list (nothing else is written), and saved into config.json beside whatever else is there.
-import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { DEFAULTS } from './config.mjs';
 import { hashPassword, parseEntry } from './access.mjs';
+import { renameOver } from './lib/replace.mjs';
 
 const REPO = /^[\w.-]{1,100}\/[\w.-]{1,100}$/;
 
@@ -130,7 +131,7 @@ export function saveSettings(path, values) {
   const target = existsSync(path) ? realpathSync(path) : path; // a config.json that is a link (kept with your dotfiles) stays one
   const temp = `${target}.${process.pid}.tmp`;
   writeFileSync(temp, `${JSON.stringify(saved, null, 2)}\n`);
-  renameSync(temp, target);
+  renameOver(temp, target);
   return saved;
 }
 
