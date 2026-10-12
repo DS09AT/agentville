@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.1](https://github.com/DS09AT/agentville/compare/v0.3.0...v0.3.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* keep the keyboard through redraws and Settings closed after a save ([2226d6d](https://github.com/DS09AT/agentville/commit/2226d6dc8137f1c8312bdb1b6c50f08936b058df))
+* keep the keyboard where it was when the page is drawn anew ([3bf0277](https://github.com/DS09AT/agentville/commit/3bf02779683e8e147230a8d70810aa2e3ebef4ce))
+* **mod:** answer and message sessions from the dashboard on Windows ([6022cc1](https://github.com/DS09AT/agentville/commit/6022cc1d92139272c61a6b957848c9453c37959f))
+* **scripts:** check-world lines, new-world steps and Chrome on Windows ([37f5935](https://github.com/DS09AT/agentville/commit/37f593575ead63f51877379ff82ee22a552f6d05))
+* Settings stays closed when a save finishes after you closed it ([0e2efd5](https://github.com/DS09AT/agentville/commit/0e2efd5206e97c8689f2c7c5f2c703785fbc7c06))
+* **web:** Windows paths in the dashboard ([7c88a00](https://github.com/DS09AT/agentville/commit/7c88a00b8af832df198783ef676c30375edfa60b))
+* **windows:** compare paths with either slash and in any case ([f6ac237](https://github.com/DS09AT/agentville/commit/f6ac23747d3f680fa54118f5cd02c34b59d20352))
+* **windows:** retry a rename over a file that another process has open ([72a6cf5](https://github.com/DS09AT/agentville/commit/72a6cf54dadd1504e541a23c20f1e8e22e05e9eb))
+* **windows:** sessions, terminals, the login entry and Explorer ([d6bf9f5](https://github.com/DS09AT/agentville/commit/d6bf9f57fdcea90ed57c13c282dba867368dfb38))
+
+
+### Documentation
+
+* Windows as checked on a real machine ([bac58c3](https://github.com/DS09AT/agentville/commit/bac58c39e5f39fc2c709fe612e04cb9ec884bf27))
+
+
+### Tests
+
+* ask the browser again when a question to a closing frame is never answered ([dd37453](https://github.com/DS09AT/agentville/commit/dd3745378036fef66a1a857bee330ecce3a44307))
+* do not fail a browser run that passed over Chrome's leftover profile ([9356fd1](https://github.com/DS09AT/agentville/commit/9356fd1b2b1b97d1303858f75cb7771ec92265d7))
+* press the page's buttons again until the page has taken them ([6767582](https://github.com/DS09AT/agentville/commit/67675824ab1cfc0050252a9be32d27f285f3a6d7))
+* run the remaining tests on Windows as on macOS and Linux ([c4a8190](https://github.com/DS09AT/agentville/commit/c4a8190067a5aa63a695bcaa52093db1868a876d))
+
 ## [0.3.0](https://github.com/DS09AT/agentville/compare/v0.2.0...v0.3.0) (2026-10-11)
 
 
