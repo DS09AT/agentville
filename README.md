@@ -22,7 +22,7 @@ already writes to disk and listens on `127.0.0.1` unless you turn on network acc
 - **Manage Claude Code:** plugins and skills with their context cost, MCP servers, permission rules.
 - **Read what agents wrote:** files with git status, documents, pictures, PDFs, spreadsheets.
 - **Get notified:** system notifications, a bell in the page, a pane and toasts inside Claude Code.
-- **Worlds:** the dashboard as a pixel farm, a robot factory or a tennis club in 3D, or a world you
+- **Worlds:** the dashboard as a pixel farm, a robot factory or a pixel tennis club, or a world you
   make yourself. Every browser shows the same world at the same moment.
 - **Share it:** other devices on your network can watch read-only, optionally limited by IP, behind
   a password and over HTTPS. A kiosk can keep its screen on.
@@ -109,7 +109,7 @@ Every part is described in [docs/guide.md](docs/guide.md).
 - 🌾 **Farm:** every agent a farmer, every repo a field. Crops grow as context fills, weather shows
   the last deploy.
 - 🏭 **Robot factory:** every agent a robot, every repo an assembly bay.
-- 🎾 **Tennis club:** every agent a player, every repo a court, in 3D.
+- 🎾 **Tennis club:** every agent a player, every repo a court, with singles, doubles and tennis scores.
 - **Your own:** `agentville new-world <name>` copies a starter into `~/.agentville/worlds`. One
   file describes the world; it is drawn in 3D ([docs/worlds.md](docs/worlds.md)).
 

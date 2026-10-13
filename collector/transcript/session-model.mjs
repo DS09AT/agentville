@@ -2,6 +2,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { parseEntry } from './parse.mjs';
 import { firstLine, summarizeTool } from './summarize.mjs';
 import { stepOf } from '../derive/step.mjs';
+import { completedGit, gitActions } from '../derive/git-events.mjs';
 
 const CHILD_KIND = { Agent: 'subagent', Task: 'subagent', Workflow: 'workflow' };
 // Documents: markdown, and the pictures, videos, PDFs and office files it wrote or read (a screenshot it checked).
@@ -42,6 +43,7 @@ export class SessionModel {
     this.resulted = new Set(); // tool uses with a result, the latest 500: a question answered in the terminal
     this.openItems = new Map();
     this.calls = [];
+    this.gitEvents = [];
     this.children = new Map();
     // What came for a child before the child was known: a background one's finish notice written ahead of the call
     // that launched it (a quick one, among many launched at once), or, after a restart, the result or notice of a
@@ -170,6 +172,10 @@ export class SessionModel {
           if (out) call.outputPath = out;
         }
         if (call?.name === 'TaskCreate' && ev.taskId) this.#taskOp({ op: 'create', id: ev.taskId, subject: firstLine(call.input?.subject ?? ''), activeForm: firstLine(call.input?.activeForm ?? ''), at: when });
+        if (call && !(call.background && ev.ok)) {
+          this.gitEvents.push(...completedGit(gitActions(call.input, call.cwd), ev.text, ev.ok, ev.toolUseId, when));
+          this.gitEvents = this.gitEvents.slice(-200);
+        }
         const item = this.openItems.get(ev.toolUseId);
         if (item) {
           item.ok = ev.ok;
@@ -186,6 +192,8 @@ export class SessionModel {
         if (call?.background && call.endedAt === undefined && ev.status !== 'running') { // the first notice says it
           call.ok = ev.status === 'completed'; call.endedAt = when;
           if (call.step === 'test') this.work.lastTest = { ok: call.ok, at: when };
+          this.gitEvents.push(...completedGit(gitActions(call.input, call.cwd), ev.result ?? ev.text, call.ok, call.id, when));
+          this.gitEvents = this.gitEvents.slice(-200);
         }
         const job = this.children.get(ev.toolUseId);
         if (job) this.#childNotice(job, ev, when);

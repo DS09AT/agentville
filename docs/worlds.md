@@ -42,7 +42,7 @@ name matches `^[a-z0-9][a-z0-9-]{0,39}$`; `sdk`, `legacy`, `starter`, `legacy-st
 |---|---|---|
 | 🌾 **Farm** | `farm` | The default: every agent a farmer, every repo a field, with animals. Pixel art ("The pixel engine") |
 | 🤖 **Robot factory** | `factory` | Every agent a robot, every repo an assembly bay. Pixel art |
-| 🎾 **Tennis club** | `tennis` | Every agent a player, every repo a court. The full example of this guide: models, a figure with its own clips, a `view.js` |
+| 🎾 **Tennis club** | `tennis` | Every agent a player, every repo a court. Painted raster sprites, fixed top view, singles/doubles, persisted scores; `sim.js` and `view.js` |
 | 🌱 **Starter** | `starter` | The template `new-world` copies. Not in the list of worlds, but the test page and `check-world` run it |
 
 ![The tennis club: every agent a player, every repo a court](tennis.png)
@@ -175,7 +175,7 @@ to 17 that it keeps, so every browser shows the same repo on the same plot. Bed 
 | Field | Meaning |
 |---|---|
 | `grid` or `at` | The plots' centres: `grid` lays them out from `origin` in rows of `cols` (3 without), `step` apart; `at` lists them, `[[x, z], …]`, 18 at most |
-| `max` | How many plots there are, 1 to 18; 18 without. A repo whose bed is past it has no plot |
+| `max` | How many plots there are, 1 to 18; 18 without. Smaller worlds compact collector-assigned beds in collector order; repos past the world's capacity have no visible plot. Eighteen-plot worlds retain the collector's original slots |
 | `size` | A plot's `[width, depth]`: where a click opens the repo's close-up. 8 × 6 without |
 | `work` | Where its agents stand, as offsets from the centre; up to 12. Past the last, the same spots again, 1.2 m nearer the viewer |
 | `face` | The way they look. Here `{ "to": … }` is measured from the plot's centre |
@@ -202,7 +202,7 @@ path, takes the shortest way along the paths, and steps off nearest its spot.
 
 ### Scenery
 
-`scenery` lists what stands in the world. Each thing is a plain shape, a model or a prefab:
+`scenery` lists what stands in the world. Each thing is a plain shape, a model, a raster sprite or a prefab:
 
 ```json
 "prefabs": {
@@ -239,6 +239,17 @@ it. Up to 400 things in `scenery`, 40 on a plot, 4000 in the world.
 
 Shapes of one kind and colour are drawn in one call, however many there are, and so is a model that
 stands in many places. A forest of one tree prefab costs two calls.
+
+**Raster sprites** keep the same three.js stage, asset bridge and simulation as 3D worlds.
+For example, `{ "sprite": "assets/court.png", "rect": [0, 0, 64, 128], "size": [3, 6], "at": [8, 12] }`
+draws a flat 3×6m image on the ground. `rect` is an optional `[left, top, width, height]` crop in
+image pixels; omitted, the entire image is used. PNG/WebP/JPEG paths follow the same asset rules.
+Sprites use nearest-neighbour filtering and preserve transparency. `each`, `turn`, `y`, prefabs,
+click targets and plot visibility work as for shapes. `camera.view: "top"` is fixed and unrotated
+unless a yaw is supplied; the other cameras, GLB figures, models and the Starter's 3D example remain.
+Geometry edges use MSAA even in top view, keeping thin ground markings visible without smoothing
+the nearest-filtered raster textures. Flat scenery uses its declared height for drawing order.
+Every world uses the shared Farm HUD/Menu and raster lettering, independently of its renderer.
 
 **What stands on a plot can show its repo.** Give a thing in `plots.scenery` a `shows`:
 
@@ -398,8 +409,9 @@ letters and digits up to 24, 16 KB each. Never share what an agent or you said: 
 |---|---|
 | `setup(ctx)` | Called once, when the stage is built. Add your own objects to `ctx.root` |
 | `scene(ctx, scene)` | Called with every scene |
-| `figure(ctx, agent)` | A figure of your own for this agent: a three.js object, or `{ object, animate?(move, t, k), setStale?(on), setKids?(n, t), dispose?() }`. Return nothing for the world's usual figure |
+| `figure(ctx, agent)` | A figure of your own for this agent: a three.js object, or `{ object, animate?(move, t, k), setStale?(on), setKids?(n, t), headOffset?, compactTags?, quietTags?, dispose?() }`. Return nothing for the world's usual figure |
 | `frame(ctx, dt)` | Called before each frame is drawn |
+| `labels(ctx)` | Optional accessible labels: `[{ key, x, z, text, title?, detail?, agent? }]`. Clicking `detail` opens a text dialog; `agent` selects its parent. `inWorld: true` with `size: [width, depth]` makes an invisible, focusable hit area for a sign drawn in three.js; it stays at that ground position. Text is escaped; up to 400 labels, 300 characters per label and 4000 per detail |
 | `dispose(ctx)` | Called when the world is taken down. Free the geometries, materials and textures you made |
 
 | In `ctx` | What it is |
@@ -409,7 +421,7 @@ letters and digits up to 24, 16 KB each. Never share what an agent or you said: 
 | `world`, `layout`, `scene`, `time`, `plotOf(repoKey)` | As in `sim.js`: the same names for the same things |
 | `bodies` | Where everyone is now: `[{ id, x, z, tx, tz, walk, zone }]` |
 | `shared` | What `sim.js` shares |
-| `assets` | `model(path)` gives a promise of `{ scene, animations }`, a copy of your own to place; `texture(path)` a promise of a texture. Paths as in `world.json` |
+| `assets` | `model(path)` gives a promise of `{ scene, animations }`, a copy of your own to place; `texture(path)` a promise of a texture; `sprite(path, [width, depth], rect?)` a promise of a flat mesh. Its `userData.frame(rect)` updates atlas UVs; dispose its geometry/material yourself. Paths as in `world.json` |
 | `light` | How light it is, 0 at night to 1 by day |
 | `invalidate()` | Draw again. With Motion off no frame is drawn by itself: call it when something of yours changed |
 
@@ -438,9 +450,11 @@ in `view.js` as `assets/<file>`. Names are letters, digits, dashes, underscores 
 Any tool that exports glTF makes them. Blender: **File › Export › glTF 2.0**, format **glTF
 Binary**, with **+Y Up** on and compression off.
 
-The tennis club's models are made by `scripts/world-assets.mjs`, from boxes, cylinders and cones
+The retained tennis GLB examples are made by `scripts/world-assets.mjs`, from boxes, cylinders and cones
 written down as data (`scripts/lib/glb.mjs` writes the file): a tree, a racket, and a figure with
-its five clips.
+its five clips. Tennis now draws `assets/club.png` and `assets/players.png` instead; its asset
+README records their generation prompts. `poses.png` supplements the original player outfit with club-life poses; `umpire.png` contains the separate official's outfit. `headOffset` anchors a raster figure's label that many
+metres towards the top of the ground plane, instead of projecting a 3D head. `compactTags` shows a name only on selection, hover or focus and folds ordinary bubbles away; `quietTags` hides resting badges until selected/hovered. These flags are optional and leave 3D worlds unchanged.
 
 ## What every world shows
 
@@ -814,3 +828,59 @@ a canvas, with kits for people, props and animals. They run beside the worlds of
 worlds of yours made that way keep working. [worlds-legacy.md](worlds-legacy.md) is their
 reference. New worlds are made as this guide says; the pixel engine goes once its worlds have been
 moved over.
+
+Subagent scene entries also carry their stable `color`, derived from their ID like a main agent, and their own current `step` when known.
+The built-in tennis club receives `scene.tennis`: matches keyed by the scene's repo key, with
+teams, helper roles, names, point labels, scores, previous encounters and the latest confirmed
+Git point. The collector owns this persisted state. Private scenes replace participant names
+and court paths with stand-ins; guest snapshots omit subagent task labels.
+
+Tennis physical ball/player state and leisure activities are computed in its `sim.js`, packed
+into bounded shared chunks and drawn by `view.js`. Simulated rallies never mutate `scene.tennis`;
+it remains the collector's authoritative Git-only score. Raster sign lettering can use
+`Agentville.pixelText.glyphOf(character)` and `textWidth(text)` with a CanvasTexture.
+Court movement keeps a net-facing stance separate from travel direction. A single predicted
+interception target per shot, reaction pauses and a short impact phase keep movement calm;
+sprite-calibrated racket offsets are shared by the simulation and renderer so ball contact also
+aligns with interpolated figures. There is no second scoring system for simulated rallies.
+The ball and interception predictor share analytic gravity/bounce integration. Doubles retain
+separate lanes and select one reachable receiver, with the other covering space. Tennis wraps
+its own `ctx.layout.route` to detour around net posts, including SDK direct shortcuts; collection
+and helper movement use the same detours. Other worlds retain their original routing.
+The recreation area draws at most ten real idle/sleeping/stale agents and shows a `+N resting`
+label for the rest. Supplementary poses use square atlas cells without stretching; measured
+seat anchors align them to furniture. The original player atlas remains unchanged, with its
+four baked-in strike balls clipped during rendering so only the simulated ball is visible.
+`rest-extra.png` adds square-cell cafe poses with grounded feet and several reclining variants;
+`umpire-track.png` uses square cells at player-compatible scale, with gaze directions derived
+from the live ball and separate speaking/service-net-call frames. Cafe canopies are a separate
+occluding layer over the unchanged full furniture sprite. One ID-stable bag per player is drawn
+beside each active court, with all cached props repositioned if its repo changes beds.
+Resting activities also include stale agents, except explicit scheduled naps. Seat selection
+balances tables, benches and loungers; individual dwell/sip timers and shared bar duty rotation
+keep the ten visible guests active without changing their real session states.
+Physical net collisions include exact-on-the-line steps. Net-cord service lets are decided
+after the first landing, preserve a previous fault, and remain separate from Git scoring.
+The club's manifest now declares nine plots, with wider allocated ground per court. `bedsOf`
+accepts the world capacity so the collector simulation and renderer map a small world equally.
+Tennis maps one real metre to 0.8 world units: the playing rectangle is 8.776×19.016 units,
+inside 14.632×29.256 units of hardcourt and run-off. `COURT` in `sim.js` defines the ITF
+baselines, singles/doubles sidelines, service lines, post/stick positions and net heights;
+regression tests match these to the manifest's line outer edges and surface bounds. Footwork,
+shot targets and travel barriers use the enlarged ground scale while avatar/racket anchors
+remain unchanged. Net collision height rises from the centre toward posts or singles sticks;
+the view adds/removes those sticks for singles/doubles. `hardcourt.png` and `court-net.png`
+provide acrylic texture and black mesh with white band/strap. Scoreboards and bags are beyond
+the baseline run-off, and the grid leaves separate circulation corridors.
+Repeated scene updates retain an active tennis player's current position and pending entry
+route instead of restarting its walk. Collection uses short two-ball batches and rectangular
+net bounds, including their thickness; path corners are reached exactly before turning.
+Recreation visibility routes use padded furniture bounds, reserved front/side seat approaches,
+a staff-only bar entrance and yielding around other mobile guests. Sitting/getting up are
+explicit transitions between an owned seat and its approach point. `idle-walk.png` omits
+rackets and baked shadows; `drink-poses.png`, `reach.png` and `glasses.png` separate hands,
+glass position and five fill frames. Shared guest state includes activity, arrival, glass level,
+glass mode and transfer progress; rendering also freezes these when Motion is off.
+The collector preserves a parent's confirmed Git score across formation changes. Legacy
+zeroed formation scores can recover retained score history or a fully retained, attributable
+short event record without replaying complete or ambiguous historical matches.

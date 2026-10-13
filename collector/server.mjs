@@ -62,6 +62,7 @@ export function guestSnapshot(snapshot) {
   return {
     ...snapshot,
     accounts: (snapshot.accounts ?? []).map(a => ({ key: a.key, name: a.name, plan: a.plan })), // their names and limits (the silos' tags): never an email, an organisation or what they cost
+    tennis: Object.fromEntries(Object.entries(snapshot.tennis ?? {}).map(([key, m]) => [key, { ...m, names: Object.fromEntries(Object.keys(m.names ?? {}).map(id => [id, id === '@machine' ? 'Ball machine' : snapshot.agents.find(a => a.id === id)?.name ?? 'Subagent'])) }])),
     chatter: null, // the helper's lines for the animals: written from what is going on here
     sources: snapshot.sources && Object.fromEntries(Object.entries(snapshot.sources).map(([k, v]) => [k, v?.ok === false ? { ...v, error: 'failing' } : v])), // which source fails, not its error's words (they carry paths and commands)
     helper: snapshot.helper && { ...snapshot.helper, lastError: null },

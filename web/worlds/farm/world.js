@@ -998,29 +998,6 @@
   }
 
   // Pixel icons for the farm's buttons (9×9): one letter per pixel, '.' clear.
-  const ICONS = {
-    follow: ['....k....', '..kkkkk..', '.k.....k.', '.k.....k.', 'kk..r..kk', '.k.....k.', '.k.....k.', '..kkkkk..', '....k....'],
-    resting: ['.....kkkk', '.......k.', '......k..', '.....kkkk', 'kkkkk....', '...k.....', '..k......', '.k.......', 'kkkkk....'],
-    bubbles: ['.........', '.kkkkkkk.', 'kwwwwwwwk', 'kwkwkwkwk', 'kwwwwwwwk', '.kkwkkkk.', '..kk.....', '..k......', '.........'],
-    day: ['....y....', '.y.....y.', '...yyy...', '..yyyyy..', 'y.yyyyy.y', '..yyyyy..', '...yyy...', '.y.....y.', '....y....'],
-    night: ['...yyy..s', '..yy.....', '.yy......', '.yy...s..', '.yy......', '.yy......', '..yy.....', '...yyy...', '.........'],
-    live: ['.........', '...yyy...', '..yyyyy..', '.yyyyyyy.', 'kkkkkkkkk', '.........', '..kkkkk..', '.........', '...kkk...'],
-    play: ['..k......', '..kk.....', '..kgk....', '..kggk...', '..kgggk..', '..kggk...', '..kgk....', '..kk.....', '..k......'],
-    pause: ['.........', '.kk...kk.', '.kk...kk.', '.kk...kk.', '.kk...kk.', '.kk...kk.', '.kk...kk.', '.kk...kk.', '.........'],
-    help: ['..kkkkk..', '.kk...kk.', '......kk.', '....kkk..', '...kk....', '...kk....', '.........', '...kk....', '.........'],
-    spring: ['.........', '.gg...gg.', '.ggg.ggg.', '..gg.gg..', '....g....', '....g....', '....g....', '..kkkkk..', '.........'],
-    autumn: ['......oo.', '....oooo.', '..ooooo..', '.ooooo...', '.oooo....', '.ooo.....', '.k.......', 'k........', '.........'],
-    list: ['.........', 'kk.kkkkkk', '.........', 'kk.kkkkkk', '.........', 'kk.kkkkkk', '.........', '.........', '.........'],
-    world: ['..kkkkk..', '.kbbgbbk.', 'kbgggbbbk', 'kbbggbgbk', 'kbbbbbggk', 'kgbbbbbbk', 'kggbbgbbk', '.kbbgbbk.', '..kkkkk..'],
-    plus: ['....k....', '....k....', '....k....', 'kkkkkkkkk', '....k....', '....k....', '....k....', '.........', '.........'],
-    gear: ['....k....', '.k.kkk.k.', '..kkkkk..', '.kkk.kkk.', 'kkk...kkk', '.kkk.kkk.', '..kkkkk..', '.k.kkk.k.', '....k....'],
-    side: ['kkkkkkkkk', 'k...kyyyk', 'k...kyyyk', 'k...kyyyk', 'k...kyyyk', 'k...kyyyk', 'kkkkkkkkk', '.........', '.........'],
-    bell: ['....k....', '...kyk...', '..kyyyk..', '..kyyyk..', '..kyyyk..', '.kyyyyyk.', 'kkkkkkkkk', '...kyk...', '....k....'],
-    winter: ['....b....', '.b..b..b.', '..b.b.b..', '...bbb...', 'bbbbbbbbb', '...bbb...', '..b.b.b..', '.b..b..b.', '....b....'],
-    animals: ['.k.k.k...', '.k.k.k...', '.........', 'k.kkk.k..', '.kkkkk...', '.kkkkk...', '..kkk....', '.........', '.........'],
-    menu: ['.........', 'kkkkkkkkk', 'kkkkkkkkk', '.........', 'kkkkkkkkk', 'kkkkkkkkk', '.........', 'kkkkkkkkk', 'kkkkkkkkk'],
-    broadcast: ['.......k.', '.....kkk.', 'k..kkyyk.', 'kkkyyyyk.', 'kkyyyyyk.', 'kkkyyyyk.', 'k..kkyyk.', '....k.kk.', '....kk...'],
-  };
   // The farm's words and colours in the engine's panel and buttons (panelHud): its stats line, its tooltips, its cream and wood.
   const FARM_WORDS = {
     place: 'farm', agent: 'farmer', agents: 'farmers',
@@ -1041,14 +1018,7 @@
     zoomAllTip: 'Show the whole farm',
     menuTip: "The dashboard's buttons, the farm's switches, the bell, help and zoom", menuHead: 'ON THE FARM',
   };
-  const ICON_PAL = { k: '#4e3626', w: '#ffffff', y: '#f0b429', s: '#f4ecd8', r: '#e04a3a', g: '#3f9b3a', o: '#c8681a', b: '#a9dcf7' };
-  const iconUrls = new Map();
-  /** HTML for one of the farm's pixel icons (none without a DOM). */
-  function iconImg(name) {
-    if (typeof document === 'undefined' || !ICONS[name]) return '';
-    if (!iconUrls.has(name)) iconUrls.set(name, makeSprite(ICONS[name], ICON_PAL).toDataURL());
-    return `<i class="px-ico" aria-hidden="true" style="background-image:url(${iconUrls.get(name)})"></i>`;
-  }
+  const iconImg = window.Agentville.iconImg;
 
   /* ---------- porch life: who is where on the porch, what it does there, and what happens now and then (pure, tested) ---------- */
 

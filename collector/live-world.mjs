@@ -16,7 +16,7 @@ export const TICK_MS = 50, STEP_S = TICK_MS / 1000;
 export const CORE = ['util.js', 'steps.js', 'manifest.js', 'events.js', 'layout.js', 'sim.js', 'wire.js', 'live.js'];
 export const PLUGINS = 'worlds/sdk/plugins.js';
 /** LEGACY: the pixel engine's frame scripts before world.js, in its frame.html's order. */
-export const SDK = ['worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'];
+export const SDK = ['worlds/sdk/ui/pixel-text.js', 'worlds/sdk/ui/pixel-hud.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'];
 
 /**
  * LEGACY. The world of the pixel engine in `worldFile`, loaded with its frame's scripts from `webDir`. `scenes`: 'snapshot' when it is given the dashboard's

@@ -29,7 +29,7 @@ const sayKey = a => (a.state === 'waiting' ? 'waiting' : a.question ? `q:${a.que
 function start({ el, opts, prefs }, config) {
   const world = readManifest(config.manifest), layout = makeLayout(world), plugins = A.plugins ?? {}, nouns = world.nouns;
   const own = String(config.key).startsWith('u/');
-  el.innerHTML = `<div class="wv"><canvas class="wv-canvas" aria-label="${esc(`The ${nouns.place}: every ${nouns.agent} is an agent, every ${nouns.repo} a repo`)}"></canvas><div class="wv-over"></div><div class="wv-hud"></div><div class="wv-loading"><span class="spinner"></span>Loading…</div></div>`;
+  el.innerHTML = `<div class="wv"><canvas class="wv-canvas" aria-label="${esc(`The ${nouns.place}: every ${nouns.agent} is an agent, every ${nouns.repo} a repo`)}"></canvas><div class="wv-over"></div><div class="wv-hud px-hud"></div><div class="wv-loading"><span class="spinner"></span>Loading…</div></div>`;
   const root = el.firstElementChild, canvas = root.querySelector('canvas'), hudEl = root.querySelector('.wv-hud');
   const fail = (message, where = 'world') => A.send({ type: 'error', message: String(message).slice(0, 300), where });
   const bytes = path => opts.request('asset', { path }).then(r => { if (!r.ok || !(r.data instanceof ArrayBuffer)) throw new Error(r.error ?? `it could not be loaded (${r.status})`); return r.data; });
@@ -53,6 +53,7 @@ function start({ el, opts, prefs }, config) {
 
   // Who moves the world: the collector (its states come through the mirror), or this page (its own simulation).
   let following = opts.remote === true, mirror = following ? makeMirror(reach) : null, sim = makeSim(world, plugins.sim ?? {});
+  let heldTime = null;
   let T = 0, wall = null, flights = [], over = {}, shared = {}, lastState = null, simFailed = false;
   const keptBeds = new Map(), shows = [], log = [];
   let stoodAt = null; // with motion off, in a world the collector moves: where everyone stood in the frame last drawn
@@ -81,7 +82,7 @@ function start({ el, opts, prefs }, config) {
     hudHtmlNow = html;
     hudEl.innerHTML = html;
     if (focused) hudEl.querySelector(`[data-do="${CSS.escape(focused)}"]`)?.focus?.(); // drawn anew, the keyboard stays where it was
-    const panel = hudEl.querySelector('.wv-panel');
+    const panel = hudEl.querySelector('.px-stats');
     stage.rig.setSafe(panel.offsetLeft + panel.offsetWidth + 8, panel.offsetTop + panel.offsetHeight + 8); // the ground sits beside the panel or below it, not under it
   }
 
@@ -116,11 +117,11 @@ function start({ el, opts, prefs }, config) {
     stage.setSelected(selected);
     if (stage.rig.following && !stage.personOf(selected)) { stage.rig.follow(null); renderHud(); } // the one followed is gone (its session ended, or resting ones are hidden)
     stage.setLight(skyMode === 'day' ? 1 : skyMode === 'night' ? 0 : lightAt(new Date(wall ?? Date.now())));
-    stage.frame(still ? 0 : dt, T, still ? [] : flights);
+    stage.frame(still ? 0 : dt, still ? (heldTime ??= T) : T, still ? [] : flights);
     const marks = stage.marks(), bubbles = new Map();
     for (const m of marks) {
       const a = agents.get(m.id), text = a && saysOn && ACTIVE.has(a.state) && !a.nap ? (a.state === 'waiting' ? a.ask : a.question || a.said) : '';
-      if (text) bubbles.set(m.id, { text, min: closedSays.get(m.id) === sayKey(a), toSidebar: a.state === 'waiting' || Boolean(a.question) || a.kind === 'codex' });
+      if (text) bubbles.set(m.id, { text, min: m.compact && m.id !== selected && m.id !== hover || closedSays.get(m.id) === sayKey(a), toSidebar: a.state === 'waiting' || Boolean(a.question) || a.kind === 'codex' });
     }
     const placeMarks = [...layout.places.values()].flatMap(p => {
       const more = over[p.name] ?? 0;
@@ -128,7 +129,7 @@ function start({ el, opts, prefs }, config) {
       const s = p.spots[0];
       return [{ name: p.name, text: `${p.label}${more ? ` +${more}` : ''}`.trim(), at: stage.project(s.x, 0, s.z + 0.9) }];
     });
-    overlay.update({ marks, agents, selected, hover, bubbles, plotMarks: stage.plotMarks(), over, placeMarks });
+    overlay.update({ marks, agents, selected, hover, bubbles, plotMarks: stage.plotMarks(), over, placeMarks, labels: stage.labels() });
     if (!drawn && scene) { drawn = true; root.querySelector('.wv-loading')?.remove(); }
   }
 
@@ -150,6 +151,7 @@ function start({ el, opts, prefs }, config) {
 
   function setStill(next) {
     still = next;
+    heldTime = next ? T : null;
     renderHud();
     if (still) { cancelAnimationFrame(raf); raf = 0; redraw(); } else startLoop();
     opts.onMotion?.(still);
@@ -186,8 +188,8 @@ function start({ el, opts, prefs }, config) {
     const what = t.closest('[data-do]')?.dataset.do ?? '';
     // The Menu: its button opens and shuts it; a click anywhere else shuts it (and does what it does). In it, the
     // switches and zoom leave it open, to change several; a button that takes you elsewhere shuts it first.
-    if (what === 'menu') { menuOpen = !menuOpen; renderHud(); if (menuOpen) hudEl.querySelector('.wv-menu button:not(:disabled)')?.focus?.(); return; }
-    if (menuOpen && (!t.closest('.wv-menu') || what === 'help' || (what.startsWith('nav:') && what !== 'nav:theme'))) { menuOpen = false; renderHud(); }
+    if (what === 'menu') { menuOpen = !menuOpen; renderHud(); if (menuOpen) hudEl.querySelector('.px-menu button:not(:disabled)')?.focus?.(); return; }
+    if (menuOpen && (!t.closest('.px-menu') || what === 'help' || (what.startsWith('nav:') && what !== 'nav:theme'))) { menuOpen = false; renderHud(); }
     const [name, arg] = what.split(':');
     switch (name) {
       case 'panel': panelOpen = !panelOpen; sw('panel', panelOpen ? 'open' : 'folded'); return;
@@ -211,6 +213,8 @@ function start({ el, opts, prefs }, config) {
     if (tag) { opts.onPickAgent?.(tag.dataset.agent); return; }
     const say = t.closest('[data-say]');
     if (say) { opts.onPickAgent?.(say.dataset.say, { from: 'say' }); return; }
+    const label = t.closest('[data-label]');
+    if (label) { const l = stage.labels().find(x => x.key === label.dataset.label); if (l?.agent) opts.onPickAgent?.(l.agent); else if (l?.detail) dialogs.show(l.title ?? 'Score', `<p>${esc(l.detail).replaceAll('\n', '<br>')}</p>`); return; }
     const plot = t.closest('[data-plot]');
     if (plot) { openPlot(Number(plot.dataset.plot)); return; }
     if (t !== canvas) return;
@@ -297,7 +301,7 @@ function start({ el, opts, prefs }, config) {
       if (!scene && next.agents.length) addLog('', 'working', `${next.agents.length} ${next.agents.length === 1 ? nouns.agent : nouns.agents} here`);
       scene = next;
       agents = new Map(next.agents.map(a => [a.id, a]));
-      beds = bedsOf(next.repos, keptBeds);
+      beds = bedsOf(next.repos, keptBeds, world.plots?.at.length);
       stage.setScene(next, beds);
       if (!following) feed(next);
       renderHud();

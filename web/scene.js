@@ -133,6 +133,7 @@
     return {
       version: VERSION,
       generatedAt: now,
+      tennis: snap?.tennis ?? {},
       private: false,
       plan: planOf(snap?.plan),
       accounts: (snap?.accounts ?? []).map(a => ({ key: a.key, name: a.name, plan: planOf(a.plan) })), // your Claude accounts: never their emails
@@ -147,7 +148,7 @@
         collector: snap?.collector ?? null,
         errors: Object.entries(snap?.sources ?? {}).filter(([, v]) => v && v.ok === false).map(([k, v]) => `${k}: ${String(v.error ?? 'failing').slice(0, 60)}`),
       },
-      subagents: agents.flatMap(a => (a.children ?? []).filter(c => c.kind === 'subagent').map(c => ({ id: c.id, label: c.label ?? '', type: c.agentType ?? null, state: c.state, parent: a.name, by: a.id, startedAt: c.startedAt, endedAt: c.endedAt ?? null, background: c.background === true, codex: a.kind === 'codex', result: c.result ?? '' }))),
+      subagents: agents.flatMap(a => (a.children ?? []).filter(c => c.kind === 'subagent').map(c => ({ id: c.id, color: colorOf(c.id), step: c.now?.step ?? c.step ?? null, label: c.label ?? '', type: c.agentType ?? null, state: c.state, parent: a.name, by: a.id, startedAt: c.startedAt, endedAt: c.endedAt ?? null, background: c.background === true, codex: a.kind === 'codex', result: c.result ?? '' }))),
       // subagents that finished lately; running ones beyond the four an agent leads
       subagentCounts: {
         done: Math.min(6, kids.flat().filter(c => c.kind !== 'bgjob' && c.state === 'done').length),
@@ -237,6 +238,10 @@
     return {
       ...s, private: true,
       chrome: { ...s.chrome, errors: [] },
+      tennis: Object.fromEntries(Object.entries(s.tennis ?? {}).map(([key, match]) => [standIn(key, 'r'), {
+        ...match, names: Object.fromEntries(Object.keys(match.names ?? {}).map(id => [id, id === '@machine' ? 'Ball machine' : labels.get(id) ?? `subagent ${standIn(id, 'a').slice(1)}`])),
+        history: (match.history ?? []).map(h => ({ mode: h.mode, teams: h.teams, score: h.score, at: h.at })),
+      }])),
       subagents: s.subagents.map(x => ({ ...x, label: '', result: '', parent: byName.get(x.parent) ?? null })),
       mail: s.mail.map(m => ({ ...m, text: '' })),
       accounts: s.accounts.map((a, i) => ({ ...a, key: `a${i + 1}`, name: `account ${i + 1}` })),

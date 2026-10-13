@@ -29,6 +29,7 @@ export function flatten(items, prefabs, origin = [0, 0], plot = null) {
     for (const [ax, az] of it.at) {
       const x = origin[0] + ax, z = origin[1] + az;
       const leaf = (p, px, py, pz, turn, scale) => {
+        if (p.kind === 'sprite') { out.push({ ...p, x: px, y: py, z: pz, turn, size: p.size.map(v => v * scale), meta }); return; }
         if (p.kind === 'model') { out.push({ kind: 'model', model: p.model, x: px, y: py, z: pz, turn, scale: scale * p.scale, meta }); return; }
         const size = p.size.map(v => v * scale);
         let lx = 0;
@@ -69,13 +70,25 @@ export function makeScenery({ world, assets, changed = () => {}, onError = () =>
    * is found again with metaOf(). The models in it come in as they load.
    */
   function build(items, origin = [0, 0], plot = null) {
-    const group = new THREE.Group(), byLook = new Map(), byModel = new Map();
+    const group = new THREE.Group(), byLook = new Map(), byModel = new Map(), sprites = new Map();
     let gone = false;
     group.userData.release = () => { gone = true; };
     for (const leaf of flatten(items, world.prefabs, origin, plot)) {
+      if (leaf.kind === 'sprite') { const key = JSON.stringify([leaf.sprite, leaf.size, leaf.rect, leaf.y]); if (!sprites.has(key)) sprites.set(key, []); sprites.get(key).push(leaf); continue; }
       const [map, key] = leaf.kind === 'model' ? [byModel, leaf.model] : [byLook, `${leaf.shape}|${leaf.color}|${leaf.opacity}|${leaf.glow}`];
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(leaf);
+    }
+    for (const leaves of sprites.values()) {
+      const leaf = leaves[0];
+      assets.sprite(leaf.sprite, leaf.size, leaf.rect).then(template => {
+        if (gone) { template.geometry.dispose(); template.material.dispose(); return; }
+        const mesh = new THREE.InstancedMesh(template.geometry, template.material, leaves.length);
+        leaves.forEach((l, i) => { position.set(l.x, l.y + PLANE_LIFT, l.z); rotation.setFromAxisAngle(UP, l.turn); scale.setScalar(1); mesh.setMatrixAt(i, matrix.compose(position, rotation, scale)); });
+        mesh.instanceMatrix.needsUpdate = true; mesh.renderOrder = 1 + leaf.y;
+        mesh.userData.metas = leaves.map(l => l.meta); mesh.userData.raster = true;
+        group.add(mesh); changed();
+      }, err => onError(`${leaf.sprite}: ${err?.message ?? err}`));
     }
     // A model that stands in many places is drawn once for all of them: each of its meshes as one instanced mesh.
     for (const [path, leaves] of byModel) {
@@ -102,6 +115,7 @@ export function makeScenery({ world, assets, changed = () => {}, onError = () =>
     for (const leaves of byLook.values()) {
       const { shape, color, opacity, glow } = leaves[0];
       const mesh = new THREE.InstancedMesh(geometries[shape], material(color, opacity, glow), leaves.length);
+      if (shape === 'plane') mesh.renderOrder = 1 + Math.max(...leaves.map(l => l.y));
       leaves.forEach((l, i) => {
         const [w, h, d] = l.size, isFlat = shape === 'plane';
         position.set(l.x, isFlat ? l.y + PLANE_LIFT : l.y + h / 2, l.z);
@@ -120,12 +134,12 @@ export function makeScenery({ world, assets, changed = () => {}, onError = () =>
   return {
     build,
     /** What a ray hit, if it can be clicked or has a tip: { opens?, tip? }; else null. */
-    metaOf: hit => hit.object.userData.metas?.[hit.instanceId] ?? null,
+    metaOf: hit => hit.object.userData.meta ?? hit.object.userData.metas?.[hit.instanceId] ?? null,
     /** Frees a group build() made (the geometry and materials in it are shared, the shapes' and the models', and stay). */
     release(group) {
       group.userData.release?.();
       group.removeFromParent();
-      for (const o of group.children) o.dispose();
+      for (const o of group.children) { if (o.userData.raster) { o.geometry.dispose(); o.material.dispose(); } o.dispose(); }
     },
     /** How dark it is, 0 by day to 1 at night: what glows, glows by it. */
     setNight(k) { night = k; for (const m of materials.values()) if (m.userData.glow) m.emissiveIntensity = k; },

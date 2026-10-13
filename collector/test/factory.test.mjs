@@ -46,7 +46,7 @@ function load({ wrap = null } = {}) {
   const dom = stubDom();
   const window = { Agentville: { raw: h => { window.registered = h; } } };
   const ctx = vm.createContext({ window, document: dom.document, console, Math, Date, JSON, Map, Set, Intl, ResizeObserver: class { observe() {} disconnect() {} }, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {}, Image: class {}, Path2D: class {} });
-  for (const f of ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js']) vm.runInContext(web(f), ctx, { filename: f });
+  for (const f of ['scene.js', 'worlds/sdk/ui/pixel-text.js', 'worlds/sdk/ui/pixel-hud.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js']) vm.runInContext(web(f), ctx, { filename: f });
   const engineWorld = window.Agentville.world; // the hooks the factory gives, kept for the tests
   window.Agentville.world = hooks => { window.hooks = hooks; wrap?.(hooks); return engineWorld(hooks); };
   vm.runInContext(web('worlds/factory/world.js'), ctx, { filename: 'worlds/factory/world.js' });

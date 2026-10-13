@@ -111,7 +111,7 @@ export function makeSim(world, hooks = {}, { now = () => Date.now() } = {}) {
     scene(next) {
       const events = eventsOf(scene, next);
       scene = next;
-      beds = bedsOf(next.repos, keptBeds);
+      beds = bedsOf(next.repos, keptBeds, world.plots?.at.length);
       const own = hook('scene', next);
       place();
       for (const e of [...events.filter(e => e.pop || e.kind === 'mail'), ...(Array.isArray(own) ? own.slice(0, 20) : [])]) {

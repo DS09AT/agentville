@@ -49,6 +49,7 @@ import { makeWorlds, watchWorlds, worldsDirOf } from './worlds.mjs';
 import { renderTranscriptPage } from './transcript-page.mjs';
 import { checkCast, chooseSession, createLinesWatch, dueLines, factsOf, lineWorld, namesOf, parseLines } from './sources/lines.mjs';
 import { renameOver } from './lib/replace.mjs';
+import { createTennis } from './derive/tennis.mjs';
 
 const DOC_FILE = /\.(md|markdown|mdx)$/i;
 
@@ -188,6 +189,7 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
 
   const token = loadToken(join(stateDir, 'token'));
   const tail = new TailReader();
+  const tennis = createTennis({ file: join(stateDir, 'tennis.json'), log });
   const beds = createBeds({ file: join(stateDir, 'beds.json'), log });
   const codexTurns = new Map(), codexMeta = new Map(); // thread id → its turn, rollout path → its first line
   let codexList = [], codexListedAt = 0, codexSeen = null; // the freshest reading of Codex's limits, kept while Codex is closed
@@ -479,6 +481,7 @@ export async function startCollector({ root, webDir = join(root, 'web'), platfor
       helper: helper.view(),
       collisions,
     };
+    snapshot.tennis = tennis.update(snapshot.agents, snapshot.repos, now, p => resolver.lookup(p));
     beds.place(snapshot, now); // each repo's field has its bed: the same in every browser
     try { linesTick(snapshot, now); } catch (err) { markFail('helper', err); } // lines never stop the dashboard
     snapshot.chatter = chatter;

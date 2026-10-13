@@ -11,7 +11,7 @@ const plain = v => JSON.parse(JSON.stringify(v));
 function load() {
   const window = { Agentville: {} };
   const ctx = vm.createContext({ window, console, Math, Date, JSON, Map, Set });
-  for (const f of ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/props.js', 'worlds/test/tour.js']) vm.runInContext(web(f), ctx, { filename: f });
+  for (const f of ['scene.js', 'worlds/sdk/ui/pixel-text.js', 'worlds/sdk/ui/pixel-hud.js', 'worlds/legacy/pixel.js', 'worlds/legacy/props.js', 'worlds/test/tour.js']) vm.runInContext(web(f), ctx, { filename: f });
   return { tour: window.AgentvilleTour, toScene: window.AgentvilleScene.toScene, STEPS: window.Agentville.props.STEPS };
 }
 

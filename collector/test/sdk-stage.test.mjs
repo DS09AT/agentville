@@ -3,6 +3,7 @@
 // camera's fit, and the HTML laid over the world. What only a browser can show (the frame, WebGL, the
 // page's part in loading a model) is in scripts/e2e-ui.mjs.
 import { test } from 'node:test';
+import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -85,6 +86,14 @@ test('shapes of one kind and colour are one instanced mesh, however many; what c
 });
 
 /* ---------- models ---------- */
+
+test('flat markings above a raster surface keep their declared drawing order', async () => {
+  const w=world({scenery:[{sprite:'assets/court.png',size:[10,20],y:.04},{shape:'plane',size:[.04,20],color:'#ffffff',y:.065}]});
+  const scenery=makeScenery({world:w,assets:{async sprite(){return new THREE.Mesh(new THREE.PlaneGeometry(10,20),new THREE.MeshBasicMaterial({transparent:true}));}}});
+  const group=scenery.build(w.scenery);await Promise.resolve();
+  const line=group.children.find(o=>!o.userData.raster),court=group.children.find(o=>o.userData.raster);
+  assert.ok(line.renderOrder>court.renderOrder);scenery.release(group);scenery.dispose();
+});
 
 test('a model is read from the bytes the page hands over, once for all who ask; each copy has nodes of its own', async () => {
   let asked = 0;
@@ -331,36 +340,39 @@ test("a plot's label: its repo's name and a chip for each thing to know; nothing
   assert.match(plotLabel({ name: 'x', deploy: { state: 'odd' } }), /dep-dim/);
 });
 
-test('the HUD: the counts, the meters and the menu, in the world\'s words; what it is told is text, never HTML', () => {
+test('the HUD: the Farm controls and SDK actions share the same accessible, escaped UI', t => {
+  const ctx = vm.createContext({ window: { Agentville: {} } });
+  for (const file of ['pixel-text.js', 'pixel-hud.js']) vm.runInContext(readFileSync(new URL(`../../web/worlds/sdk/ui/${file}`, import.meta.url), 'utf8'), ctx);
+  const old = globalThis.Agentville; globalThis.Agentville = ctx.window.Agentville; t.after(() => { globalThis.Agentville = old; });
   const nouns = { agent: 'player', agents: 'players', repo: 'court', repos: 'courts', place: '<i>club</i>' };
   const scene = {
     agents: [{ id: 'a', state: 'waiting', cost: 1.5, compactions: 2 }, { id: 'b', state: 'turn', question: 'Ok?', cost: 0.25 }],
     chrome: { counts: { waiting: 1, working: 0, yourTurn: 1, idle: 0, stale: 0, collisions: 0 }, asking: 1, agents: 2, oldestWaiting: Date.now() - 180_000, ram: { usedMb: 2048, totalMb: 16384 }, cpu: { used: 40, cores: 8 }, errors: ['git: <script>'] },
-    plan: { fiveHour: { pct: 30, reset: false }, weekly: { pct: 95, reset: false } }, accounts: [],
+    plan: { windows: [{ kind: 'five_hour', pct: 30 }, { kind: 'seven_day', pct: 95 }] }, accounts: [],
   };
   const html = hudHtml({ scene, nouns, still: false, zoom: 1.5, saysOn: true, skyMode: 'live', follow: false, canFollow: false, restingHidden: 2, bell: true, awake: false, nav: { theme: 'dark', side: true, live: false }, panelOpen: true, menuOpen: true });
   assert.match(html, /\$1\.75/);
   assert.match(html, /2 compacted/);
   assert.match(html, /data-do="state:waiting"/);
-  assert.match(html, /class="wv-kpi" disabled[^>]*><i class="k-work"/, 'a count of none can not be clicked');
+  assert.match(html, /class="px-kpi" disabled[^>]*><span class="px-kpi-ico k-work"/, 'a count of none can not be clicked');
   assert.match(html, /oldest 3m/);
   assert.match(html, /2\.0 GB/);
-  assert.match(html, /<span>Week<\/span><span class="wv-bar"><i class="bad" style="width:95%">/);
+  assert.match(html, /WEEK.*?px-bar.*?class="bad" style="width:95%"/);
   assert.match(html, /2 need you/);
   assert.match(html, /git: &lt;script&gt;/);
   assert.ok(!html.includes('<i>club</i>') && html.includes('&lt;i&gt;club&lt;/i&gt;'), "the world's nouns are text");
   assert.match(html, /data-do="follow"[^>]*disabled/);
   assert.match(html, /hidden \(2\)/);
   assert.match(html, /data-do="nav:side"[^>]*aria-pressed="true"/);
-  assert.match(html, /wv-live off/);
+  assert.match(html, /px-live off/);
   assert.match(html, />150%</);
-  assert.match(html, /class="wv-menu" role="group" aria-label="Menu">/);
+  assert.match(html, /class="px-menu" role="group" aria-label="Menu">/);
   const folded = hudHtml({ scene: null, nouns, panelOpen: false, menuOpen: false, own: true });
-  assert.match(folded, /wv-panel folded own/);
-  assert.match(folded, /class="wv-menu" role="group" aria-label="Menu" hidden>/);
+  assert.match(folded, /px-stats own folded/);
+  assert.match(folded, /class="px-menu" role="group" aria-label="Menu" hidden>/);
   const two = hudHtml({ scene: { ...scene, accounts: [{ key: 'a', name: 'work', plan: { weekly: { pct: 10 }, fiveHour: { pct: 5 } } }, { key: 'b', name: '', plan: null }] }, nouns, panelOpen: true });
-  assert.match(two, /<span>work<\/span>/);
-  assert.match(two, /<span>account <\/span>|<span>account 2<\/span>/, 'an account with no name is numbered');
+  assert.match(two, /WORK/);
+  assert.match(two, /ACC 2/, 'an account with no name is numbered');
   assert.ok(!two.includes('5-hour limit'), 'with several accounts, each has its own row');
 });
 
@@ -372,4 +384,19 @@ test('how to read a world: the signs, the same in every world, with the world\'s
   assert.match(html, /<dt>🎾<\/dt><dd>serving<\/dd>/);
   assert.match(html, /Over each player/);
   assert.ok(!helpHtml(world()).includes('<p>'), 'no words of its own: only the signs');
+});
+
+test('raster sprites use nearest filtering, atlas UVs and owned geometry without changing model loading', async t => {
+  const old = globalThis.createImageBitmap;
+  globalThis.createImageBitmap = async () => ({ width: 128, height: 256, close() {} });
+  t.after(() => { globalThis.createImageBitmap = old; });
+  const assets = makeAssets({ bytes: async () => new ArrayBuffer(1) });
+  const mesh = await assets.sprite('assets/tile.png', [2, 4], [32, 64, 32, 64]);
+  assert.equal(mesh.material.map.magFilter, THREE.NearestFilter);
+  assert.equal(mesh.material.map.minFilter, THREE.NearestFilter);
+  assert.equal(mesh.material.map.generateMipmaps, false);
+  assert.deepEqual([...mesh.geometry.attributes.uv.array], [.25, .75, .5, .75, .25, .5, .5, .5]);
+  mesh.userData.frame([0, 0, 128, 256]);
+  assert.deepEqual([...mesh.geometry.attributes.uv.array], [0, 1, 1, 1, 0, 0, 1, 0]);
+  mesh.geometry.dispose(); mesh.material.dispose(); assets.dispose();
 });

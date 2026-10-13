@@ -3,6 +3,7 @@
 // to add to (ctx.root), and what sim.js shares (ctx.shared). Decide nothing here: only show what is so.
 (() => {
   'use strict';
+  // Raster scenery can use "sprite" in world.json; this template keeps its 3D sphere and figures.
   let ball = null;
   Agentville.view({
     setup(ctx) {

@@ -108,3 +108,10 @@ test('a guest snapshot has your accounts by name and limits only, and none of th
   assert.doesNotMatch(JSON.stringify(g), /example\.com|Acme|cart test/);
   assert.deepEqual(guestSnapshot(snapshot).accounts, [], 'a snapshot without accounts: none');
 });
+
+test('tennis scores keep numbers and roles while subagent task labels stay private', () => {
+  const g = guestSnapshot({ ...snapshot, tennis: { '/p/shop': { parent: 's1', names: { s1: 'shop', c1: 'private customer credentials', '@machine': 'Ball machine' }, teams: [['s1'], ['c1']], points: ['15', '30'] } } });
+  assert.equal(g.tennis['/p/shop'].names.c1, 'Subagent');
+  assert.deepEqual(g.tennis['/p/shop'].points, ['15', '30']);
+  assert.ok(!JSON.stringify(g).includes('private customer credentials'));
+});

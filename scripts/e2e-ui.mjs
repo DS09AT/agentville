@@ -1262,11 +1262,11 @@ try {
   await inWorld('starter', "document.querySelector('.wv-say').click(); true");
   check(await until("[...document.querySelectorAll('#asked li')].some(l => /^pick a2 \\(from its bubble\\)/.test(l.textContent))"), 'a click on its bubble too, saying so');
   await inWorld('starter', "document.querySelector('[data-do=\"menu\"]').click(); true");
-  check(await worldUntil('starter', "!document.querySelector('.wv-menu').hidden && ['nav:list', 'nav:worlds', 'sky', 'motion', 'zoom:1', 'help'].every(d => document.querySelector(`[data-do=\"${d}\"]`))"), "its Menu holds the dashboard's buttons and the world's switches");
+  check(await worldUntil('starter', "!document.querySelector('.px-menu').hidden && ['nav:list', 'nav:worlds', 'sky', 'motion', 'zoom:1', 'help'].every(d => document.querySelector(`[data-do=\"${d}\"]`))"), "its Menu holds the dashboard's buttons and the world's switches");
   await inWorld('starter', "document.querySelector('[data-do=\"sky\"]').click(); document.querySelector('[data-do=\"zoom:1\"]').click(); true");
-  check(await worldUntil('starter', "/night/.test(document.querySelector('[data-do=\"sky\"]').textContent) && /125%/.test(document.querySelector('[data-do=\"zoom:0\"]').textContent) && !document.querySelector('.wv-menu').hidden"), 'the switches change what they say (the sky from day to night, the zoom a step in), and leave the Menu open');
+  check(await worldUntil('starter', "/night/.test(document.querySelector('[data-do=\"sky\"]').textContent) && /125%/.test(document.querySelector('[data-do=\"zoom:0\"]').textContent) && !document.querySelector('.px-menu').hidden"), 'the switches change what they say (the sky from day to night, the zoom a step in), and leave the Menu open');
   await inWorld('starter', "document.querySelector('[data-do=\"nav:list\"]').click(); true");
-  check(await until("[...document.querySelectorAll('#asked li')].some(l => l.textContent === 'go to: list')") && await inWorld('starter', "document.querySelector('.wv-menu').hidden"), 'List asks the page for the list view, and shuts the Menu');
+  check(await until("[...document.querySelectorAll('#asked li')].some(l => l.textContent === 'go to: list')") && await inWorld('starter', "document.querySelector('.px-menu').hidden"), 'List asks the page for the list view, and shuts the Menu');
   await inWorld('starter', "document.querySelector('.wv-plot').click(); true");
   check(await worldUntil('starter', "document.querySelector('.wv-dlg').open && document.querySelectorAll('.wv-file').length === 2"), "a click on a plot's label opens its repo's close-up: the files touched there");
   await inWorld('starter', "document.querySelector('.wv-file .k-doc').closest('button').click(); true");
@@ -1275,7 +1275,7 @@ try {
   await send('Page.navigate', { url: addr('/worlds/test?world=starter&stop=compaction') });
   check(await until("document.body.dataset.shown === 'compaction'", 15_000) && await worldUntil('starter', "[...document.querySelectorAll('.wv-pop')].some(p => p.textContent === 'Compacted')", 4000), 'what happens between two scenes pops up where it happened');
   await send('Page.navigate', { url: addr('/worlds/test?world=tennis&stop=everyone') });
-  check(await until("document.body.dataset.shown === 'everyone'", 15_000) && await worldUntil('tennis', "(s => s.figures === 7 && s.geometries > 20)(window.Agentville.statsNow())"), `the tennis club's models (its players, their rackets, its trees) come through the page as bytes, and are drawn (${await inWorld('tennis', 'JSON.stringify(window.Agentville.statsNow())')})`);
+  check(await until("document.body.dataset.shown === 'everyone'", 15_000) && await worldUntil('tennis', "(s => s.figures === 7 && s.geometries > 20)(window.Agentville.statsNow())"), `the tennis club's raster assets come through the page as bytes, and are drawn (${await inWorld('tennis', 'JSON.stringify(window.Agentville.statsNow())')})`);
   check(await js("!document.querySelector('.world-strip')"), 'with no error');
   await shot('world-api2-tennis');
   await send('Page.navigate', { url: addr('/worlds/test?world=u/club&stop=private') });
@@ -1298,7 +1298,7 @@ try {
   await js("document.querySelector('[data-world=\"u/club\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/u/club/') && !!document.querySelector('#farm .world-corner')"), 'a world of api 2 of your own shows, with the page’s corner over it');
   check(await worldUntil('u/club', "(t => t.length >= 2 && t.every(x => /^agent \\d+:/.test(x.title)))([...document.querySelectorAll('.wv-tag')])") && await until("window.TrackerLive.world() === 'u/club' && window.TrackerLive.watching()", 12_000), 'it sees numbers for names, and the collector moves it too, shut in');
-  check(await worldUntil('u/club', "document.querySelector('.wv-panel').classList.contains('own')"), 'its panel sits below the corner');
+  check(await worldUntil('u/club', "document.querySelector('.px-stats').classList.contains('own')"), 'its panel sits below the corner');
   await pressUntil("document.querySelector('#farm .world-corner [data-corner-worlds]').click()", "document.getElementById('worlds-dlg').open && !!document.querySelector('[data-world=\"farm\"]')");
   await js("document.querySelector('[data-world=\"farm\"]').click()");
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/')") && await worldUntil('farm', "document.querySelectorAll('.px-tag').length >= 2", 20_000), 'and the farm comes back');
@@ -1576,6 +1576,24 @@ try {
   check(await until("document.querySelector('#farm .world-frame')?.src.endsWith('/world/farm/') && localStorage.getItem('tracker-world') === 'farm'") && await funtil("document.querySelectorAll('.px-tag').length >= 1"), 'and back to the farm');
   if (facSideBefore !== 'open' && (await js("document.getElementById('main').dataset.side")) === 'open') await js("document.getElementById('side-toggle').click()"); // the sidebar as it was
   check(errors.length === facErrors, `no page or frame errors in the factory${errors.length > facErrors ? `: ${errors.slice(facErrors).join(' | ')}` : ''}`);
+
+  console.log('Tennis SDK');
+  await send('Page.navigate', { url: `http://127.0.0.1:${handle.port}/worlds/test?world=tennis&stop=everyone` });
+  check(await until("document.body.dataset.shown === 'everyone'") && await funtil("document.querySelectorAll('[data-label^=\"score:\"]').length === 3"), 'tennis renders raster courts and three physical scoreboard hit areas through the SDK');
+  check(await fjs("[...document.querySelectorAll('[data-label^=\"score:\"]')].every(b => b.classList.contains('in-world'))"), 'scoreboard controls stay aligned with actual signs rather than floating labels');
+  check(await fjs("document.querySelectorAll('.pxt').length > 20 && !!document.querySelector('.px-stats') && !!document.querySelector('.px-menu')"), 'tennis uses the same pixel lettering, panel and Menu as Farm');
+  await fjs("document.querySelector('[data-do=\"menu\"]').click()");
+  check(await funtil("!document.querySelector('.px-menu').hidden && document.querySelectorAll('.px-menu [data-do^=\"nav:\"]').length === 7"), 'the SDK keeps the full shared navigation');
+  await fjs("document.querySelector('[data-do=\"menu\"]').click(); document.querySelector('[data-label^=\"score:\"]').click()");
+  check(await funtil("document.querySelector('.wv-dlg').open && /Ball machine training/.test(document.querySelector('.wv-dlg-body').textContent)"), 'a score opens the teams and point explanation');
+  await fjs("document.querySelector('.wv-dlg [data-do=\"dlg-close\"]').click()");
+  for (const width of [375, 1400]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: width === 375 ? 812 : 950, deviceScaleFactor: 1, mobile: false });
+    check(await funtil("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), `tennis UI fits a ${width}px viewport`);
+  }
+  await send('Page.navigate', { url: `http://127.0.0.1:${handle.port}/worlds/test?world=starter&stop=everyone` });
+  check(await until("document.body.dataset.shown === 'everyone'") && await funtil("Agentville.statsNow().triangles > 100"), 'the starter still renders its 3D figures and geometry');
+  check(errors.length === facErrors, `no new errors from tennis or the 3D starter${errors.length > facErrors ? `: ${errors.slice(facErrors).join(' | ')}` : ''}`);
 } finally {
   await chrome?.close();
   worker.kill();

@@ -3,6 +3,8 @@
 // the diary; those marked `pop` the simulation also pops up where they happened, for everyone watching.
 // No DOM and no three.js.
 
+import { BEDS_MAX } from './manifest.js';
+
 const STATE_WORDS = { waiting: 'waits for you', turn: 'finished its turn', working: 'gets to work', idle: 'rests', stale: 'went quiet' };
 
 /**
@@ -38,7 +40,9 @@ export function eventsOf(prev, next) {
  * names none (the test page's made-up ones) gets the first free bed for each repo, kept in `kept` while the
  * repo stays.
  */
-export function bedsOf(repos, kept = new Map()) {
+export function bedsOf(repos, kept = new Map(), capacity = BEDS_MAX) {
+  // Smaller worlds compact the collector's slots consistently for both the room and its viewers.
+  if (capacity < BEDS_MAX && repos.some(r => Number.isInteger(r.bed))) return new Map([...repos].sort((a,b) => (a.bed ?? Infinity)-(b.bed ?? Infinity) || a.key.localeCompare(b.key)).map((r,i) => [r.key,i]));
   const out = new Map(), taken = new Set();
   for (const r of repos) if (Number.isInteger(r.bed)) { out.set(r.key, r.bed); taken.add(r.bed); }
   for (const [key, bed] of kept) if (!repos.some(r => r.key === key) || out.has(key) || taken.has(bed)) kept.delete(key); else taken.add(bed);

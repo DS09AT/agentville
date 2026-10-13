@@ -171,8 +171,8 @@ test('each subagent says whose it is, how it runs and what came of it; a private
   const child = { id: 'c1', kind: 'subagent', agentType: 'ship-reviewer', label: 'security_all · Socrates', state: 'done', startedAt: 5, endedAt: 9, background: true, result: 'No findings.' };
   const s = toScene({ generatedAt: 10, collisions: [], repos: [], agents: [{ id: 'codex:t', kind: 'codex', name: 'Fix the cart', state: 'working', touching: [], children: [child] }, { id: 's1', kind: 'interactive', name: 'web', state: 'working', touching: [], children: [{ ...child, id: 'c2', background: undefined, result: undefined, endedAt: undefined, state: 'running' }] }] });
   assert.deepEqual(JSON.parse(JSON.stringify(s.subagents)), [
-    { id: 'c1', label: 'security_all · Socrates', type: 'ship-reviewer', state: 'done', parent: 'Fix the cart', by: 'codex:t', startedAt: 5, endedAt: 9, background: true, codex: true, result: 'No findings.' },
-    { id: 'c2', label: 'security_all · Socrates', type: 'ship-reviewer', state: 'running', parent: 'web', by: 's1', startedAt: 5, endedAt: null, background: false, codex: false, result: '' },
+    { id: 'c1', color: load().colorOf('c1'), step: null, label: 'security_all · Socrates', type: 'ship-reviewer', state: 'done', parent: 'Fix the cart', by: 'codex:t', startedAt: 5, endedAt: 9, background: true, codex: true, result: 'No findings.' },
+    { id: 'c2', color: load().colorOf('c2'), step: null, label: 'security_all · Socrates', type: 'ship-reviewer', state: 'running', parent: 'web', by: 's1', startedAt: 5, endedAt: null, background: false, codex: false, result: '' },
   ]);
   assert.deepEqual(privateScene(s).subagents.map(x => [x.by, x.background, x.codex, x.label, x.result]), [['codex:t', true, true, '', ''], ['s1', false, false, '', '']]);
 });
@@ -217,4 +217,16 @@ test("a page that takes the collector's stand-ins numbers its private scene as t
   assert.equal(early.useStandIns(table), true);
   assert.deepEqual(keys(early, ['x', 'y', 'z', 'new']).map(l => l.at(-1)), ['r4=repo 4', 'agent 4'], 'one the collector has not met yet gets the next number, past them all');
   for (const junk of [null, 'x', [['r:/a', 'p1']], [['q:/a', 'q1']], [['r:/a', 'r0x']], [[1, 2]], [['r:/a']]]) assert.equal(load().useStandIns(junk), false, `what is not a table of stand-ins is not taken (${JSON.stringify(junk)})`);
+});
+
+test('private tennis scenes redact court paths and every participant name', () => {
+  const { toScene, privateScene } = load();
+  const original = toScene(snapOf([agent('a', { cwd: '/private/project', name: 'private parent' })], [repo('/private/project')], {
+    tennis: { '/private/project': { names: { a: 'private parent', child: 'private task', '@machine': 'Ball machine' }, teams: [['a'], ['child']], points: ['15', '0'], history: [] } },
+  }));
+  const hidden = plain(privateScene(original));
+  assert.ok(!JSON.stringify(hidden).includes('/private/project'));
+  assert.ok(!JSON.stringify(hidden).includes('private parent'));
+  assert.ok(!JSON.stringify(hidden).includes('private task'));
+  assert.deepEqual(Object.values(hidden.tennis)[0].points, ['15', '0']);
 });

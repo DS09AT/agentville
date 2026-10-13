@@ -12,7 +12,7 @@ function load() {
   const window = { Agentville: {} };
   const sandbox = { window, console, Math, Date, JSON, Map, Set, __ctx: { fillRect() {}, set fillStyle(_) {} } };
   vm.createContext(sandbox);
-  vm.runInContext(`${['worlds/legacy/pixel.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js'].map(web).join('\n;\n')}\n;PXG.ctx = __ctx; window.kit = { makeAnimals, seededRandom, makeJobs };`, sandbox);
+  vm.runInContext(`${['worlds/sdk/ui/pixel-text.js', 'worlds/sdk/ui/pixel-hud.js', 'worlds/legacy/pixel.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js'].map(web).join('\n;\n')}\n;PXG.ctx = __ctx; window.kit = { makeAnimals, seededRandom, makeJobs };`, sandbox);
   return window.kit;
 }
 const plain = v => JSON.parse(JSON.stringify(v));

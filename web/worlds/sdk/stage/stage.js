@@ -192,7 +192,13 @@ export function makeStage({ canvas, world, layout, bytes, view = {}, changed = (
     },
     /** Where each agent shown is: its id, its head on the screen, and its feet ([x, y] in CSS pixels; null out of view). */
     marks() {
-      return [...people.values()].map(p => ({ id: p.agent.id, head: project(p.x, p.figure.height * (moveOf(p.agent, p.walk) === 'sleep' ? 0.72 : 1.08), p.z), feet: project(p.x, 0, p.z) }));
+      return [...people.values()].map(p => ({ id: p.agent.id, compact: p.figure.compactTags === true, quiet: p.figure.quietTags === true, head: p.figure.headOffset ? project(p.x, 0, p.z - p.figure.headOffset) : project(p.x, p.figure.height * (moveOf(p.agent, p.walk) === 'sleep' ? 0.72 : 1.08), p.z), feet: project(p.x, 0, p.z) }));
+    },
+    labels() {
+      const labels = hook('labels');
+      return (Array.isArray(labels) ? labels : []).slice(0, 400)
+        .filter(l => l && typeof l.key === 'string' && l.key.length <= 120 && Number.isFinite(l.x) && Number.isFinite(l.z) && typeof l.text === 'string')
+        .map(l => ({ key: l.key, text: l.text.slice(0, 300), title: typeof l.title === 'string' ? l.title.slice(0, 320) : '', detail: typeof l.detail === 'string' ? l.detail.slice(0, 4000) : '', agent: typeof l.agent === 'string' ? l.agent : null, inWorld: l.inWorld === true, size: Array.isArray(l.size) && l.size.length === 2 && l.size.every(n => Number.isFinite(n) && n > 0 && n < 40) ? l.size.map((n, i) => { const p = project(l.x + (i === 0 ? n / 2 : 0), 0, l.z + (i === 1 ? n / 2 : 0)), q = project(l.x - (i === 0 ? n / 2 : 0), 0, l.z - (i === 1 ? n / 2 : 0)); return p && q ? Math.hypot(p[0] - q[0], p[1] - q[1]) : 20; }) : null, at: project(l.x, 0, l.z) }));
     },
     /** Each plot in use: its bed, its repo, and where its label sits on the screen. */
     plotMarks() {

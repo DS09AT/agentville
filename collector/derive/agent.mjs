@@ -61,7 +61,8 @@ export function codexChildrenOf(subs, now, cfg) {
     if (!running && now - endedAt > CHILD_KEEP_MS) continue;
     const said = !running && t.lastTurnEndAt && t.lastReply ? t.lastReply : undefined;
     out.push({
-      id: s.id, kind: 'subagent', agentType: s.role ?? 'subagent', label: [s.task, s.nickname].filter(Boolean).join(' · '), state: running ? 'running' : t.aborted ? 'failed' : 'done',
+      id: s.id, kind: 'subagent', ...(running && t.lastStep ? { step: t.lastStep.step } : {}), agentType: s.role ?? 'subagent', label: [s.task, s.nickname].filter(Boolean).join(' · '), state: running ? 'running' : t.aborted ? 'failed' : 'done',
+      ...(t.gitEvents?.length ? { gitEvents: t.gitEvents } : {}),
       startedAt: t.turnStartAt || s.at || t.lastActivityAt, background: true, lastAt: t.lastActivityAt, endedAt, result: said, // its thread goes on beside it: in the background, as Claude Code's are when launched so
     });
   }
@@ -79,6 +80,7 @@ export function childrenOf(model, childModels, now) {
     out.push({
       id: c.id, kind: c.kind, agentType: c.agentType, label: c.label, state, startedAt: c.startedAt, background: c.isBackground === true, now: cm ? nowOf(cm) : undefined,
       // from its own transcript: its steps so far, what it last said; from the parent: when it finished, and its result's first line
+      ...(cm?.gitEvents?.length ? { gitEvents: cm.gitEvents } : {}),
       steps: cm?.toolCount, lastSaid: cm?.lastReply ? firstLine(cm.lastReply) : undefined, lastAt, endedAt: c.endedAt, result: c.result ? firstLine(c.result) : undefined,
     });
   }
@@ -221,6 +223,7 @@ export function buildAgent({ base, model, codex, registry, proc, command, cpuHis
     modelLabel: model?.modelSet ?? undefined, // what /model last set it to, shown before its next reply says
     fast: model?.fast || undefined,
     contextTokens: model?.contextTokens ?? undefined,
+    gitEvents: (model ?? codex)?.gitEvents?.length ? (model ?? codex).gitEvents : undefined,
     tasks: tasksOf(model),
     compactions: model?.compactions || undefined,
     lastCompactAt: model?.lastCompactAt || undefined,

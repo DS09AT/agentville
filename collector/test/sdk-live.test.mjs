@@ -139,9 +139,9 @@ test('a built-in world of api 2 is moved here without being named anywhere: a th
     assert.ok(await until(() => JSON.stringify(metres(sa)) === JSON.stringify(metres(sb))), 'everyone watching is told the same');
     const where = Object.fromEntries(metres(sa).map(([id, x, z, zone]) => [id, [x, z, zone]]));
     const court = JSON.parse(readFileSync(`${WEB}worlds/tennis/world.json`, 'utf8')).plots;
-    const [cx, cz] = [court.grid.origin[0] + court.grid.step[0] * (4 % court.grid.cols), court.grid.origin[1] + court.grid.step[1] * Math.floor(4 / court.grid.cols)];
-    assert.ok(Math.abs(where.w1[0] - (cx + court.work[0][0])) <= 1 / 64 && Math.abs(where.w1[1] - (cz + court.work[0][1])) <= 1 / 64 && where.w1[2] === 'plot:4', `at work on the court of its repo's bed, to 1/64 m (${where.w1})`);
-    assert.deepEqual(where.w2.slice(2), ['plot:4']);
+    const [cx, cz] = court.grid.origin;
+    assert.ok(Math.abs(where.w1[0] - (cx + (23.77*.8/2/5.415))) <= .4 && Math.abs(where.w1[1] - (cz + 4.3*(23.77*.8/2/5.415))) <= .4 && where.w1[2] === 'tennis:0', `the nine-court world compacts collector bed 4 into its first visible slot, to 1/64 m (${where.w1})`);
+    assert.deepEqual(where.w2.slice(2), ['wait'], 'an independent working agent waits at reception instead of inflating the idle terrace');
     assert.deepEqual([where.q1[2], where.i1[2]], ['wait', 'idle']);
     assert.deepEqual([sa.animals.size, sa.jobs, sa.names], [0, 0, '[]'], 'no animals, and no stand-ins: it is not a world of yours');
   } finally { await a.leave(); await b.leave(); }

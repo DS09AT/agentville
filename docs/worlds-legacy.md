@@ -798,3 +798,6 @@ back. A built-in engine world with its own `hud` must keep a List and a World bu
 `prefs.get(name)` and `prefs.set(name, value)` keep the world's own settings as strings. The page
 stores them and hands them back at the next `start`. `bell` and `awake` are the page's settings:
 read them with `prefs.get`, change them with `onBell` and `onAwake`.
+
+The pixel lettering, panel/Menu, button icons and speech-bubble styles are shared with SDK
+worlds in `sdk/ui/`. Legacy worlds retain their existing `panelHud` and `data-farm-*` interface.

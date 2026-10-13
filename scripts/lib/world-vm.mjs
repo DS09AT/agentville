@@ -16,7 +16,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WEB = join(ROOT, 'web');
 // The frame's scripts before world.js, in frame.html's order (the animals kit's when it is there); scene.js
 // too, for toScene and privateScene, as the page has them.
-const SDK = ['scene.js', 'brand.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'].filter(f => existsSync(join(WEB, f)));
+const SDK = ['scene.js', 'brand.js', 'worlds/sdk/ui/pixel-text.js', 'worlds/sdk/ui/pixel-hud.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js'].filter(f => existsSync(join(WEB, f)));
 const TOUR = join(WEB, 'worlds', 'test', 'tour.js');
 /** Every file a check reads besides the world's own folder: this module, what it imports, the SDK and the tour. */
 export const FILES = [fileURLToPath(import.meta.url), join(ROOT, 'collector', 'worlds.mjs'), ...['manifest.js', 'steps.js'].map(f => join(WEB, 'worlds', 'sdk', 'core', f)), join(ROOT, 'scripts', 'lib', 'plain-text.mjs'), ...SDK.map(f => join(WEB, f)), TOUR];

@@ -42,6 +42,22 @@ export function makeAssets({ bytes }) {
       }
       return textures.get(path);
     },
+    /** A flat raster asset; its caller owns the mesh, the texture stays cached here. */
+    async sprite(path, size, rect = null) {
+      const texture = await this.texture(path);
+      texture.magFilter = texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false; texture.needsUpdate = true;
+      const geometry = new THREE.PlaneGeometry(size[0], size[1]).rotateX(-Math.PI / 2);
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.1, depthWrite: false }));
+      mesh.userData.frame = r => {
+        const [x, y, w, h] = r ?? [0, 0, texture.image.width, texture.image.height], uv = geometry.attributes.uv;
+        const coords = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]];
+        coords.forEach(([u, v], i) => uv.setXY(i, u / texture.image.width, 1 - v / texture.image.height));
+        uv.needsUpdate = true;
+      };
+      mesh.userData.frame(rect);
+      return mesh;
+    },
     dispose() {
       for (const t of textures.values()) void t.then(texture => { texture.image?.close?.(); texture.dispose(); }, () => {});
       for (const m of models.values()) void m.then(gltf => disposeTree(gltf.scene), () => {});

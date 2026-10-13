@@ -35,7 +35,7 @@ export function plotLabel(repo, over = 0) {
 
 /** `el`: the element over the canvas. */
 export function makeOverlay(el, { steps, nouns }) {
-  const tags = new Map(), says = new Map(), plots = new Map(), places = new Map();
+  const tags = new Map(), says = new Map(), plots = new Map(), places = new Map(), labels = new Map();
   /** Puts an element at a point of the canvas; written to the page only when it has moved. */
   function at(node, x, y, how = 'translate(-50%, -100%)') {
     const where = `translate(${Math.round(x)}px, ${Math.round(y)}px) ${how}`;
@@ -52,14 +52,14 @@ export function makeOverlay(el, { steps, nouns }) {
      * `bubbles`: id → { text, min, toSidebar }, for those who have one; `plotMarks`: stage.plotMarks(); `over`:
      * how many more stand at each zone than it shows; `placeMarks`: [{ name, text, at }] for the places to label.
      */
-    update({ marks, agents, selected, hover, bubbles, plotMarks, over, placeMarks }) {
+    update({ marks, agents, selected, hover, bubbles, plotMarks, over, placeMarks, labels: extra = [] }) {
       const placed = [];
       sync(tags, new Set(marks.map(m => m.id)), id => { const b = document.createElement('button'); b.type = 'button'; b.dataset.agent = id; return b; });
       for (const m of marks) {
         const a = agents.get(m.id), t = tags.get(m.id);
-        t.el.hidden = !a || !m.head;
+        t.el.hidden = !a || !m.head || m.quiet && m.id !== selected && m.id !== hover && document.activeElement !== t.el;
         if (t.el.hidden) continue;
-        const sel = m.id === selected, open = sel || m.id === hover || a.state === 'waiting' || (a.state === 'turn' && !a.nap);
+        const sel = m.id === selected, open = sel || m.id === hover || document.activeElement === t.el || !m.compact && (a.state === 'waiting' || (a.state === 'turn' && !a.nap));
         const [glyph, what] = glyphOf(a, steps), key = [a.state, a.name, glyph, what, open, sel, a.nap, Math.round((a.contextPct ?? 0) * 20), a.tasks?.done, a.tasks?.total].join('|');
         if (t.key !== key) {
           t.key = key;
@@ -82,7 +82,7 @@ export function makeOverlay(el, { steps, nouns }) {
         const a = agents.get(m.id), s = says.get(m.id), b = bubbles.get(m.id), key = [b.min, b.text, a.state, Boolean(a.question), b.toSidebar].join('|');
         if (s.key !== key) {
           s.key = key;
-          s.el.className = b.min ? `wv-say-min st-${a.state}` : `wv-say st-${a.state}${a.question ? ' q' : ''}`;
+          s.el.className = b.min ? `wv-say-min px-say-min st-${a.state}` : `wv-say px-say st-${a.state}${a.question ? ' q' : ''}`;
           s.el.title = b.min ? `${a.name} ${a.state === 'waiting' ? 'is waiting for you' : 'said something'}: click the 💬 to show it` : `${a.name}: ${b.text} (click to ${b.toSidebar ? 'open it in the sidebar' : 'read the whole conversation'})`;
           s.el.innerHTML = b.min ? `<button type="button" data-do="say-open" aria-label="Show ${esc(a.name)}'s bubble">💬</button>` : `<span>${esc(b.text)}</span><button type="button" class="x" data-do="say-close" aria-label="Hide this bubble" title="Hide (a 💬 stays to show it again)">×</button>`;
           s.w = null;
@@ -101,6 +101,22 @@ export function makeOverlay(el, { steps, nouns }) {
         if (node.key !== html) { node.key = html; node.el.innerHTML = html; node.el.title = `${p.repo.name}: the files agents read or wrote in this ${nouns.repo}`; node.el.classList.toggle('bad', Boolean(p.repo.collision) || p.repo.deploy?.state === 'failed'); }
         node.el.hidden = !p.at;
         if (p.at) at(node, p.at[0], p.at[1], 'translate(-50%, 0)');
+      }
+      sync(labels, new Set(extra.map(l => l.key)), key => { const b = document.createElement('button'); b.type = 'button'; b.className = 'wv-label'; b.dataset.label = key; return b; });
+      for (const l of extra) {
+        const node = labels.get(l.key), key = `${l.text}|${l.title}`;
+        node.el.classList.toggle('in-world', l.inWorld === true);
+        if (l.inWorld && l.size) { node.el.style.width = `${l.size[0]}px`; node.el.style.height = `${l.size[1]}px`; }
+        if (node.key !== key) { node.key = key; node.el.innerHTML = l.text.split('\n').map(t => window.Agentville.pixelText.pxt(t, '#4e3626', null, 2 / 3)).join('<br>'); node.el.title = l.title ?? l.text; node.el.setAttribute('aria-label', `${l.title ?? ''}: ${l.text}`); node.w = null; }
+        node.el.hidden = !l.at;
+        if (l.at && l.inWorld) { at(node, l.at[0], l.at[1], 'translate(-50%, -50%)'); }
+        else if (l.at) {
+          if (node.w == null) { node.w = node.el.offsetWidth; node.h = node.el.offsetHeight; }
+          let bottom = l.at[1];
+          for (let guard = 0; guard < 12; guard++) { const hit = hitAt(placed, l.at[0] - node.w / 2, bottom, node.w, node.h); if (!hit) break; bottom = hit.top - 4; }
+          placed.push({ left: l.at[0] - node.w / 2, right: l.at[0] + node.w / 2, top: bottom - node.h, bottom });
+          at(node, l.at[0], bottom);
+        }
       }
       sync(places, new Set(placeMarks.map(p => p.name)), () => { const d = document.createElement('div'); d.className = 'wv-place'; return d; });
       for (const p of placeMarks) {
@@ -121,6 +137,6 @@ export function makeOverlay(el, { steps, nouns }) {
       setTimeout(() => d.remove(), 1700);
     },
     /** Forgets every size measured: the frame was resized, or its text is drawn at another size. */
-    measureAgain() { for (const m of [tags, says]) for (const n of m.values()) n.w = null; },
+    measureAgain() { for (const m of [tags, says, labels]) for (const n of m.values()) n.w = null; },
   };
 }

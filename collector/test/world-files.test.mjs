@@ -64,7 +64,7 @@ test('the frame runs sandboxed, its scripts from the dashboard only, and can rea
 
 test("the frame page loads the SDK's and the world's scripts in CORS mode, so their errors say what and where", () => {
   const html = readFileSync(fileURLToPath(new URL('../../web/worlds/legacy/frame.html', import.meta.url)), 'utf8');
-  const sdk = ['/world/sdk/bridge.js', '/world/legacy/pixel.js', '/world/legacy/people.js', '/world/legacy/props.js', '/world/legacy/creatures.js', '/world/legacy/animals.js', '/world/sdk/grid.js', '/world/legacy/engine.js', '__BASE__world.js'];
+  const sdk = ['/world/sdk/bridge.js', '/world/sdk/ui/pixel-text.js', '/world/sdk/ui/pixel-hud.js', '/world/legacy/pixel.js', '/world/legacy/people.js', '/world/legacy/props.js', '/world/legacy/creatures.js', '/world/legacy/animals.js', '/world/sdk/grid.js', '/world/legacy/engine.js', '__BASE__world.js'];
   for (const src of sdk) {
     assert.match(html, new RegExp(`<script src="${src.replace(/[.]/g, '\\.')}" crossorigin="anonymous"></script>`), src);
   }

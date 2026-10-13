@@ -9,6 +9,7 @@ export const API = 2;
 export const BEDS_MAX = 18; // the collector gives each repo one of this many beds (collector/derive/beds.mjs)
 export const ASSET = /^assets\/[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*)*\.(glb|png|webp|jpe?g)$/;
 const MODEL = /\.glb$/;
+const PICTURE = /\.(png|webp|jpe?g)$/;
 const PLACE_NAME = /^[a-z][a-z0-9-]{0,23}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
 const VIEWS = { iso: { yaw: 45, pitch: 35 }, tilt: { yaw: 0, pitch: 55 }, top: { yaw: 0, pitch: 90 }, orbit: { yaw: 35, pitch: 30 } };
@@ -91,8 +92,8 @@ function spots(p, what) {
  */
 function item(v, what, ctx) {
   const it = obj(v, what);
-  const kinds = ['shape', 'model', 'use'].filter(k => it[k] !== undefined);
-  if (kinds.length !== 1) fail(`"${what}" has exactly one of "shape", "model" or "use".`);
+  const kinds = ['shape', 'model', 'sprite', 'use'].filter(k => it[k] !== undefined);
+  if (kinds.length !== 1) fail(`"${what}" has exactly one of "shape", "model", "sprite" or "use".`);
   if (it.at !== undefined && it.each !== undefined) fail(`"${what}" has "at" or "each", not both.`);
   const out = {
     at: it.each !== undefined ? points(it.each, `${what}.each`, 1, 400) : [it.at === undefined ? [0, 0] : point(it.at, `${what}.at`)],
@@ -116,6 +117,14 @@ function item(v, what, ctx) {
     const flat = it.shape === 'plane', n = flat ? 2 : 3, s = it.size;
     if (!Array.isArray(s) || s.length !== n || !s.every(d => isNum(d) && d >= 0.01 && d <= 400)) fail(`"${what}.size" is ${flat ? '[width, depth]' : '[width, height, depth]'} in metres.`);
     return { ...out, kind: 'shape', shape: it.shape, size: flat ? [s[0], 0, s[1]] : [...s], color: color(it.color, `${what}.color`, '#c3cbd2'), opacity: num(it.opacity, 0.05, 1, `${what}.opacity`, 1) };
+  }
+  if (it.sprite !== undefined) {
+    const sprite = asset(it.sprite, `${what}.sprite`, PICTURE); ctx.assets.add(sprite);
+    const size = it.size;
+    if (!Array.isArray(size) || size.length !== 2 || !size.every(n => isNum(n) && n >= 0.01 && n <= 400)) fail(`"${what}.size" is [width, depth] in metres.`);
+    const rect = it.rect;
+    if (rect !== undefined && (!Array.isArray(rect) || rect.length !== 4 || !rect.every(n => isNum(n) && n >= 0 && n <= 8192) || rect[2] < 1 || rect[3] < 1)) fail(`"${what}.rect" is [left, top, width, height] in image pixels.`);
+    return { ...out, kind: 'sprite', sprite, size: [...size], rect: rect ?? null };
   }
   const scale = num(it.scale, 0.01, 100, `${what}.scale`, 1);
   if (it.model !== undefined) {

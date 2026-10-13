@@ -268,7 +268,7 @@ test("the page's library is this collector's own copy of the installed SDK, and 
 test("the factory shares where its AGVs drive: another factory takes it as it is, and, told, drives none itself", () => {
   const window = { Agentville: { raw() {} }, devicePixelRatio: 1 };
   const ctx = vm.createContext({ window, console });
-  for (const f of ['scene.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js', 'worlds/factory/world.js']) vm.runInContext(readFileSync(`${WEB}${f}`, 'utf8'), ctx, { filename: f });
+  for (const f of ['scene.js', 'worlds/sdk/ui/pixel-text.js', 'worlds/sdk/ui/pixel-hud.js', 'worlds/legacy/pixel.js', 'worlds/legacy/people.js', 'worlds/legacy/props.js', 'worlds/legacy/creatures.js', 'worlds/legacy/animals.js', 'worlds/sdk/grid.js', 'worlds/legacy/engine.js', 'worlds/factory/world.js']) vm.runInContext(readFileSync(`${WEB}${f}`, 'utf8'), ctx, { filename: f });
   const F = window.AgentvilleFactory, plain = v => JSON.parse(JSON.stringify(v));
   const t = Date.now(), snap = snapshot();
   snap.agents[2] = { ...snap.agents[2], mcp: [{ server: 'notes', at: t }], now: { ...snap.agents[2].now, startedAt: t } };

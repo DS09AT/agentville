@@ -40,7 +40,8 @@ Three things are decisions, not deletions:
   - `scripts/check-world.mjs` and `scripts/lib/contained.mjs`: the pixel engine's check;
   - `web/worlds.js`: `LIVE_WORLDS`, `LEGACY_API`.
 
-`web/worlds/sdk/bridge.js` and `web/worlds/sdk/grid.js` are not part of the pixel engine: the bridge
+`web/worlds/sdk/ui/` (shared lettering, HUD and styles), `web/worlds/sdk/bridge.js` and
+`web/worlds/sdk/grid.js` are not part of the pixel engine: the bridge
 carries every world's messages, and the collector gives each repo its bed with the grid.
 
 Afterwards `scripts/world-golden.mjs` and the demo scripts need new views: theirs are the farm's.

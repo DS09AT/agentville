@@ -13,7 +13,7 @@ export function helpHtml(world) {
   const n = world.nouns;
   const signs = [['!', 'waits for your permission'], ['?', 'asks you something'], ['📋', 'a plan waits for your approval'], ['✓', 'finished its turn: it is yours'], ['💤', 'idle, or napping until it wakes by itself'], ['…', 'stale: untouched for days'], ['💭', 'thinking, or between two steps']];
   return `${world.help ? `<p>${esc(world.help)}</p>` : ''}
-    <dl class="wv-key"><dt>${esc(n.agents)}</dt><dd>one for each agent working on this computer; its colour is its colour in the list</dd><dt>${esc(n.repos)}</dt><dd>one for each repo an agent works in: click one for the files touched there</dd><dt>small orbs</dt><dd>its subagents, while they run</dd><dt>a letter in the air</dt><dd>a message from one agent to another</dd></dl>
+    <dl class="wv-key"><dt>${esc(n.agents)}</dt><dd>one for each agent working on this computer; its colour is its colour in the list</dd><dt>${esc(n.repos)}</dt><dd>one for each repo an agent works in: click one for the files touched there</dd><dt>subagents</dt><dd>helpers of their parent agent; their appearance depends on the world</dd><dt>a letter in the air</dt><dd>a message from one agent to another</dd></dl>
     <h4>Over each ${esc(n.agent)}</h4><dl class="wv-key">${signs.map(([g, t]) => `<dt>${g}</dt><dd>${esc(t)}</dd>`).join('')}</dl>
     <h4>At work</h4><dl class="wv-key wv-steps">${STEP_NAMES.map(k => `<dt>${esc(world.steps[k].glyph)}</dt><dd>${esc(world.steps[k].verb)}</dd>`).join('')}</dl>`;
 }
@@ -24,8 +24,8 @@ export function helpHtml(world) {
  */
 export function makeDialogs(host, { request, nouns, colorOf, nameOf }) {
   const dlg = document.createElement('dialog');
-  dlg.className = 'wv-dlg';
-  dlg.innerHTML = '<header><b class="wv-dlg-title"></b><button type="button" class="x" data-do="dlg-close" aria-label="Close">×</button></header><div class="wv-dlg-body"></div>';
+  dlg.className = 'wv-dlg px-help px-dlg';
+  dlg.innerHTML = '<header><b class="wv-dlg-title px-dlg-title"></b><button type="button" class="x" data-do="dlg-close" aria-label="Close">×</button></header><div class="wv-dlg-body px-dlg-body"></div>';
   host.appendChild(dlg);
   const body = dlg.querySelector('.wv-dlg-body');
   let asked = 0, repo = null; // the close-up showing: { key, name, data, sel }

@@ -274,23 +274,86 @@ opens the full legend.
 
 ![The tennis club](tennis.png)
 
-The same data in 3D: every agent a player, every repo a court. Every world drawn in 3D, yours too,
-shows agents the same way. **Help** in the Menu lists every sign.
+A painted pixel club, viewed from above, with the same panel, Menu and speech bubbles as Farm.
+The club has nine full-size courts, arranged in three rows. Their proportions follow the
+[ITF court rules](https://www.itftennis.com/media/7221/2026-rules-of-tennis-english.pdf):
+23.77m long, 10.97m wide for doubles and 8.23m for singles, with service lines 6.40m from the net.
+Blue acrylic playing surfaces have white markings and green run-off areas, with the
+[LTA-recommended](https://www.lta.org.uk/support-centre/venue-support/facilities-and-funding/facilities-support/what-are-the-lta-recommended-court-dimensions/)
+6.40m behind each baseline and 3.66m along each side. Corridors remain outside these areas;
+scoreboards and bags stand beyond the baseline run-off. Nets have a white top band and centre
+strap, with the official 0.914m centre height and 1.07m post height; singles use supporting sticks.
+The same larger scale governs player movement, serves and ball collisions.
+Additional repos appear as **+N courts** and remain in the repo list. A working agent trains
+against a ball machine when alone; one active
+subagent makes singles, three make doubles. With two subagents, one plays and one collects balls;
+extra helpers umpire or collect balls. Their badges show **A/B** (team), **UMP** or **BALL**;
+hover a badge for its participant name and click it to open the parent agent. Other independent
+agents in the same repo wait at reception until the court is free. Idle ones rest on the terrace.
 
-| You see | It means |
-|---|---|
-| A player at reception, waving, with a red **!** or **?** | Waiting on you: a permission or a question |
-| A player at reception with an amber **✓** | Its turn ended (a **?**: it asked you something) |
-| A player on a court, with a sign over it | Working in that repo. The sign is its step: ✏️ editing, 📖 reading, 🔍 searching, 🧪 tests, 🔨 build, 🔖 commit, 🚀 deploy |
-| 💭 | Thinking, or between two steps |
-| The bar in a name tag | Context used |
-| **Compacted** | Its conversation was compacted |
-| Small orbs circling a player | Subagents |
-| A letter in the air | One session messaging another |
-| A player on the terrace, 💤 / grey, **…** | Idle or napping / stale |
-| Signs beside a court's name: ✓ ✗ ◌ / ⚠ / ●3 ↑2 ↓1 / #2 | Last deploy passed, failed, running / two agents writing the repo / uncommitted, unpushed, behind / open pull requests |
-| The scoreboard / the floodlight / the yellow line | Last deploy / someone works there / context used |
-| **Merged #12** | A pull request was merged |
+The physical scoreboards beside the courts show **S** (sets), **G** (games), and current points.
+Click a board for its teams and latest Git event. The same Git-only tennis counting applies:
+0–15–30–40, deuce/advantage, tie-break sets and two winning sets.
+
+The game itself simulates serves, diagonal service boxes, bounces, net/out errors, missed returns,
+volleys, lobs, drop shots and different baseline/net tactics. Each agent has an individual movement
+profile; its own current tool action influences its shot choice. These animated rallies never add
+points or accumulate a separate match score. A ball machine stays behind the far baseline and
+feeds individual balls at varying angles; it never hits a return. The player returns each feed,
+pauses, and occasionally takes a short break to collect two loose balls before returning to play.
+
+During rallies, players face the opponent while side-stepping or backpedalling. They briefly
+watch each incoming shot, move to a reachable hitting position, and recover after the stroke.
+The ball meets the visible racket strings for forehands, backhands and serves. Travel to a court
+still faces the walking direction. Doubles partners keep separate lanes: one reachable player
+takes the ball while the partner covers the remaining space. Safe shots keep rallies going,
+with occasional errors and changes in shot type. Players walking between court halves or
+collecting balls go around the net posts, never through the net.
+Each player has a larger racket bag beside the court. Bag positions vary between players and
+courts but stay fixed during an encounter. A ball stopped by the net ends that simulated rally;
+a legal net-cord return stays in play, and an otherwise good net-cord serve is replayed as a let.
+
+Idle activity stays in the recreation area at the top right. Players keep their court outfits,
+with separate empty-handed standing/walking poses and additional sitting, reclining, sipping
+and pouring poses. Rackets stay on court or with players travelling to a game; the bartender
+has empty hands until pouring. Waiting players face the viewer. Walkers avoid furniture
+perimeters and each other, approach seats from their designated entrances and leave through
+the same entrances; bar staff use the rear entrance.
+At most ten real resting agents are visible; a **+N resting** sign counts the others, who remain
+in the agent list. Furniture stays empty when no agent is using it. They choose free seats,
+converse with a neighbouring guest, buy lemonade from an idle agent at
+the juice bar, carry it to a seat, and take turns staffing the bar. These are decorative club activities,
+not real messages or purchases. Idle and stale agents alternate among tables, benches and
+loungers, typically staying seated for about one to two minutes; bar duties rotate every few
+minutes. They sip occasionally and vary their resting poses. Glasses show full, three-quarter,
+half, quarter and empty levels. On loungers with a side table, players pick the glass up, sip
+and put it back; on the border lounger they keep it in their hand to preserve the access corridor.
+They return empty glasses to the juice bar. Agents explicitly sleeping until
+a scheduled wake-up stay quiet. The compact reception badges
+show status; selecting or hovering a player reveals its name and bubble. A physical reception sign
+stands beside the clubhouse. Umpires wear a navy blazer and pale trousers, without a racket,
+inspired by the official Wimbledon chair-umpire outfit. Their head follows the ball; speaking
+poses accompany Out, Fault, Let and Not up calls, while the raised arm is reserved for a
+service net call. Canopies cover seated heads naturally and furniture legs remain visible.
+Two water dispensers stand close to the reception building.
+
+A confirmed new commit, push with changes, PR creation or merge gives its player's team one
+point; a confirmed failed action gives the other side a point. Adds, stashes, tags, dry runs,
+no-op pushes and commands that merely started earn nothing. Helpers' operations do not count as
+players' points. A PR merged outside the agent's CLI counts only when its creation was already
+attributed to that player. Ambiguous operations earn no point; the ball can still rally while work
+continues. This translates activity into tennis, rather than measuring code quality.
+The repo label's commit total and changed-file counts are not new Git scoring events.
+Git scores persist when the same parent switches between solo, singles and doubles as helpers
+join or leave; serving order adapts to the new formation. Older recorded formation resets are
+recovered from retained scores or provably attributable confirmed events where possible.
+A point score of 0:0 can also mark the start of a new game; check **G** and **S** for games
+and sets, and click the physical board to see its latest scoring event or the explanation.
+
+Git events count for their resolved repo even when a working folder uses a different path spelling.
+Git scores survive browser reloads and collector restarts. Earlier transcript history is not awarded
+retroactively when the score tracker is first installed. Solo play is labelled training, including
+its practice score against the machine.
 
 **Controls.** The panel (top left) shows cost, counts and gauges; click a count to open its first
 agent. The **Menu** (top right) holds the dashboard's buttons and the switches: Follow, Resting,
@@ -355,4 +418,4 @@ until you run `/reload-plugins` in it.
   only a `claude.cmd`, the text for a fork's prompt box is left out when it holds `& | < > ^ % !` or a quote.
 - On Linux, ending a session does not close a tmux session that holds more than Claude.
 - ⑂ Fork and ↺ Restore rely on Claude Code options that a Claude Code update could change.
-- Worlds drawn in 3D (the tennis club, and worlds you make) need WebGL and have no animals.
+- SDK worlds (including pixel tennis and 3D worlds you make) need WebGL and have no animals.

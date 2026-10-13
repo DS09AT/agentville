@@ -87,8 +87,8 @@ test("the frame's page: the SDK by addresses relative to its own, the world's co
   const w = makeWorlds({ builtinDir, userDir: dir });
   const builtIn = w.frame('tennis'), plain = w.frame('u/plain'), full = w.frame('u/full');
   assert.match(builtIn, /<script type="importmap">\{"imports":\{"three":"\.\.\/sdk\/three\/three\.module\.js","three\/addons\/":"\.\.\/sdk\/three\/addons\/"\}\}<\/script>/);
-  assert.deepEqual([...builtIn.matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1]), ['../../base.css', '../sdk/world.css', '../sdk/bridge.js', '../../brand.js', '../sdk/plugins.js', 'view.js', '../sdk/runtime.js'], 'the tennis club has looks of its own, and no rules');
-  assert.deepEqual([...plain.matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1]), ['../../../base.css', '../../sdk/world.css', '../../sdk/bridge.js', '../../../brand.js', '../../sdk/plugins.js', '../../sdk/runtime.js'], 'one of yours is a folder deeper; with no code of its own, none is loaded');
+  assert.deepEqual([...builtIn.matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1]), ['../../base.css', '../sdk/world.css', '../sdk/ui/world-ui.css', '../sdk/bridge.js', '../../brand.js', '../sdk/ui/pixel-text.js', '../sdk/ui/pixel-hud.js', '../sdk/plugins.js', 'sim.js', 'view.js', '../sdk/runtime.js'], 'the tennis club keeps the SDK frame and registers its rules and sprites');
+  assert.deepEqual([...plain.matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1]), ['../../../base.css', '../../sdk/world.css', '../../sdk/ui/world-ui.css', '../../sdk/bridge.js', '../../../brand.js', '../../sdk/ui/pixel-text.js', '../../sdk/ui/pixel-hud.js', '../../sdk/plugins.js', '../../sdk/runtime.js'], 'one of yours is a folder deeper; with no code of its own, none is loaded');
   assert.ok(full.includes('<script src="sim.js" crossorigin="anonymous"></script><script src="view.js" crossorigin="anonymous"></script>'));
   assert.ok(!/(?:src|href)="\//.test(builtIn + plain), "no address starts at the server's root: a guest's pass in the path carries over");
   const block = /<script type="application\/json" id="world">([\s\S]*?)<\/script>/.exec(plain)[1];

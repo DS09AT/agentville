@@ -75,7 +75,7 @@ test('what is wrong is said in one sentence that names the field', () => {
     [{ scenery: [{ shape: 'pyramid', size: [1, 1, 1] }] }, /"scenery\[0\]\.shape" is one of box, cylinder, cone, sphere, plane/],
     [{ scenery: [{ shape: 'box', size: [1, 1] }] }, /"scenery\[0\]\.size" is \[width, height, depth\]/],
     [{ scenery: [{ shape: 'plane', size: [1, 1, 1] }] }, /"scenery\[0\]\.size" is \[width, depth\]/],
-    [{ scenery: [{ shape: 'box', size: [1, 1, 1], model: 'assets/a.glb' }] }, /exactly one of "shape", "model" or "use"/],
+    [{ scenery: [{ shape: 'box', size: [1, 1, 1], model: 'assets/a.glb' }] }, /exactly one of "shape", "model", "sprite" or "use"/],
     [{ scenery: [{ shape: 'box', size: [1, 1, 1], at: [0, 0], each: [[1, 1]] }] }, /"at" or "each", not both/],
     [{ scenery: [{ shape: 'box', size: [1, 1, 1], opens: 'vault' }] }, /"scenery\[0\]\.opens" is one of session, board, repos, help/],
     [{ scenery: [{ shape: 'box', size: [1, 1, 1], shows: 'deploy' }] }, /"scenery\[0\]\.shows" is for what stands on a plot/],
@@ -356,4 +356,10 @@ test('text and numbers: a name cut in the middle, the same numbers from the same
   assert.notEqual(hashOf('a'), hashOf('b'));
   const r1 = seededRandom(7), r2 = seededRandom(7);
   assert.deepEqual([r1(), r1(), r1()], [r2(), r2(), r2()]);
+});
+
+test('nine-slot worlds compact collector assignments consistently, retaining the eighteen-slot default',()=>{
+  const repos=[{key:'c',bed:17},{key:'a',bed:4},{key:'b',bed:12}];
+  assert.deepEqual([...bedsOf(repos,new Map(),9)],[['a',0],['b',1],['c',2]]);
+  assert.equal(bedsOf(repos,new Map(),18).get('c'),17);
 });
